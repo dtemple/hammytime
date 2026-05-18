@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/db";
+import { pingAnthropic } from "@/lib/anthropic";
 
 type PostgresCheck = { ok: boolean; latency_ms: number; error?: string };
 type ExternalCheck = {
@@ -24,10 +25,23 @@ async function checkPostgres(): Promise<PostgresCheck> {
   }
 }
 
-export async function GET() {
-  const postgres = await checkPostgres();
+async function checkAnthropic(): Promise<ExternalCheck> {
+  const configured = !!process.env.ANTHROPIC_API_KEY;
+  if (!configured) return { ok: false, configured };
+  try {
+    const { latency_ms } = await pingAnthropic();
+    return { ok: true, configured, latency_ms };
+  } catch (err) {
+    return { ok: false, configured, error: String(err) };
+  }
+}
 
-  const anthropic: ExternalCheck = { ok: false, configured: false };
+export async function GET() {
+  const [postgres, anthropic] = await Promise.all([
+    checkPostgres(),
+    checkAnthropic(),
+  ]);
+
   const telegram: ExternalCheck = { ok: false, configured: false };
   const strava: ExternalCheck = { ok: false, configured: false };
 
