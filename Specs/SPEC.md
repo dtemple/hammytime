@@ -64,6 +64,7 @@ Six-week plan, solo full-time, with a one-week buffer at the end. Build costs as
 **Exit criteria:** `/api/health` returns 200 with green pings for Postgres, Anthropic, Telegram (`getMe`), and Strava (`/oauth/authorize` HEAD).
 
 **Day 0.1 — Decisions and reading.**
+
 - Lock the scope cuts from §1 and the change log above.
 - Read Strava's API ToS and Brand Guidelines end-to-end. This is the biggest blind spot in the plan per §5.3 / §7 — if Strava's terms forbid AI-driven coaching at the level we want, the rest of the spec changes.
 - Decide name (or defer; Vercel default URL is fine for v1).
@@ -71,11 +72,13 @@ Six-week plan, solo full-time, with a one-week buffer at the end. Build costs as
 - Write down the kill criterion (§6.10) — e.g. "if fewer than 40% of alpha friends are still actively replying to daily check-ins at week 8, sunset and take the learnings." Hard to write honestly once you're invested.
 
 **Day 0.2 — Accounts and keys.**
+
 - Provision: Vercel project, Supabase project, Anthropic API key, Strava API app (client id + secret + webhook callback URL), BotFather bot + token, Sentry project, Resend project (smoke-test only in week 0).
 - Extract reusable parts from the personal `CLAUDE.md` and `marathon_training_plan.json` into a `prompts/` dir in the new repo. Pull out the generalizable patterns (look-it-up-first protocol, memory write-through, wellness battery wording, prehab tiers); leave David-specific bits behind.
 - Draft v0 of the BYO-plan prompt template that the bot will hand to athletes. This is a real artifact — see §3.4. Spike it now against your own onboarding answers in Claude to make sure the output JSON is close to the existing `marathon_training_plan.json` shape.
 
 **Day 0.3 — Scaffold.**
+
 - `create-next-app` with TS, App Router, Tailwind.
 - Supabase client + env wired (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, service-role key in Vercel only).
 - Sentry wired (server + client + edge).
@@ -89,6 +92,7 @@ Six-week plan, solo full-time, with a one-week buffer at the end. Build costs as
 
 **Day 1.1 — Data model + migrations.**
 Migrations for the v1 schema. Trimmed from §3.3 — drop `memory_file_revisions` (cut #7) and `invites` (cut #14 → `friend_allowlist` instead):
+
 ```
 users, athletes, races, injuries,
 plans, plan_versions (status: awaiting_paste | active | superseded),
@@ -97,15 +101,18 @@ oauth_tokens, activities,
 messages, agent_runs, agent_run_steps,
 friend_allowlist, job_queue
 ```
+
 Row-level security on athlete-scoped tables. Seed yourself as athlete 1 manually for early-week dev.
 
 **Day 1.2 — Allowlist signup + Telegram link handshake.**
+
 - `friend_allowlist` table; you add rows by hand for v1 (cut #14).
 - `/signup?email=...` page: validates against allowlist, mints a one-time `link_token` (15-min TTL, single-use), renders a `tg://resolve?domain=<bot>&start=<token>` deeplink + a QR code for desktop visitors.
 - The page should be visually minimalist per your direction — three-line value prop, email field, button. No marketing copy, no scroll.
 - Optional: Resend "here's your link" email path, only if the friend prefers email over web. Smoke-test only; don't build the whole flow.
 
 **Day 1.3 — Telegram bot scaffold.**
+
 - Webhook receiver at `/api/tg/webhook` with HMAC-style secret-token verification (Telegram's built-in `secret_token` header).
 - Inbound: parse update, persist a `messages` row, ack within 200 ms.
 - Outbound send helper with 4096-char chunking and a markdown subset (MarkdownV2 is strict — escape liberally).
@@ -127,6 +134,7 @@ Each step writes through to memory files as it completes: `athlete_profile.md` (
 Final step output: bot creates a `plan_versions` row with `status = awaiting_paste`, then sends the athlete the BYO-plan prompt template (see §3.4) with their answers baked in, plus the JSON schema and a one-paragraph instruction. Bot also fires a Telegram message to David saying "athlete X finished onboarding, awaiting plan paste."
 
 **Day 1.5 — End-to-end self-test.**
+
 - Drop your seeded athlete-1 row. Re-onboard yourself from scratch via the real flow: allowlist → /signup → deeplink → Telegram → onboarding state machine → awaiting-paste.
 - Verify: `athletes`, `injuries`, `races`, `memory_files` (3 files) all populated. `plan_versions` row exists with `awaiting_paste`. David-alert fired.
 - Fix whatever is ugly in the conversational flow. Budget half a day for tone iteration — a 6-step Telegram conversation can feel either delightful or interminable depending on phrasing, and you'll only know once you've walked through it once.
@@ -134,6 +142,7 @@ Final step output: bot creates a `plan_versions` row with `status = awaiting_pas
 **Out-of-pocket:** ~$0–5 (a handful of WebFetch calls during onboarding self-test, plus any Claude/ChatGPT cost while you tune the BYO-plan prompt — your own subscription should cover it).
 
 ### Week 2 — Strava OAuth + BYO-plan paste-back + plan validator
+
 **Goals:** Athlete finishes onboarding → connects Strava → pastes a plan back → has an active `plan_versions` row that the agent can read.
 
 - **Strava OAuth in Telegram.** Bot sends an "authorize Strava" link (web page that initiates OAuth with `read,activity:read_all` scopes). Callback persists encrypted refresh token, fires a Telegram message back to the athlete confirming connection. No backfill in v1 (cut #9 in §1) — only "since signup" activities.
@@ -146,6 +155,7 @@ Final step output: bot creates a `plan_versions` row with `status = awaiting_pas
 **Out-of-pocket:** ~$0–5 (BYO-plan means most LLM tokens are spent in the athlete's own Claude/ChatGPT subscription, not ours).
 
 ### Week 3 — Daily agent loop + ad-hoc Telegram replies
+
 **Goals:** Daily check-in cron runs for any athlete with `status = active`, generates a structured update, delivers to Telegram. Ad-hoc Telegram replies route through the same agent runtime.
 
 - Daily cron worker: Vercel cron + `job_queue` (no Inngest, per cut #4). Every 30 min, enqueue `daily_checkin` jobs for athletes in their 6:30–7:00 AM local window. Worker drains the queue with `FOR UPDATE SKIP LOCKED`.
@@ -158,6 +168,7 @@ Final step output: bot creates a `plan_versions` row with `status = awaiting_pas
 **Out-of-pocket:** ~$10–30 (you running the loop on yourself + one or two test users).
 
 ### Week 4 — Self-test + polish
+
 **Goals:** You are a user. The loop runs end-to-end on you for 5+ days. Bugs fixed.
 
 - Telemetry: per-message token counts, agent step traces, error rates → Sentry + the `/admin` console (athletes, recent `agent_runs`, errors, outbound messages — read-only).
@@ -167,6 +178,7 @@ Final step output: bot creates a `plan_versions` row with `status = awaiting_pas
 **Out-of-pocket:** ~$30–60.
 
 ### Week 5 — Closed alpha (5–10 friends)
+
 **Goals:** First 5–10 invited friends onboarded, daily updates flowing, weekly debrief with each.
 
 - Allowlist gating (David adds friend emails by hand — no invite codes per cut #14), basic rate limiting, abuse controls (one-bot-per-user, message length caps).
@@ -177,6 +189,7 @@ Final step output: bot creates a `plan_versions` row with `status = awaiting_pas
 **Out-of-pocket:** ~$50–120 in API costs (see §2.1) + $0–20 domain (defer the domain until alpha if you want).
 
 ### Week 6 — Open up to full friend set
+
 **Goals:** All ~25 friends invited, monitoring stable, a clear "what's next" backlog.
 
 - Self-serve invite flow.
@@ -213,15 +226,15 @@ You said advice quality is non-negotiable — I'd recommend the **hybrid**: Opus
 
 **Other monthly costs:**
 
-| Line item | Cost |
-|---|---|
-| Vercel Pro (recommended for crons + analytics) | $20 |
-| Supabase Pro (when you exceed free tier — likely month 2+) | $25 |
-| Sentry (free tier) | $0 |
-| Resend (3k emails/mo free) | $0 |
-| Domain (or defer for v1) | $0–1 |
-| Anthropic API (hybrid model, plan-gen $0 under BYO) | ~$80–110 |
-| **Total monthly steady state** | **~$125–155** |
+| Line item                                                  | Cost          |
+| ---------------------------------------------------------- | ------------- |
+| Vercel Pro (recommended for crons + analytics)             | $20           |
+| Supabase Pro (when you exceed free tier — likely month 2+) | $25           |
+| Sentry (free tier)                                         | $0            |
+| Resend (3k emails/mo free)                                 | $0            |
+| Domain (or defer for v1)                                   | $0–1          |
+| Anthropic API (hybrid model, plan-gen $0 under BYO)        | ~$80–110      |
+| **Total monthly steady state**                             | **~$125–155** |
 
 That's well under the "<$200/mo" ceiling I'd quietly check against, and it's a single-line decision to step up Opus usage if quality demands it.
 
@@ -328,12 +341,14 @@ The server-side plan-generation pipeline from v0.1 is **deferred**. v1 hands the
 **The agent never modifies an existing plan version.** Per cut #11 in §1, the structured `plan_change_proposal` 👍/👎 flow is deferred. In v1, plan changes mid-cycle work like this: the agent suggests a modification in prose during a check-in; the athlete agrees in prose; the agent emits a new BYO-plan prompt for them to regenerate (or for small changes, the agent writes the change directly into the daily prescription rather than the plan-of-record).
 
 **Why this works for v1:**
+
 - Removes the highest-cost, highest-risk subsystem from the server. Plan-quality variance becomes an athlete-side concern with our schema as the safety net.
 - Removes server-side LLM cost for plan generation entirely.
 - Athletes who are technical (most of David's friends) will enjoy iterating on their own plan; the BYO process gives them ownership and visibility.
 - Liability story improves: the athlete authored their own plan with help from an AI assistant of their choosing; we validated it against a schema. We're not the prescriber of record.
 
 **Why this might not work and what we'd do about it:**
+
 - Some athletes won't have a paid Claude or ChatGPT subscription, and free tiers may not handle the prompt size well. Fallback: bot offers to generate the plan server-side using Opus — a one-button escape hatch that flows through the server-side pipeline we deferred. We don't build the full pipeline until at least one athlete actually needs this; until then we offer to do it manually for them (David runs it in the personal coach's existing tooling).
 - The JSON-paste UX in Telegram could be fiddly. Mitigation: the bot accepts JSON as either a single message, a `/plan` command followed by JSON, or an attached `.json` file. The validation feedback loop is the key — make it good.
 - Schema drift between athlete's pasted plan and our parser. Mitigation: ship the schema with the prompt, lock the schema version per plan_version row, and tolerate forward-compatible additions.
@@ -422,6 +437,7 @@ Ordered by impact-likelihood product, not pure likelihood.
 1. **Plan-quality variance / unsafe plans.** Under v0.3's BYO-plan model the risk shape changes: the athlete generates their plan in their own Claude or ChatGPT, then pastes it to us. The model can still produce a plan that's physiologically reckless (back-to-back hard days, a 22-mile long run on a base athlete) or schema-valid but content-unsafe. Mitigations: (a) the schema validator enforces structural safety caps (max long-run mileage vs. recent-mileage step 5 self-report, hard-day spacing rules, acute:chronic ratio across the generated plan, total weekly volume ramp rate) — reject anything outside; (b) you (David) personally eyeball every plan paste-back for the first 20 athletes via an admin-dashboard alert; (c) daily check-in agent applies the same safety rules and refuses to prescribe a plan-day that violates them, suggesting a downgrade instead; (d) the BYO prompt template explicitly anchors on the safety rules, so the athlete's LLM is steered toward acceptable plans up-front.
 
    Note: legal exposure improves under v0.3 (see §6.1) — the athlete authored their plan with help from an AI assistant of their choosing. The technical safety job is unchanged.
+
 2. **LLM cost blow-up.** A misbehaved loop or prompt regression can 10x cost overnight. Mitigations: hard daily token cap per athlete, alert at 2x normal, kill switch in admin UI.
 3. **Strava ToS.** Strava's API agreement restricts coaching apps and certain types of automated advice. Need to read the current ToS before launch — this could be a real constraint, not just a footnote. Likely fine for friends-only with no monetization, but it shapes what's possible commercially.
 4. **Strava API reliability + rate limits.** A webhook storm or a future backfill (deferred from v1) can hit limits. Mitigations: respect `X-RateLimit-Usage` headers, exponential backoff, queue webhook handlers through `job_queue`.
@@ -469,12 +485,12 @@ Updated for v0.3 — stack picks are locked, plan-gen pipeline is deferred, the 
 
 ## Appendix A — Cost summary card
 
-| Stage | One-time | Monthly |
-|---|---|---|
-| Build (weeks 0–6, your time aside) | ~$100–250 in API + $20 domain | — |
-| Steady state, 25 athletes, hybrid model | — | ~$125–155 |
-| Steady state, 25 athletes, all Opus | — | ~$220–250 |
-| Steady state, 100 athletes, hybrid | — | ~$350–450 |
+| Stage                                   | One-time                      | Monthly   |
+| --------------------------------------- | ----------------------------- | --------- |
+| Build (weeks 0–6, your time aside)      | ~$100–250 in API + $20 domain | —         |
+| Steady state, 25 athletes, hybrid model | —                             | ~$125–155 |
+| Steady state, 25 athletes, all Opus     | —                             | ~$220–250 |
+| Steady state, 100 athletes, hybrid      | —                             | ~$350–450 |
 
 ## 8. Follow-up decisions
 
@@ -485,6 +501,7 @@ Three questions raised after the v0.1 review. Each affects scope and product dir
 **Scope delta is roughly neutral, product delta is meaningfully worse.**
 
 What Telegram is doing in v1:
+
 - Push delivery of the daily check-in (high-attention, ~70–90% open rate in habit-loop apps)
 - Conversational ad-hoc Q&A on the device the user is already holding
 - Zero install friction (most of your friends already have it; the rest install in 2 min)
@@ -492,6 +509,7 @@ What Telegram is doing in v1:
 What you'd remove if you cut it: BotFather setup, deeplink linking, webhook handler, message chunking, the regional caveat in §6.9. Realistically ~3–4 days of build.
 
 What you'd have to add to keep the daily-update loop working:
+
 - Web push notifications via a PWA. ~3–4 days, plus the iOS Safari complications (web push on iOS only works for installed PWAs and only since 16.4, with reliability issues), so realistically you also need...
 - Email fallback for the morning digest. ~1–2 days (Resend + a mjml-ish template).
 - A more polished in-app chat UI for ad-hoc Q&A. ~2–3 days.
@@ -499,6 +517,7 @@ What you'd have to add to keep the daily-update loop working:
 Net build delta: roughly **+2 days** vs. Telegram, possibly less. So scope-wise it's a wash.
 
 The product delta is where this gets expensive:
+
 - **Daily engagement collapses.** Web push notification opt-in averages 5–15%. Email morning-digest open rates for product comms are 20–30%. Telegram messages from a bot the user opted into sit around 70–90%. The whole product hinges on the morning loop happening; cutting Telegram cuts the floor on that loop in half.
 - **Conversational latency goes up.** A user texting their coach back is a five-second action. A user signing into a web app to type a follow-up is a minute-plus action that often doesn't happen.
 - **You lose the "feels like a friend" register.** Daily messages from a TG contact named "Coach" read very differently from a notification or an email.
@@ -515,6 +534,7 @@ The product delta is where this gets expensive:
 **Honest answer: roughly 60–70% of what's possible with full biometrics, and the missing 30–40% is mostly early-warning overtraining detection.**
 
 What Strava actually gives you for injury work:
+
 - Per-activity distance, duration, pace splits, elevation, in-activity HR (if the watch captured it), cadence, sometimes power, optional self-reported RPE.
 - Activity titles + descriptions (free-text — the agent can mine "calf felt tight" out of Strava notes).
 - Aggregate volume across rolling windows.
@@ -531,7 +551,7 @@ What you can compute well from this alone:
 
 What you can't do well without biometrics:
 
-- **Early-warning overtraining detection (the big one).** Drops in HRV and rises in resting HR show up roughly 7–14 days *before* injury or illness manifests. This is the single highest-value injury-prevention signal and Strava can't see it.
+- **Early-warning overtraining detection (the big one).** Drops in HRV and rises in resting HR show up roughly 7–14 days _before_ injury or illness manifests. This is the single highest-value injury-prevention signal and Strava can't see it.
 - **Sleep-driven recovery deficits.** A week of 5-hour sleep is not visible to Strava but cuts adaptation and raises injury risk.
 - **Sub-clinical illness onset.** Resting HR is up 8 BPM = oncoming cold = don't push hard. Strava-blind.
 - **Day-to-day "ready or not."** Sometimes the legs are great, sometimes they're trash; HRV captures this; Strava doesn't.
@@ -600,32 +620,37 @@ Maintaining a multi-tenant Garmin scraper is a part-time job in itself. Drop it 
 Given all of §8, the version I'd actually ship:
 
 **Keep:**
+
 - Telegram for the daily-loop surface.
 - Strava OAuth as the primary activity source.
 - Manual log fallback for non-Strava users.
 
 **Add to v1 (cheap, high-ROI):**
+
 - **Daily wellness battery** in the morning Telegram check-in. Not just a 1–10 — go a little richer:
   - Readiness 1–10 (single tap)
   - Sleep hours (one number)
   - Soreness 1–10 + optional body-part tag
   - Optional one-line note
-  
+
   This takes ~20 seconds. The Hooper questionnaire (Hooper et al., 1995) and Saw et al.'s 2016 systematic review in BJSM both find subjective wellness measures of this exact shape match or beat HRV-based monitoring for predicting maladaptation in non-elite athletes. For your audience this is genuinely competitive, not a consolation prize.
+
 - **Weekly deeper check-in** on Sunday morning: 5 questions covering motivation, stress, perceived training load, body-area concerns, and goals/concerns for the week. ~2 minutes. Fed into the agent's weekly synthesis.
 
 **Defer to v1.5 (post-launch, 2–4 weeks after first friends are on):**
+
 - Health Auto Export → webhook integration for iPhone users who want real biometrics. ~3 days build.
 - Whoop OAuth for any Whoop-wearing friend. ~2 days build.
 - Oura OAuth same idea. ~2 days build.
 
 **Defer to v2 (only if there's a real reason):**
+
 - Native iOS companion app for first-class HealthKit access.
 - Garmin only if Garmin ships a usable public API (not holding breath).
 
 **Timeline impact vs. v0.1:** stays inside the 4–6 week window. Skipping Garmin saves the time we would've spent fighting it; the wellness battery costs ~1 extra day; HealthKit/Whoop/Oura slip to v1.5 as separate one-week mini-releases each, scheduled when a friend actually asks for it.
 
-**Quality impact:** I'd actually argue this is *better* than the v0.1 plan. Strava data + a structured daily wellness battery + weekly subjective synthesis gives the agent a richer signal than Strava + Garmin scraping (which would have been intermittent anyway). The injury-prevention story holds without depending on a fragile external ingestion pipeline. And every user — Apple, Garmin, Polar, watch-less — gets the same baseline experience.
+**Quality impact:** I'd actually argue this is _better_ than the v0.1 plan. Strava data + a structured daily wellness battery + weekly subjective synthesis gives the agent a richer signal than Strava + Garmin scraping (which would have been intermittent anyway). The injury-prevention story holds without depending on a fragile external ingestion pipeline. And every user — Apple, Garmin, Polar, watch-less — gets the same baseline experience.
 
 The summary: you didn't lose much by Apple not having OAuth, because the daily wellness battery recovers most of the same signal at much lower system complexity.
 

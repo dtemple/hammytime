@@ -29,11 +29,13 @@ The spec (v0.3) is locked. CLAUDE.md is written. No code has been scaffolded yet
 ## What is left to do (v1 sequencing)
 
 ### Week 0 — Setup
+
 - [ ] **Day 0.1** Read Strava API ToS and Brand Guidelines end-to-end. Confirm name. Write kill criterion.
 - [ ] **Day 0.2** Provision accounts and keys: Vercel, Supabase, Anthropic, Strava API app, BotFather bot, Sentry, Resend. Extract reusable prompts from personal `CLAUDE.md` into `prompts/`. Spike BYO-plan prompt template against your own onboarding answers.
 - [ ] **Day 0.3** Scaffold: `create-next-app` (TS, App Router, Tailwind), Supabase client + env, Sentry wired, `/api/health` endpoint (Postgres + Anthropic + Telegram + Strava pings).
 
 ### Week 1 — Data model, allowlist, Telegram onboarding
+
 - [ ] **Day 1.1** Migrations for full v1 schema (users, athletes, races, injuries, plans, plan_versions, memory_files, oauth_tokens, activities, messages, agent_runs, agent_run_steps, friend_allowlist, job_queue). RLS on athlete-scoped tables. Seed self as athlete 1.
 - [ ] **Day 1.2** Allowlist signup + Telegram link handshake (`/signup`, one-time `link_token`, deeplink + QR).
 - [ ] **Day 1.3** Telegram bot scaffold: webhook receiver, HMAC verification, inbound persist, outbound send helper, `/start <token>` handler.
@@ -41,6 +43,7 @@ The spec (v0.3) is locked. CLAUDE.md is written. No code has been scaffolded yet
 - [ ] **Day 1.5** End-to-end self-test: re-onboard from scratch, verify all DB rows, fix conversational tone.
 
 ### Week 2 — Strava OAuth + BYO-plan paste-back
+
 - [ ] Strava OAuth in Telegram (send auth link, callback persists encrypted token).
 - [ ] Strava webhook subscription (app-level, route by `owner_id`).
 - [ ] Token refresh cron (every 4 hours, lazy fallback).
@@ -49,6 +52,7 @@ The spec (v0.3) is locked. CLAUDE.md is written. No code has been scaffolded yet
 - [ ] `/app/plan` read-only web view.
 
 ### Week 3 — Daily agent loop + ad-hoc Telegram replies
+
 - [ ] Daily cron worker: enqueue `daily_checkin` jobs for athletes in 6:30–7:00 AM local window.
 - [ ] Daily agent run per §3.7 (memory load, Strava pull, Claude Agent SDK, structured response, memory write-back, Telegram send, shadow-bcc mirror).
 - [ ] Daily wellness battery in morning check-in.
@@ -56,6 +60,7 @@ The spec (v0.3) is locked. CLAUDE.md is written. No code has been scaffolded yet
 - [ ] Per-athlete advisory lock for concurrent write safety.
 
 ### Week 4 — Self-test + polish
+
 - [ ] Run the full loop on yourself for 5+ days.
 - [ ] Telemetry: token counts, agent step traces, error rates → Sentry + `/admin` console.
 - [ ] Prompt-cache system prompt + memory files.
@@ -63,12 +68,14 @@ The spec (v0.3) is locked. CLAUDE.md is written. No code has been scaffolded yet
 - [ ] Ingest production memory files from personal coach into DB (replace day-1.5 seed).
 
 ### Week 5 — Closed alpha (5–10 friends)
+
 - [ ] Allowlist gating, rate limiting, abuse controls.
 - [ ] Weekly debrief calls with alpha friends.
 - [ ] Hot-fix queue.
 - [ ] Plan-paste escape hatch (David generates manually if friend LLM fails).
 
 ### Week 6 — Open to full friend set
+
 - [ ] Self-serve invite flow.
 - [ ] Postmortem doc.
 
@@ -76,14 +83,14 @@ The spec (v0.3) is locked. CLAUDE.md is written. No code has been scaffolded yet
 
 ## Important milestones
 
-| Milestone | Target | Status |
-|---|---|---|
-| `/api/health` returns 200 (all green) | End of Week 0 | Not started |
+| Milestone                                   | Target        | Status      |
+| ------------------------------------------- | ------------- | ----------- |
+| `/api/health` returns 200 (all green)       | End of Week 0 | Not started |
 | First friend reaches `awaiting_paste` state | End of Week 1 | Not started |
-| First active plan in the system | End of Week 2 | Not started |
-| Daily loop running on David for 5 days | End of Week 4 | Not started |
-| First alpha friend onboarded | Week 5 | Not started |
-| All ~25 friends onboarded | Week 6 | Not started |
+| First active plan in the system             | End of Week 2 | Not started |
+| Daily loop running on David for 5 days      | End of Week 4 | Not started |
+| First alpha friend onboarded                | Week 5        | Not started |
+| All ~25 friends onboarded                   | Week 6        | Not started |
 
 ---
 
