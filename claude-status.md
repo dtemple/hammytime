@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-05-18 (session 1 — orientation)_
+_Updated: 2026-05-18 (session 2 — Supabase wiring)_
 
 ---
 
@@ -12,9 +12,9 @@ A multi-tenant Telegram-based marathon coaching bot for ~5–25 friends. Daily c
 
 ## Current status
 
-**Week 0, Day 0.1 — decisions and reading.**
+**Week 0, Day 0.3 (partial) — Supabase client wired.**
 
-The spec (v0.3) is locked. CLAUDE.md is written. No code has been scaffolded yet.
+Next.js scaffold is in place. Supabase clients and env conventions are wired. `supabase/` directory initialized. `npm run db:smoke` verifies connection. Sentry and `/api/health` still outstanding.
 
 ---
 
@@ -23,6 +23,8 @@ The spec (v0.3) is locked. CLAUDE.md is written. No code has been scaffolded yet
 - `Specs/SPEC.md` v0.3 written and locked (scope cuts, week 0–1 day-level detail).
 - `CLAUDE.md` created in repo root (project orientation, scope locks, anti-goals, file structure, working agreement).
 - `claude-status.md` created (this file).
+- Next.js 15 scaffold (`create-next-app` with TS, App Router, Tailwind).
+- **Supabase wired**: `@supabase/supabase-js` + `supabase` CLI + `tsx` + `dotenv` installed. `supabase init` run. `src/lib/db.ts` exports `supabaseAnon()` and `supabaseAdmin()`. `.env.example` documents all keys. `scripts/db-smoke.ts` verifies connection. `npm run db:smoke` script added.
 
 ---
 
@@ -32,7 +34,7 @@ The spec (v0.3) is locked. CLAUDE.md is written. No code has been scaffolded yet
 
 - [ ] **Day 0.1** Read Strava API ToS and Brand Guidelines end-to-end. Confirm name. Write kill criterion.
 - [ ] **Day 0.2** Provision accounts and keys: Vercel, Supabase, Anthropic, Strava API app, BotFather bot, Sentry, Resend. Extract reusable prompts from personal `CLAUDE.md` into `prompts/`. Spike BYO-plan prompt template against your own onboarding answers.
-- [ ] **Day 0.3** Scaffold: `create-next-app` (TS, App Router, Tailwind), Supabase client + env, Sentry wired, `/api/health` endpoint (Postgres + Anthropic + Telegram + Strava pings).
+- [x] **Day 0.3 (partial)** Scaffold: `create-next-app` (TS, App Router, Tailwind). Supabase client + env wired. Remaining: Sentry wired, `/api/health` endpoint (Postgres + Anthropic + Telegram + Strava pings).
 
 ### Week 1 — Data model, allowlist, Telegram onboarding
 
@@ -108,4 +110,4 @@ The spec (v0.3) is locked. CLAUDE.md is written. No code has been scaffolded yet
 
 ## Likely next task
 
-**Day 0.1 work**: Read Strava API ToS, confirm product name, write kill criterion. Then move to Day 0.2 account provisioning.
+Wire Sentry (server + client + edge) and `/api/health` endpoint (Postgres + Anthropic + Telegram + Strava pings). This completes Day 0.3 and the Week 0 exit criterion.

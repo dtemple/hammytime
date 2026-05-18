@@ -89,9 +89,11 @@ npm run test
 # TODO: fill in after first migration set (Day 1.1)
 npm run db:reset
 
-# Smoke test (/api/health green check)
-# TODO: fill in after /api/health endpoint (Day 0.3)
+# Smoke test — verifies Supabase connection (requires supabase start + .env.local)
 npm run db:smoke
+
+# Health check (/api/health green check)
+# TODO: fill in after /api/health endpoint (Day 0.3)
 ```
 
 ---
