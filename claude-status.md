@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-05-18 (session 3 — initial schema + TS types)_
+_Updated: 2026-05-18 (session 4 — /api/health endpoint + vitest)_
 
 ---
 
@@ -12,9 +12,9 @@ A multi-tenant Telegram-based marathon coaching bot for ~5–25 friends. Daily c
 
 ## Current status
 
-**Week 1, Day 1.1 complete — initial schema migrated and TS types generated.**
+**Week 1, Day 1.1 complete + /api/health wired — Day 0.3 partially complete.**
 
-Next.js scaffold, Supabase client, and full v0.3 schema are in place. Migration `20260518000000_initial_schema.sql` applies cleanly via `supabase db reset`. TS types generated at `src/lib/db-types.ts`. Sentry and `/api/health` still outstanding (remainder of Day 0.3).
+Next.js scaffold, Supabase client, full v0.3 schema, and `/api/health` endpoint are in place. Migration `20260518000000_initial_schema.sql` applies cleanly. TS types at `src/lib/db-types.ts`. Vitest configured with 6 passing tests. Sentry still outstanding (remainder of Day 0.3).
 
 ---
 
@@ -27,6 +27,8 @@ Next.js scaffold, Supabase client, and full v0.3 schema are in place. Migration 
 - **Supabase wired**: `@supabase/supabase-js` + `supabase` CLI + `tsx` + `dotenv` installed. `supabase init` run. `src/lib/db.ts` exports `supabaseAnon()` and `supabaseAdmin()`. `.env.example` documents all keys. `scripts/db-smoke.ts` verifies connection. `npm run db:smoke` script added.
 - **Initial schema**: `supabase/migrations/20260518000000_initial_schema.sql` — all 15 tables from SPEC.md §3.3 plus `link_tokens`. FKs, NOT NULL, check constraints, indexes, RLS enabled (no policies yet). Applies cleanly via `supabase db reset`.
 - **TS types**: `src/lib/db-types.ts` generated via `npm run db:types`. `db:reset` and `db:types` npm scripts added. CLAUDE.md commands updated.
+- **`/api/health` endpoint**: `src/app/api/health/route.ts` — GET returns `{ status, timestamp, checks: { postgres, anthropic, telegram, strava } }`. Postgres check uses `supabaseAdmin()` with latency measurement; anthropic/telegram/strava are stubs (`configured: false`) until their clients land. Each check is wrapped in its own try/catch; `Cache-Control: no-store` set.
+- **Vitest**: `vitest` + `@vitejs/plugin-react` installed as dev deps. `vitest.config.ts` configured with `@` alias. `npm run test` added. 6 tests in `src/app/api/health/route.test.ts` covering response shape, status derivation (ok/error), throw handling, and stub values.
 
 ---
 
@@ -36,7 +38,7 @@ Next.js scaffold, Supabase client, and full v0.3 schema are in place. Migration 
 
 - [ ] **Day 0.1** Read Strava API ToS and Brand Guidelines end-to-end. Confirm name. Write kill criterion.
 - [ ] **Day 0.2** Provision accounts and keys: Vercel, Supabase, Anthropic, Strava API app, BotFather bot, Sentry, Resend. Extract reusable prompts from personal `CLAUDE.md` into `prompts/`. Spike BYO-plan prompt template against your own onboarding answers.
-- [x] **Day 0.3 (partial)** Scaffold: `create-next-app` (TS, App Router, Tailwind). Supabase client + env wired. Remaining: Sentry wired, `/api/health` endpoint (Postgres + Anthropic + Telegram + Strava pings).
+- [x] **Day 0.3 (partial)** Scaffold: `create-next-app` (TS, App Router, Tailwind). Supabase client + env wired. `/api/health` endpoint wired (Postgres check live; Anthropic/Telegram/Strava stubs). Vitest configured. Remaining: Sentry wired.
 
 ### Week 1 — Data model, allowlist, Telegram onboarding
 
@@ -112,4 +114,4 @@ Next.js scaffold, Supabase client, and full v0.3 schema are in place. Migration 
 
 ## Likely next task
 
-Wire Sentry (server + client + edge) and `/api/health` endpoint (Postgres + Anthropic + Telegram + Strava pings). This completes Day 0.3 and the Week 0 exit criterion. After that: Day 1.2 allowlist signup + Telegram link handshake.
+Wire Sentry (server + client + edge). This is the last remaining item on Day 0.3. After that: Day 1.2 allowlist signup + Telegram link handshake.
