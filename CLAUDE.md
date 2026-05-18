@@ -14,6 +14,8 @@ Priority order: `Specs/SPEC.md` > `CLAUDE.md` > your prior assumptions.
 
 If you find a conflict between `CLAUDE.md` and `Specs/SPEC.md`, the spec wins. Flag the drift in your reply so the CLAUDE.md can be corrected.
 
+**When a new decision is made during a session** — a scope change, an architecture choice, a deferred item being pulled forward, or anything that would affect how future sessions understand the project — ask: "This looks like a spec-level decision. Do you want me to update `Specs/SPEC.md` to keep it as the source of truth?" Do not update the spec unilaterally; wait for confirmation.
+
 ---
 
 ## 3. v1 scope locks
@@ -94,7 +96,17 @@ npm run db:smoke
 
 ---
 
-## 7. Working agreement
+## 7. Session status
+
+`claude-status.md` in the repo root is the running project snapshot. It records: where we are, what has been done, what is left, the end goal, important milestones, deferred problems, and the likely next task.
+
+- Read `claude-status.md` at the start of every session to orient yourself.
+- Update it at the end of every session — even if the only change is marking a task complete or adding a new deferred item.
+- If a session ends with open threads, capture them in the "deferred / open questions" section rather than leaving them in conversation context.
+
+---
+
+## 8. Working agreement
 
 Each prompt is a scoped unit of work defined by the deliverable stated in that prompt.
 
