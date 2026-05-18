@@ -12,7 +12,8 @@
     "format:check": "prettier --check .",
     "db:smoke": "tsx scripts/db-smoke.ts",
     "db:reset": "supabase db reset",
-    "db:types": "supabase gen types typescript --local > src/lib/db-types.ts"
+    "db:types": "supabase gen types typescript --local > src/lib/db-types.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.0",
@@ -25,6 +26,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.0.2",
     "dotenv": "^17.4.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
@@ -32,6 +34,7 @@
     "supabase": "^2.100.0",
     "tailwindcss": "^4",
     "tsx": "^4.22.2",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.6"
   }
 }
