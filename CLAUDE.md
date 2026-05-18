@@ -85,9 +85,11 @@ npm run typecheck
 # TODO: fill in after test harness is wired
 npm run test
 
-# Reset local database
-# TODO: fill in after first migration set (Day 1.1)
+# Reset local database (requires supabase start)
 npm run db:reset
+
+# Generate TS types from local schema (requires supabase start)
+npm run db:types
 
 # Smoke test — verifies Supabase connection (requires supabase start + .env.local)
 npm run db:smoke

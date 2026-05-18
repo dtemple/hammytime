@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "db:smoke": "tsx scripts/db-smoke.ts"
+    "db:smoke": "tsx scripts/db-smoke.ts",
+    "db:reset": "supabase db reset",
+    "db:types": "supabase gen types typescript --local > src/lib/db-types.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.0",

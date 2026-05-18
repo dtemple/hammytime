@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-05-18 (session 2 — Supabase wiring)_
+_Updated: 2026-05-18 (session 3 — initial schema + TS types)_
 
 ---
 
@@ -12,9 +12,9 @@ A multi-tenant Telegram-based marathon coaching bot for ~5–25 friends. Daily c
 
 ## Current status
 
-**Week 0, Day 0.3 (partial) — Supabase client wired.**
+**Week 1, Day 1.1 complete — initial schema migrated and TS types generated.**
 
-Next.js scaffold is in place. Supabase clients and env conventions are wired. `supabase/` directory initialized. `npm run db:smoke` verifies connection. Sentry and `/api/health` still outstanding.
+Next.js scaffold, Supabase client, and full v0.3 schema are in place. Migration `20260518000000_initial_schema.sql` applies cleanly via `supabase db reset`. TS types generated at `src/lib/db-types.ts`. Sentry and `/api/health` still outstanding (remainder of Day 0.3).
 
 ---
 
@@ -25,6 +25,8 @@ Next.js scaffold is in place. Supabase clients and env conventions are wired. `s
 - `claude-status.md` created (this file).
 - Next.js 15 scaffold (`create-next-app` with TS, App Router, Tailwind).
 - **Supabase wired**: `@supabase/supabase-js` + `supabase` CLI + `tsx` + `dotenv` installed. `supabase init` run. `src/lib/db.ts` exports `supabaseAnon()` and `supabaseAdmin()`. `.env.example` documents all keys. `scripts/db-smoke.ts` verifies connection. `npm run db:smoke` script added.
+- **Initial schema**: `supabase/migrations/20260518000000_initial_schema.sql` — all 15 tables from SPEC.md §3.3 plus `link_tokens`. FKs, NOT NULL, check constraints, indexes, RLS enabled (no policies yet). Applies cleanly via `supabase db reset`.
+- **TS types**: `src/lib/db-types.ts` generated via `npm run db:types`. `db:reset` and `db:types` npm scripts added. CLAUDE.md commands updated.
 
 ---
 
@@ -38,7 +40,7 @@ Next.js scaffold is in place. Supabase clients and env conventions are wired. `s
 
 ### Week 1 — Data model, allowlist, Telegram onboarding
 
-- [ ] **Day 1.1** Migrations for full v1 schema (users, athletes, races, injuries, plans, plan_versions, memory_files, oauth_tokens, activities, messages, agent_runs, agent_run_steps, friend_allowlist, job_queue). RLS on athlete-scoped tables. Seed self as athlete 1.
+- [x] **Day 1.1** Migrations for full v1 schema (users, athletes, races, injuries, plans, plan_versions, memory_files, oauth_tokens, activities, messages, agent_runs, agent_run_steps, friend_allowlist, job_queue, link_tokens). RLS enabled on athlete-scoped tables (policies are a separate prompt). TS types generated. Seed self as athlete 1 — deferred to Day 1.5.
 - [ ] **Day 1.2** Allowlist signup + Telegram link handshake (`/signup`, one-time `link_token`, deeplink + QR).
 - [ ] **Day 1.3** Telegram bot scaffold: webhook receiver, HMAC verification, inbound persist, outbound send helper, `/start <token>` handler.
 - [ ] **Day 1.4** Onboarding state machine (steps 0–5, write-through to memory files, BYO-plan prompt send, David alert).
@@ -110,4 +112,4 @@ Next.js scaffold is in place. Supabase clients and env conventions are wired. `s
 
 ## Likely next task
 
-Wire Sentry (server + client + edge) and `/api/health` endpoint (Postgres + Anthropic + Telegram + Strava pings). This completes Day 0.3 and the Week 0 exit criterion.
+Wire Sentry (server + client + edge) and `/api/health` endpoint (Postgres + Anthropic + Telegram + Strava pings). This completes Day 0.3 and the Week 0 exit criterion. After that: Day 1.2 allowlist signup + Telegram link handshake.
