@@ -35,3 +35,19 @@ npm run db:smoke
 ```
 
 Should print `db-smoke: connection OK` and exit 0. If it fails, check that `supabase start` completed and your `.env.local` keys match `supabase status` output.
+
+### 4. Register the Telegram webhook (ngrok)
+
+Run ngrok to expose your local Next.js dev server:
+
+```bash
+ngrok http 3000
+```
+
+Then register the webhook with Telegram — replace `$TELEGRAM_BOT_TOKEN`, `$NGROK_URL`, and `$TELEGRAM_WEBHOOK_SECRET` with your actual values (do not run this literally):
+
+```bash
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook?url=$NGROK_URL/api/tg/webhook&secret_token=$TELEGRAM_WEBHOOK_SECRET"
+```
+
+Smoke test: send `/ping` to the bot in Telegram. It should reply `pong`.

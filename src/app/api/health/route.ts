@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/db";
 import { pingAnthropic } from "@/lib/anthropic";
+import { pingTelegram } from "@/server/telegram/bot";
 
 type PostgresCheck = { ok: boolean; latency_ms: number; error?: string };
 type ExternalCheck = {
@@ -36,13 +37,24 @@ async function checkAnthropic(): Promise<ExternalCheck> {
   }
 }
 
+async function checkTelegram(): Promise<ExternalCheck> {
+  const configured = !!process.env.TELEGRAM_BOT_TOKEN;
+  if (!configured) return { ok: false, configured };
+  try {
+    const { latency_ms } = await pingTelegram();
+    return { ok: true, configured, latency_ms };
+  } catch (err) {
+    return { ok: false, configured, error: String(err) };
+  }
+}
+
 export async function GET() {
-  const [postgres, anthropic] = await Promise.all([
+  const [postgres, anthropic, telegram] = await Promise.all([
     checkPostgres(),
     checkAnthropic(),
+    checkTelegram(),
   ]);
 
-  const telegram: ExternalCheck = { ok: false, configured: false };
   const strava: ExternalCheck = { ok: false, configured: false };
 
   const configuredFailing = [anthropic, telegram, strava].some(
