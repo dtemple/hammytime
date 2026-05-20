@@ -1,4 +1,6 @@
-import "dotenv/config";
+import { config } from "dotenv";
+config({ path: ".env.local" });
+
 import { telegramBot } from "../src/server/telegram/bot";
 
 const mode = process.env.TELEGRAM_BOT_MODE ?? "webhook";
@@ -18,10 +20,6 @@ bot.on("message", async (ctx, next) => {
   return next();
 });
 
-const stop = bot.start({
-  onStart: () => console.info("[bot:dev] polling started"),
-});
-
 function shutdown() {
   console.info("[bot:dev] polling stopped");
   bot.stop();
@@ -31,4 +29,9 @@ function shutdown() {
 process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);
 
-await stop;
+bot
+  .start({ onStart: () => console.info("[bot:dev] polling started") })
+  .catch((err) => {
+    console.error("[bot:dev] fatal error", err);
+    process.exit(1);
+  });
