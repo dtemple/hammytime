@@ -1,0 +1,1 @@
+select * from friend_allowlist where email = 'dtemple@gmail.com';
