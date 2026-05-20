@@ -479,6 +479,7 @@ export type Database = {
           expires_at: string
           id: string
           provider: string
+          provider_athlete_id: string | null
           refresh_token_enc: string
           updated_at: string
         }
@@ -489,6 +490,7 @@ export type Database = {
           expires_at: string
           id?: string
           provider: string
+          provider_athlete_id?: string | null
           refresh_token_enc: string
           updated_at?: string
         }
@@ -499,6 +501,7 @@ export type Database = {
           expires_at?: string
           id?: string
           provider?: string
+          provider_athlete_id?: string | null
           refresh_token_enc?: string
           updated_at?: string
         }
@@ -830,3 +833,4 @@ export const Constants = {
     Enums: {},
   },
 } as const
+

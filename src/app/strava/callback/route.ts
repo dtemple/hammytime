@@ -57,6 +57,7 @@ export async function GET(req: NextRequest) {
       access_token_enc: accessTokenEnc,
       refresh_token_enc: refreshTokenEnc,
       expires_at: new Date(tokens.expires_at * 1000).toISOString(),
+      provider_athlete_id: tokens.provider_athlete_id,
     },
     { onConflict: "athlete_id,provider" }
   );

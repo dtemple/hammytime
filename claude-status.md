@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-05-20 (session 6 — Strava OAuth bones + token encryption)_
+_Updated: 2026-05-20 (session 7 — allowlist signup + Telegram deeplink page)_
 
 ---
 
@@ -12,9 +12,9 @@ A multi-tenant Telegram-based marathon coaching bot for ~5–25 friends. Daily c
 
 ## Current status
 
-**Week 1, Day 1.1 complete + Day 0.3 complete + Strava OAuth bones complete.**
+**Week 1, Day 1.2 complete.**
 
-Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Anthropic client, Sentry, Telegram scaffold, and Strava OAuth are all in place. Migration `20260518000000_initial_schema.sql` applies cleanly. TS types at `src/lib/db-types.ts`. Vitest configured with 8 passing tests.
+Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Anthropic client, Sentry, Telegram scaffold, Strava OAuth, and `/signup` page are all in place. `scripts/seed-allowlist.ts` + `npm run seed:allowlist` also done.
 
 ---
 
@@ -33,6 +33,7 @@ Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Ant
 - **Sentry**: `@sentry/nextjs` installed. `sentry.{client,server,edge}.config.ts` + `instrumentation.ts` created. `next.config.ts` wrapped with `withSentryConfig`. `SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT` added to `.env.example`. Dev-only test-error route at `/api/dev/test-error` for Sentry capture verification.
 - **`/api/health` Anthropic check**: `checkAnthropic()` implemented — `configured=true` when `ANTHROPIC_API_KEY` is set, `ok=true` when `pingAnthropic()` succeeds; `status=degraded` when configured but failing.
 - **Strava OAuth bones**: `src/lib/crypto.ts` (libsodium secretbox encrypt/decrypt, key from `TOKEN_ENCRYPTION_KEY`). `src/lib/state-sign.ts` (HMAC-SHA256 sign/verify, 10-min expiry, key from `STATE_SIGNING_KEY`). `src/server/strava/client.ts` (`getAuthorizeUrl`, `exchangeCode`, `refreshAccessToken`, `pingStrava`). `GET /strava/connect?athlete_id=<uuid>` signs state, redirects to Strava. `GET /strava/callback` verifies state, exchanges code, upserts encrypted tokens into `oauth_tokens`. `/strava/connected` success page. `/api/health` Strava check live via `pingStrava()`. `.env.example` updated with `STATE_SIGNING_KEY` and `TOKEN_ENCRYPTION_KEY`.
+- **Allowlist + signup page (Day 1.2)**: `scripts/seed-allowlist.ts` + `npm run seed:allowlist -- <email>` (idempotent upsert into `friend_allowlist`). `/signup` server component: no-email → email form; not-on-list → invite gate; on-list → mints `link_tokens` row (32-byte base64url token, 15-min TTL), renders `tg://resolve?domain=<bot>&start=<token>` deeplink + QR code via `qrcode` package.
 
 ---
 
@@ -47,7 +48,7 @@ Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Ant
 ### Week 1 — Data model, allowlist, Telegram onboarding
 
 - [x] **Day 1.1** Migrations for full v1 schema (users, athletes, races, injuries, plans, plan_versions, memory_files, oauth_tokens, activities, messages, agent_runs, agent_run_steps, friend_allowlist, job_queue, link_tokens). RLS enabled on athlete-scoped tables (policies are a separate prompt). TS types generated. Seed self as athlete 1 — deferred to Day 1.5.
-- [ ] **Day 1.2** Allowlist signup + Telegram link handshake (`/signup`, one-time `link_token`, deeplink + QR).
+- [x] **Day 1.2** Allowlist signup + Telegram link handshake (`/signup`, one-time `link_token`, deeplink + QR).
 - [ ] **Day 1.3** Telegram bot scaffold: webhook receiver, HMAC verification, inbound persist, outbound send helper, `/start <token>` handler.
 - [ ] **Day 1.4** Onboarding state machine (steps 0–5, write-through to memory files, BYO-plan prompt send, David alert).
 - [ ] **Day 1.5** End-to-end self-test: re-onboard from scratch, verify all DB rows, fix conversational tone.
@@ -119,4 +120,4 @@ Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Ant
 
 ## Likely next task
 
-Day 1.2: Allowlist signup + Telegram link handshake (`/signup`, one-time `link_token`, deeplink + QR).
+Day 1.3: Telegram bot scaffold — webhook receiver at `/api/tg/webhook` (HMAC secret-token verification), inbound persist to `messages`, outbound send helper (4096-char chunking, MarkdownV2), `/start <token>` handler that resolves the token → links `telegram_chat_id` to `athlete_id` → sends welcome + kicks off onboarding step 0.

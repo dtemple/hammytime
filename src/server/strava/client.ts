@@ -37,7 +37,7 @@ export async function exchangeCode(code: string): Promise<{
   refresh_token: string;
   access_token: string;
   expires_at: number;
-  athlete_id_strava: number;
+  provider_athlete_id: string;
 }> {
   const res = await fetch(`${STRAVA_AUTH_BASE}/token`, {
     method: "POST",
@@ -58,7 +58,7 @@ export async function exchangeCode(code: string): Promise<{
     refresh_token: data.refresh_token,
     access_token: data.access_token,
     expires_at: data.expires_at,
-    athlete_id_strava: data.athlete.id,
+    provider_athlete_id: String(data.athlete.id),
   };
 }
 
