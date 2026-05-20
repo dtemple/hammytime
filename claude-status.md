@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-05-18 (session 5 — Anthropic client + Sentry + health anthropic ping)_
+_Updated: 2026-05-20 (session 6 — Strava OAuth bones + token encryption)_
 
 ---
 
@@ -12,9 +12,9 @@ A multi-tenant Telegram-based marathon coaching bot for ~5–25 friends. Daily c
 
 ## Current status
 
-**Week 1, Day 1.1 complete + Day 0.3 complete.**
+**Week 1, Day 1.1 complete + Day 0.3 complete + Strava OAuth bones complete.**
 
-Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Anthropic client, and Sentry are all in place. Migration `20260518000000_initial_schema.sql` applies cleanly. TS types at `src/lib/db-types.ts`. Vitest configured with 8 passing tests. Day 0.3 is fully complete.
+Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Anthropic client, Sentry, Telegram scaffold, and Strava OAuth are all in place. Migration `20260518000000_initial_schema.sql` applies cleanly. TS types at `src/lib/db-types.ts`. Vitest configured with 8 passing tests.
 
 ---
 
@@ -32,6 +32,7 @@ Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Ant
 - **Anthropic client**: `@anthropic-ai/sdk` installed. `src/lib/anthropic.ts` exports `anthropicClient()` and `pingAnthropic()` (1-token Haiku 4.5 call with latency measurement). `ANTHROPIC_API_KEY` already in `.env.example`.
 - **Sentry**: `@sentry/nextjs` installed. `sentry.{client,server,edge}.config.ts` + `instrumentation.ts` created. `next.config.ts` wrapped with `withSentryConfig`. `SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT` added to `.env.example`. Dev-only test-error route at `/api/dev/test-error` for Sentry capture verification.
 - **`/api/health` Anthropic check**: `checkAnthropic()` implemented — `configured=true` when `ANTHROPIC_API_KEY` is set, `ok=true` when `pingAnthropic()` succeeds; `status=degraded` when configured but failing.
+- **Strava OAuth bones**: `src/lib/crypto.ts` (libsodium secretbox encrypt/decrypt, key from `TOKEN_ENCRYPTION_KEY`). `src/lib/state-sign.ts` (HMAC-SHA256 sign/verify, 10-min expiry, key from `STATE_SIGNING_KEY`). `src/server/strava/client.ts` (`getAuthorizeUrl`, `exchangeCode`, `refreshAccessToken`, `pingStrava`). `GET /strava/connect?athlete_id=<uuid>` signs state, redirects to Strava. `GET /strava/callback` verifies state, exchanges code, upserts encrypted tokens into `oauth_tokens`. `/strava/connected` success page. `/api/health` Strava check live via `pingStrava()`. `.env.example` updated with `STATE_SIGNING_KEY` and `TOKEN_ENCRYPTION_KEY`.
 
 ---
 
@@ -53,7 +54,8 @@ Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Ant
 
 ### Week 2 — Strava OAuth + BYO-plan paste-back
 
-- [ ] Strava OAuth in Telegram (send auth link, callback persists encrypted token).
+- [x] Strava OAuth bones (connect route, callback, token encryption, health check) — accessible via direct URL with manually-seeded athlete UUID.
+- [ ] Strava OAuth in Telegram (bot sends the athlete a /strava/connect link).
 - [ ] Strava webhook subscription (app-level, route by `owner_id`).
 - [ ] Token refresh cron (every 4 hours, lazy fallback).
 - [ ] BYO-plan paste-back flow (detect JSON paste, Zod validate, accept or structured reject).
@@ -117,4 +119,4 @@ Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Ant
 
 ## Likely next task
 
-Day 1.2: Allowlist signup + Telegram link handshake (`/signup`, one-time `link_token`, deeplink + QR). Day 0.3 is complete.
+Day 1.2: Allowlist signup + Telegram link handshake (`/signup`, one-time `link_token`, deeplink + QR).
