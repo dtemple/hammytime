@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/db";
 import { pingAnthropic } from "@/lib/anthropic";
 import { pingTelegram } from "@/server/telegram/bot";
+import { pingStrava } from "@/server/strava/client";
 
 type PostgresCheck = { ok: boolean; latency_ms: number; error?: string };
 type ExternalCheck = {
@@ -48,14 +49,24 @@ async function checkTelegram(): Promise<ExternalCheck> {
   }
 }
 
+async function checkStrava(): Promise<ExternalCheck> {
+  const configured = !!process.env.STRAVA_CLIENT_ID;
+  if (!configured) return { ok: false, configured };
+  try {
+    const { ok, latency_ms } = await pingStrava();
+    return { ok, configured, latency_ms };
+  } catch (err) {
+    return { ok: false, configured, error: String(err) };
+  }
+}
+
 export async function GET() {
-  const [postgres, anthropic, telegram] = await Promise.all([
+  const [postgres, anthropic, telegram, strava] = await Promise.all([
     checkPostgres(),
     checkAnthropic(),
     checkTelegram(),
+    checkStrava(),
   ]);
-
-  const strava: ExternalCheck = { ok: false, configured: false };
 
   const configuredFailing = [anthropic, telegram, strava].some(
     (c) => c.configured && !c.ok
