@@ -155,6 +155,12 @@ npm run db:smoke
 
 # Health check (/api/health green check)
 # TODO: fill in after /api/health endpoint (Day 0.3)
+
+# Start the bot in polling mode (local dev, no ngrok — requires TELEGRAM_BOT_MODE=polling in .env.local)
+npm run bot:dev
+
+# Start everything: Supabase, Next.js dev server, and polling bot in parallel
+npm run dev:all
 ```
 
 ---

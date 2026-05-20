@@ -4,6 +4,8 @@ Hammytime is a multi-tenant Telegram-based marathon coaching bot built for a sma
 
 ## Local development
 
+The bot runs in polling mode locally so you don't need ngrok. Set `TELEGRAM_BOT_MODE=polling` in `.env.local` (it's the default in `.env.example`). In production, `TELEGRAM_BOT_MODE=webhook` routes updates through `/api/tg/webhook` instead.
+
 ### 1. Start the local database
 
 ```bash
@@ -26,6 +28,7 @@ Copy the values into a new `.env.local` file (see `.env.example` for the full ke
 NEXT_PUBLIC_SUPABASE_URL=<API URL from supabase status>
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon key from supabase status>
 SUPABASE_SERVICE_ROLE_KEY=<service_role key from supabase status>
+TELEGRAM_BOT_MODE=polling
 ```
 
 ### 3. Verify the database connection
@@ -36,18 +39,42 @@ npm run db:smoke
 
 Should print `db-smoke: connection OK` and exit 0. If it fails, check that `supabase start` completed and your `.env.local` keys match `supabase status` output.
 
-### 4. Register the Telegram webhook (ngrok)
-
-Run ngrok to expose your local Next.js dev server:
+### 4. Start everything
 
 ```bash
-ngrok http 3000
+npm run dev:all
 ```
 
-Then register the webhook with Telegram — replace `$TELEGRAM_BOT_TOKEN`, `$NGROK_URL`, and `$TELEGRAM_WEBHOOK_SECRET` with your actual values (do not run this literally):
+This runs three processes in parallel:
+
+| Stripe | What it does |
+|--------|-------------|
+| `db` (cyan) | `supabase start` — spins up local Postgres, then tails to keep the pane alive |
+| `web` (magenta) | `next dev` — Next.js dev server on port 3000 |
+| `bot` (yellow) | `tsx scripts/start-bot-polling.ts` — long-polling bot; logs each inbound update |
+
+Or run them separately in three terminals:
 
 ```bash
-curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook?url=$NGROK_URL/api/tg/webhook&secret_token=$TELEGRAM_WEBHOOK_SECRET"
+npx supabase start          # terminal 1
+npm run dev                 # terminal 2
+npm run bot:dev             # terminal 3
 ```
 
-Smoke test: send `/ping` to the bot in Telegram. It should reply `pong`.
+Smoke test: send `/ping` to the bot in Telegram. It should reply `pong` and you'll see the update logged in the bot terminal.
+
+### Production webhook setup
+
+In production the bot receives updates via webhook. To register the webhook after deploying:
+
+```bash
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook?url=$YOUR_PROD_URL/api/tg/webhook&secret_token=$TELEGRAM_WEBHOOK_SECRET"
+```
+
+Or use the convenience script:
+
+```bash
+npm run webhook:register
+```
+
+Make sure `TELEGRAM_BOT_MODE=webhook` is set in your Vercel environment variables (the default when the var is unset).

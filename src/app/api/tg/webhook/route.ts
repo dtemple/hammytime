@@ -16,6 +16,12 @@ function verifySecret(header: string | null, expected: string): boolean {
 }
 
 export async function POST(req: NextRequest) {
+  if ((process.env.TELEGRAM_BOT_MODE ?? "webhook") === "polling") {
+    return new NextResponse("polling mode active — webhook endpoint disabled", {
+      status: 503,
+    });
+  }
+
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET ?? "";
   const header = req.headers.get("X-Telegram-Bot-Api-Secret-Token");
 
