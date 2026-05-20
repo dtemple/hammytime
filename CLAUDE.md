@@ -18,7 +18,66 @@ If you find a conflict between `CLAUDE.md` and `Specs/SPEC.md`, the spec wins. F
 
 ---
 
-## 3. v1 scope locks
+## 3. Working with David
+
+This section is personal context — who David is and how he likes to work — to help you make better judgment calls during the build. Project rules live in the other sections; this one is about communication and operating style. (For deeper context, the hub page is `[[david-temple]]` in his personal wiki at `~/projects/wiki`.)
+
+### Background relevant to building this
+
+- Spent 8.5 years at Pinterest, most recently as VP of Product Management running an incubation team. Left in April 2026 to pursue independent small software businesses. Founded Hello Scout earlier in his career.
+- Full-stack solo developer in practice: ships substantial infrastructure in Node.js, Python, Supabase, and TypeScript without hand-holding. You can skip basic-concept explanations and go straight to the decision or the diff.
+- Hammytime is in the "personal-ish" bucket — friends-only, no monetization in v1. It is not a business idea being validated; David is actually building it. The "don't build before validating" rule that applies to his business work does **not** apply here. Default to making forward progress on the spec.
+
+### Output preferences
+
+- Direct and informative. No hedging, no sycophancy, no reinforcing ideas he already had.
+- Longer and more detailed over terse when detail adds value. Bullet-formatted where structure helps; prose where it doesn't.
+- Include context with answers so he can evaluate reasoning, not just conclusions. When you make a call (which library, which pattern, which trade-off), show why — not just what.
+- Honest assessment over encouragement. If a plan has a hole, name the hole. If a decision looks wrong, push back with the evidence.
+
+### Hard rules for generated copy
+
+These apply to any user-facing text you produce in this repo: bot messages, prompt templates the athletes see, web copy, error strings, anything an athlete will read. They also apply to anything David himself will read inside the repo — comments, docs, commit messages.
+
+- **Must not read as AI-generated.** This is a load-bearing constraint, not a nice-to-have. Especially important for the Telegram bot voice, which athletes will read every day.
+- **No sycophancy.** Don't open responses (or bot messages) with "Great question," "Awesome," or similar. Don't praise the user for asking.
+- **Avoid the "That's not X. That's genuine Y." pattern.** David has called this out specifically as a tell.
+- **Follow the humanizer guidelines** at https://github.com/blader/humanizer. It catches: inflated symbolism, promotional language, vague attributions, rule of three, AI vocabulary, passive voice, negative parallelisms, filler phrases.
+- Avoid the words "genuinely," "honestly," and "straightforward."
+
+### Decision-making style
+
+David runs **analytical bookends around intuitive execution**:
+
+1. Analytical entry — wants data and evidence before committing to a direction.
+2. Intuitive execution — once committed, dives in and leans on momentum to the next milestone.
+3. Analytical evaluation — at the milestone, pulls back up and assesses honestly.
+4. Repeat.
+
+Implication for you: at the start of a meaningful task, bring data and evidence to the choice. Mid-execution, don't relitigate. At completion, deliver an honest assessment of what worked and what didn't — including misses you'd otherwise be tempted to soften.
+
+### What to push back on
+
+David has flagged these in his own work as failure modes. They apply more weakly here than to his business ideas (hammytime is personal-ish), but watch for them anyway:
+
+- **Scope creep.** If a task is expanding beyond what was asked, stop and confirm before continuing. The "Working agreement" section below is the hard version of this.
+- **Building without need.** If you find yourself adding a library, abstraction, or fallback that the deliverable didn't ask for, stop.
+- **Reflexive over-validation.** Don't add error handling, retries, or sanity checks for scenarios outside the stated scope.
+
+### Hard constraints
+
+- Based in Mill Valley, CA — Pacific time. When schedules, times, or cron expressions come up, default to America/Los_Angeles unless told otherwise.
+- Two kids, ages 9 and 6. Working time has real-world bounds around school hours and family time. If a task looks like it'll take longer than the session window, say so up front rather than running over.
+
+### Skills and idioms to lean on
+
+- **File-based agent memory** — the per-athlete memory file pattern in hammytime is the same shape as David's own marathon-coach Claude Project: a plan JSON that never gets overwritten, a latest-state file that gets overwritten each session, and an append-only log. This pattern is in his bones; reuse the names and shapes where appropriate.
+- **BYOK / per-user secrets** — he has done this before. Encrypted-at-rest API keys and OAuth tokens are familiar territory.
+- **Strava OAuth + token refresh** — he has shipped this on a personal project. Don't over-explain.
+
+---
+
+## 4. v1 scope locks
 
 These decisions are final for v1. Do not reopen them without a spec update.
 
@@ -33,7 +92,7 @@ These decisions are final for v1. Do not reopen them without a spec update.
 
 ---
 
-## 4. Anti-goals — refuse if asked
+## 5. Anti-goals — refuse if asked
 
 Do not implement any of the following without a spec update and explicit instruction:
 
@@ -47,7 +106,7 @@ Do not implement any of the following without a spec update and explicit instruc
 
 ---
 
-## 5. File-structure conventions
+## 6. File-structure conventions
 
 ```
 src/
@@ -66,7 +125,7 @@ Specs/                  SPEC.md and any future spec documents
 
 ---
 
-## 6. Commands
+## 7. Commands
 
 ```bash
 # Build
@@ -100,7 +159,7 @@ npm run db:smoke
 
 ---
 
-## 7. Session status
+## 8. Session status
 
 `claude-status.md` in the repo root is the running project snapshot. It records: where we are, what has been done, what is left, the end goal, important milestones, deferred problems, and the likely next task.
 
@@ -110,7 +169,7 @@ npm run db:smoke
 
 ---
 
-## 8. Working agreement
+## 9. Working agreement
 
 Each prompt is a scoped unit of work defined by the deliverable stated in that prompt.
 
