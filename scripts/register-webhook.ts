@@ -1,5 +1,6 @@
 // Usage: npm run webhook:register -- https://abc123.ngrok.io
-import "dotenv/config";
+import { config } from "dotenv";
+config({ path: ".env.local" });
 import { Bot } from "grammy";
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -18,9 +19,11 @@ if (!rawUrl) {
 const webhookUrl = `${rawUrl.replace(/\/$/, "")}/api/tg/webhook`;
 const bot = new Bot(token);
 
-console.log("Registering webhook at:", webhookUrl);
-const result = await bot.api.setWebhook(webhookUrl, { secret_token: secret });
-console.log("setWebhook result:", result);
+(async () => {
+  console.log("Registering webhook at:", webhookUrl);
+  const result = await bot.api.setWebhook(webhookUrl, { secret_token: secret });
+  console.log("setWebhook result:", result);
 
-const info = await bot.api.getWebhookInfo();
-console.log("Webhook info:", JSON.stringify(info, null, 2));
+  const info = await bot.api.getWebhookInfo();
+  console.log("Webhook info:", JSON.stringify(info, null, 2));
+})();
