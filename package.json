@@ -14,7 +14,8 @@
     "db:smoke": "tsx scripts/db-smoke.ts",
     "db:reset": "supabase db reset",
     "db:types": "supabase gen types typescript --local > src/lib/db-types.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "webhook:register": "tsx scripts/register-webhook.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.96.0",
