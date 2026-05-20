@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "seed:allowlist": "tsx scripts/seed-allowlist.ts",
     "db:smoke": "tsx scripts/db-smoke.ts",
     "db:reset": "supabase db reset",
     "db:types": "supabase gen types typescript --local > src/lib/db-types.ts",
@@ -22,6 +23,7 @@
     "grammy": "^1.43.0",
     "libsodium-wrappers": "^0.8.4",
     "next": "16.2.6",
+    "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
@@ -29,6 +31,7 @@
     "@tailwindcss/postcss": "^4",
     "@types/libsodium-wrappers": "^0.7.14",
     "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.0.2",
