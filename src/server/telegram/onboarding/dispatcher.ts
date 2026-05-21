@@ -64,6 +64,24 @@ export async function handleOnboardingMessage(
   const step = onboardingSteps[state.step];
   if (!step) return false;
 
+  // --- Custom sub-flow steps (e.g. step 2 races) ---
+  if (step.handleMessage) {
+    const result = await step.handleMessage(text, state.partial, athleteId);
+    if (!result.done) {
+      await advanceQuestion(athleteId, {
+        step: state.step,
+        question: 0,
+        partial: result.newPartial,
+      });
+      await sendAndLog(athleteId, chatId, result.reply);
+      return true;
+    }
+    // Step complete: run onComplete then advance to next step
+    await step.onComplete(athleteId, result.newPartial);
+    return await completeStep(athleteId, chatId, { ...state, partial: result.newPartial });
+  }
+
+  // --- Standard question-array steps ---
   const questionIdx = firstActiveQuestion(step.questions, state.question, state.partial);
 
   // All remaining questions in this step are skipped — complete immediately
@@ -119,6 +137,21 @@ async function completeStep(
     const nextStep = onboardingSteps[nextStepIdx];
     if (!nextStep) return false;
 
+    // --- Custom sub-flow step: send initialPrompt instead of questions[0] ---
+    if (nextStep.handleMessage) {
+      const newState: OnboardingState = {
+        step: nextStepIdx,
+        question: 0,
+        partial: {},
+      };
+      await advanceQuestion(athleteId, newState);
+      if (nextStep.initialPrompt) {
+        await sendAndLog(athleteId, chatId, nextStep.initialPrompt);
+      }
+      return true;
+    }
+
+    // --- Standard step: send first active question ---
     const emptyPartial: Record<string, unknown> = {};
     const firstQIdx = firstActiveQuestion(nextStep.questions, 0, emptyPartial);
 
@@ -144,11 +177,11 @@ async function completeStep(
   };
   await advanceQuestion(athleteId, terminalState);
 
-  // REPLACE-IN-PROMPT-11
+  // REPLACE-IN-PROMPT-12
   await sendAndLog(
     athleteId,
     chatId,
-    "Step 1 complete. Steps 2–5 ship in a later update. Type /restart to go again."
+    "Step 2 complete. Steps 3–5 ship in a later update. Type /restart to go again."
   );
 
   return false;

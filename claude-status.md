@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-05-21 (session 8 — onboarding state-machine framework + steps 0 & 1)_
+_Updated: 2026-05-21 (session 9 — onboarding step 2 races + agentic race lookup)_
 
 ---
 
@@ -12,9 +12,9 @@ A multi-tenant Telegram-based marathon coaching bot for ~5–25 friends. Daily c
 
 ## Current status
 
-**Week 1, Day 1.4 complete (onboarding state machine, steps 0 & 1).**
+**Week 1, Day 1.4 continuing — onboarding step 2 (races) complete. Steps 3–5 remain.**
 
-Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Anthropic client, Sentry, Telegram scaffold, Strava OAuth, `/signup` page, and onboarding state-machine framework are all in place.
+Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Anthropic client, Sentry, Telegram scaffold, Strava OAuth, `/signup` page, onboarding state-machine framework, steps 0, 1, and 2 are all in place. First Anthropic Messages API call with web_search tool use ships in `lookupRace`.
 
 ---
 

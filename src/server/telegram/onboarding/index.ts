@@ -1,8 +1,9 @@
 import { basicsStep } from "./steps/00-basics";
 import { goalsStep } from "./steps/01-goals";
+import { racesStep } from "./steps/02-races";
 import type { OnboardingStep } from "./types";
 
-export const onboardingSteps: OnboardingStep[] = [basicsStep, goalsStep];
+export const onboardingSteps: OnboardingStep[] = [basicsStep, goalsStep, racesStep];
 
 export { handleOnboardingMessage } from "./dispatcher";
 export { resetOnboarding } from "./state";
