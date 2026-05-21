@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-05-20 (session 7 — allowlist signup + Telegram deeplink page)_
+_Updated: 2026-05-21 (session 8 — onboarding state-machine framework + steps 0 & 1)_
 
 ---
 
@@ -12,9 +12,9 @@ A multi-tenant Telegram-based marathon coaching bot for ~5–25 friends. Daily c
 
 ## Current status
 
-**Week 1, Day 1.2 complete.**
+**Week 1, Day 1.4 complete (onboarding state machine, steps 0 & 1).**
 
-Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Anthropic client, Sentry, Telegram scaffold, Strava OAuth, and `/signup` page are all in place. `scripts/seed-allowlist.ts` + `npm run seed:allowlist` also done.
+Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Anthropic client, Sentry, Telegram scaffold, Strava OAuth, `/signup` page, and onboarding state-machine framework are all in place.
 
 ---
 
@@ -34,6 +34,16 @@ Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Ant
 - **`/api/health` Anthropic check**: `checkAnthropic()` implemented — `configured=true` when `ANTHROPIC_API_KEY` is set, `ok=true` when `pingAnthropic()` succeeds; `status=degraded` when configured but failing.
 - **Strava OAuth bones**: `src/lib/crypto.ts` (libsodium secretbox encrypt/decrypt, key from `TOKEN_ENCRYPTION_KEY`). `src/lib/state-sign.ts` (HMAC-SHA256 sign/verify, 10-min expiry, key from `STATE_SIGNING_KEY`). `src/server/strava/client.ts` (`getAuthorizeUrl`, `exchangeCode`, `refreshAccessToken`, `pingStrava`). `GET /strava/connect?athlete_id=<uuid>` signs state, redirects to Strava. `GET /strava/callback` verifies state, exchanges code, upserts encrypted tokens into `oauth_tokens`. `/strava/connected` success page. `/api/health` Strava check live via `pingStrava()`. `.env.example` updated with `STATE_SIGNING_KEY` and `TOKEN_ENCRYPTION_KEY`.
 - **Allowlist + signup page (Day 1.2)**: `scripts/seed-allowlist.ts` + `npm run seed:allowlist -- <email>` (idempotent upsert into `friend_allowlist`). `/signup` server component: no-email → email form; not-on-list → invite gate; on-list → mints `link_tokens` row (32-byte base64url token, 15-min TTL), renders `tg://resolve?domain=<bot>&start=<token>` deeplink + QR code via `qrcode` package.
+- **Onboarding state machine (Day 1.4, steps 0 & 1)**:
+  - `supabase/migrations/20260521000000_onboarding_helpers.sql` — `set_onboarding_state()` stored proc with `pg_advisory_xact_lock`
+  - `src/server/telegram/onboarding/types.ts` — `OnboardingState`, `ParseResult`, `Question`, `OnboardingStep` interfaces
+  - `src/server/telegram/onboarding/state.ts` — `loadOnboardingState`, `advanceQuestion`, `resetOnboarding`
+  - `src/server/telegram/onboarding/memory.ts` — `upsertProfileSection` (regex replace-or-append on `athlete_profile.md`)
+  - `src/server/telegram/onboarding/dispatcher.ts` — `handleOnboardingMessage`: routes inbound text, re-asks on parse failure, calls `onComplete` at step end, advances to next step
+  - `src/server/telegram/onboarding/steps/00-basics.ts` — name, age, sex, timezone, days/hours per week; writes athletes row + Identity/Schedule sections
+  - `src/server/telegram/onboarding/steps/01-goals.ts` — distance, target, target_time (conditional skip), meaning; writes athletes.notes + Goals section
+  - `bot.ts` updated: `message:text` handler → dispatcher, real `/restart`, `handleStart` uses step-0 prompt
+  - 75 tests covering all parsers + state helpers + `upsertProfileSection`
 
 ---
 
@@ -49,8 +59,11 @@ Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Ant
 
 - [x] **Day 1.1** Migrations for full v1 schema (users, athletes, races, injuries, plans, plan_versions, memory_files, oauth_tokens, activities, messages, agent_runs, agent_run_steps, friend_allowlist, job_queue, link_tokens). RLS enabled on athlete-scoped tables (policies are a separate prompt). TS types generated. Seed self as athlete 1 — deferred to Day 1.5.
 - [x] **Day 1.2** Allowlist signup + Telegram link handshake (`/signup`, one-time `link_token`, deeplink + QR).
-- [ ] **Day 1.3** Telegram bot scaffold: webhook receiver, HMAC verification, inbound persist, outbound send helper, `/start <token>` handler.
+- [x] **Day 1.3** Telegram bot scaffold: webhook receiver, HMAC verification, inbound persist, outbound send helper, `/start <token>` handler.
 - [ ] **Day 1.4** Onboarding state machine (steps 0–5, write-through to memory files, BYO-plan prompt send, David alert).
+  - [x] Framework (types, state, memory, dispatcher) + Steps 0 & 1 — done
+  - [ ] Steps 2–5 (goal race, injury history, free text, recent mileage) — Prompts 11–13
+  - [ ] BYO-plan prompt send + David alert — later prompt
 - [ ] **Day 1.5** End-to-end self-test: re-onboard from scratch, verify all DB rows, fix conversational tone.
 
 ### Week 2 — Strava OAuth + BYO-plan paste-back
@@ -120,4 +133,9 @@ Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Ant
 
 ## Likely next task
 
-Day 1.3: Telegram bot scaffold — webhook receiver at `/api/tg/webhook` (HMAC secret-token verification), inbound persist to `messages`, outbound send helper (4096-char chunking, MarkdownV2), `/start <token>` handler that resolves the token → links `telegram_chat_id` to `athlete_id` → sends welcome + kicks off onboarding step 0.
+Steps 2–5 of the onboarding state machine (Prompts 11–13):
+- Step 2 — goal race (name, WebFetch for details, tune-up races, PR baseline) → `race_calendar.md` + `personal_records.md`
+- Step 3 — injury history (inline keyboard picker, severity/active/notes) → `athlete_profile.md`
+- Step 4 — free text "anything else" → `athlete_profile.md`
+- Step 5 — recent mileage self-report (avg weekly + longest run) → `athlete_profile.md`
+- BYO-plan prompt send + `plan_versions` row (status=awaiting_paste) + David alert
