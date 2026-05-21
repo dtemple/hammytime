@@ -1,5 +1,10 @@
 import { Bot, CommandContext, Context } from "grammy";
 import { supabaseAdmin } from "@/lib/db";
+import {
+  handleOnboardingMessage,
+  onboardingSteps,
+  resetOnboarding,
+} from "./onboarding/index";
 
 let _bot: Bot | null = null;
 
@@ -42,7 +47,11 @@ async function handleStart(ctx: CommandContext<Context>): Promise<void> {
 
   if (!data.ok) {
     const reason = data.reason as string;
-    if (reason === "not_found" || reason === "expired" || reason === "already_used") {
+    if (
+      reason === "not_found" ||
+      reason === "expired" ||
+      reason === "already_used"
+    ) {
       await ctx.reply(
         "That link has expired or already been used. Head back to the signup page to get a fresh one."
       );
@@ -65,8 +74,62 @@ async function handleStart(ctx: CommandContext<Context>): Promise<void> {
   await sendAndLog(
     athleteId,
     ctx.chat.id,
-    "Hi — I'm your training coach. We'll spend a few minutes getting set up, then I'll give you a prompt to take to Claude or ChatGPT so you can build your plan. First — what's your name?"
+    "Hi — I'm your training coach. We'll spend a few minutes getting you set up, then I'll give you a prompt to take to Claude or ChatGPT to build your training plan."
   );
+
+  // Ask the first onboarding question
+  const firstQuestion = onboardingSteps[0]?.questions[0];
+  if (firstQuestion) {
+    await sendAndLog(athleteId, ctx.chat.id, firstQuestion.prompt);
+  }
+}
+
+async function handleRestart(ctx: CommandContext<Context>): Promise<void> {
+  const db = supabaseAdmin();
+  const { data: athlete, error } = await db
+    .from("athletes")
+    .select("id")
+    .eq("telegram_chat_id", String(ctx.chat.id))
+    .maybeSingle();
+
+  if (error || !athlete) {
+    await ctx.reply("No account linked to this chat.");
+    return;
+  }
+
+  await resetOnboarding(athlete.id);
+
+  await ctx.reply("Starting over from the beginning.");
+
+  const firstQuestion = onboardingSteps[0]?.questions[0];
+  if (firstQuestion) {
+    await sendAndLog(athlete.id, ctx.chat.id, firstQuestion.prompt);
+  }
+}
+
+async function handleInboundText(ctx: Context): Promise<void> {
+  const db = supabaseAdmin();
+  const { data: athlete, error } = await db
+    .from("athletes")
+    .select("*")
+    .eq("telegram_chat_id", String(ctx.chat!.id))
+    .maybeSingle();
+
+  if (error || !athlete) {
+    await ctx.reply("Use your invite link to get started.");
+    return;
+  }
+
+  const state = athlete.onboarding_state as { step?: number } | null;
+  const step = typeof state?.step === "number" ? state.step : 0;
+
+  if (step < onboardingSteps.length) {
+    await handleOnboardingMessage(ctx, athlete);
+    return;
+  }
+
+  // REPLACE-IN-PROMPT-13
+  await ctx.reply("Your onboarding is complete — daily coaching is coming soon.");
 }
 
 function getBot(): Bot {
@@ -76,9 +139,12 @@ function getBot(): Bot {
     _bot = new Bot(token);
     _bot.command("ping", (ctx) => ctx.reply("pong"));
     _bot.command("start", handleStart);
-    _bot.command("restart", (ctx) =>
-      ctx.reply("Resetting onboarding isn't wired yet — ping David.")
-    );
+    _bot.command("restart", handleRestart);
+    _bot.on("message:text", async (ctx) => {
+      if (!ctx.message.text.startsWith("/")) {
+        await handleInboundText(ctx);
+      }
+    });
   }
   return _bot;
 }
