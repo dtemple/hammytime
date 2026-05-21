@@ -1,3 +1,4 @@
+import { execSync } from "child_process";
 import { Bot, CommandContext, Context } from "grammy";
 import { supabaseAdmin } from "@/lib/db";
 import {
@@ -8,6 +9,14 @@ import {
 } from "./onboarding/index";
 
 let _bot: Bot | null = null;
+
+function getBuildInfo(): string | null {
+  try {
+    return execSync('git log -1 --format="%h — %s"').toString().trim();
+  } catch {
+    return null;
+  }
+}
 
 // Sends a message and persists it to the messages table (direction = 'out').
 export async function sendAndLog(
@@ -102,6 +111,9 @@ async function handleRestart(ctx: CommandContext<Context>): Promise<void> {
 
   await ctx.reply("Starting over from the beginning.");
 
+  const build = getBuildInfo();
+  if (build) await ctx.reply(`[build: ${build}]`);
+
   const firstQuestion = onboardingSteps[0]?.questions[0];
   if (firstQuestion) {
     await sendAndLog(athlete.id, ctx.chat.id, firstQuestion.prompt);
@@ -129,8 +141,42 @@ async function handleInboundText(ctx: Context): Promise<void> {
     return;
   }
 
-  // REPLACE-IN-PROMPT-13
-  await ctx.reply("Your onboarding is complete — daily coaching is coming soon.");
+  // Post-onboarding: route based on plan state
+  const { data: plan } = await db
+    .from("plans")
+    .select("id")
+    .eq("athlete_id", athlete.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!plan) {
+    // Help path (no plan row created) or unexpected state
+    await ctx.reply("Sit tight — David's on it. He'll be in touch.");
+    return;
+  }
+
+  const { data: version } = await db
+    .from("plan_versions")
+    .select("status")
+    .eq("plan_id", plan.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!version) {
+    console.warn("[bot] athlete has a plan row but no plan_versions row", athlete.id);
+    await ctx.reply("Your onboarding is complete — daily coaching is coming soon.");
+    return;
+  }
+
+  if (version.status === "awaiting_paste") {
+    await ctx.reply("Drop your plan JSON here when you're ready. (Or `/restart` to start over.)");
+  } else if (version.status === "active") {
+    await ctx.reply("All set. Daily check-ins start when that side of the bot ships.");
+  } else {
+    await ctx.reply("Your onboarding is complete — daily coaching is coming soon.");
+  }
 }
 
 function getBot(): Bot {

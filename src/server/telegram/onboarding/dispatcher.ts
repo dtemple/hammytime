@@ -189,13 +189,7 @@ async function completeStep(
   };
   await advanceQuestion(athleteId, terminalState);
 
-  // REPLACE-IN-PROMPT-13
-  await sendAndLog(
-    athleteId,
-    chatId,
-    "Step 3 complete. (Steps 4–5 ship in subsequent prompts. /restart to go again.)"
-  );
-
+  // All steps complete — no message here; step 6's build/help handlers already sent confirmation.
   return false;
 }
 
