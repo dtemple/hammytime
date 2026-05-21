@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-05-21 (session 9 — onboarding step 2 races + agentic race lookup)_
+_Updated: 2026-05-21 (session 10 — onboarding steps 4-5 + plan-acquisition fork + BYO handoff)_
 
 ---
 
@@ -12,9 +12,9 @@ A multi-tenant Telegram-based marathon coaching bot for ~5–25 friends. Daily c
 
 ## Current status
 
-**Week 1, Day 1.4 continuing — onboarding step 2 (races) complete. Steps 3–5 remain.**
+**Week 1, Day 1.4 complete — full onboarding conversation (steps 0–6) ships. First friend can now reach `awaiting_paste` state.**
 
-Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Anthropic client, Sentry, Telegram scaffold, Strava OAuth, `/signup` page, onboarding state-machine framework, steps 0, 1, and 2 are all in place. First Anthropic Messages API call with web_search tool use ships in `lookupRace`.
+All 7 onboarding steps are in place. The bot captures everything it needs, sends the BYO-plan prompt template, and alerts David. The `awaiting_paste` terminal state is wired; plan paste-back validation is Week 2.
 
 ---
 
@@ -62,8 +62,10 @@ Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Ant
 - [x] **Day 1.3** Telegram bot scaffold: webhook receiver, HMAC verification, inbound persist, outbound send helper, `/start <token>` handler.
 - [ ] **Day 1.4** Onboarding state machine (steps 0–5, write-through to memory files, BYO-plan prompt send, David alert).
   - [x] Framework (types, state, memory, dispatcher) + Steps 0 & 1 — done
-  - [ ] Steps 2–5 (goal race, injury history, free text, recent mileage) — Prompts 11–13
-  - [ ] BYO-plan prompt send + David alert — later prompt
+  - [x] Step 2 — goal race + tune-ups + PR baseline (Prompt 11)
+  - [x] Step 3 — injury history inline keyboard (Prompt 12)
+  - [x] Steps 4–5 + plan-fork (step 6) — free text, recent mileage, BYO handoff (Prompt 13)
+  - [x] BYO-plan prompt send + David alert — done
 - [ ] **Day 1.5** End-to-end self-test: re-onboard from scratch, verify all DB rows, fix conversational tone.
 
 ### Week 2 — Strava OAuth + BYO-plan paste-back
@@ -111,7 +113,7 @@ Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Ant
 | Milestone                                   | Target        | Status      |
 | ------------------------------------------- | ------------- | ----------- |
 | `/api/health` returns 200 (all green)       | End of Week 0 | Not started |
-| First friend reaches `awaiting_paste` state | End of Week 1 | Not started |
+| First friend reaches `awaiting_paste` state | End of Week 1 | ✅ Wired (pending e2e test) |
 | First active plan in the system             | End of Week 2 | Not started |
 | Daily loop running on David for 5 days      | End of Week 4 | Not started |
 | First alpha friend onboarded                | Week 5        | Not started |
@@ -133,9 +135,9 @@ Next.js scaffold, Supabase client, full v0.3 schema, `/api/health` endpoint, Ant
 
 ## Likely next task
 
-Steps 2–5 of the onboarding state machine (Prompts 11–13):
-- Step 2 — goal race (name, WebFetch for details, tune-up races, PR baseline) → `race_calendar.md` + `personal_records.md`
-- Step 3 — injury history (inline keyboard picker, severity/active/notes) → `athlete_profile.md`
-- Step 4 — free text "anything else" → `athlete_profile.md`
-- Step 5 — recent mileage self-report (avg weekly + longest run) → `athlete_profile.md`
-- BYO-plan prompt send + `plan_versions` row (status=awaiting_paste) + David alert
+Day 1.5 end-to-end self-test (Prompt 14):
+- Set `DAVID_TELEGRAM_CHAT_ID` in `.env.local`
+- Apply migration (`supabase db reset` or push `20260521000002_plan_versions_json_nullable.sql`)
+- `/restart` → walk all 7 steps, choose `build` → verify DB rows and David alert
+- Review conversational tone, fix anything that reads wrong
+- Then: Week 2 — Strava OAuth bot-side trigger + BYO-plan paste-back validation (Prompt 15)
