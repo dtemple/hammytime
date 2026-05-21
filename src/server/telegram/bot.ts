@@ -1,6 +1,7 @@
 import { Bot, CommandContext, Context } from "grammy";
 import { supabaseAdmin } from "@/lib/db";
 import {
+  handleOnboardingCallback,
   handleOnboardingMessage,
   onboardingSteps,
   resetOnboarding,
@@ -144,6 +145,36 @@ function getBot(): Bot {
       if (!ctx.message.text.startsWith("/")) {
         await handleInboundText(ctx);
       }
+    });
+    _bot.on("callback_query:data", async (ctx) => {
+      const data = ctx.callbackQuery.data;
+      const db = supabaseAdmin();
+      const { data: athlete } = await db
+        .from("athletes")
+        .select("*")
+        .eq("telegram_chat_id", String(ctx.from.id))
+        .maybeSingle();
+
+      if (!athlete) {
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      const state = athlete.onboarding_state as { step?: number } | null;
+      const stepIdx = typeof state?.step === "number" ? state.step : 0;
+
+      if (stepIdx >= onboardingSteps.length) {
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      const step = onboardingSteps[stepIdx];
+      if (!step?.handleCallback) {
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      await handleOnboardingCallback(ctx, athlete, data);
     });
   }
   return _bot;

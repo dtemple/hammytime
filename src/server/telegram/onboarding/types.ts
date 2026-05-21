@@ -1,3 +1,5 @@
+import type { InlineKeyboard } from "grammy";
+
 export interface OnboardingState {
   step: number;
   question: number;
@@ -18,10 +20,23 @@ export interface Question<T = unknown> {
   skip?: (partial: Record<string, unknown>) => boolean;
 }
 
-// Returned by OnboardingStep.handleMessage for steps that manage their own sub-flow.
+// Returned by OnboardingStep.handleMessage / handleCallback for steps that manage their own sub-flow.
 export type StepHandleResult =
-  | { done: false; newPartial: Record<string, unknown>; reply: string }
-  | { done: true; newPartial: Record<string, unknown> };
+  | {
+      done: false;
+      newPartial: Record<string, unknown>;
+      reply?: string;
+      // If set, dispatcher calls ctx.editMessageReplyMarkup with this keyboard.
+      replyMarkup?: InlineKeyboard;
+      // If set, dispatcher answers callback query with show_alert:true.
+      alertText?: string;
+    }
+  | {
+      done: true;
+      newPartial: Record<string, unknown>;
+      // If set, dispatcher sends this before calling onComplete.
+      reply?: string;
+    };
 
 export interface OnboardingStep {
   id: string;
@@ -39,7 +54,15 @@ export interface OnboardingStep {
     partial: Record<string, unknown>,
     athleteId: string
   ) => Promise<StepHandleResult>;
+  // If defined, the dispatcher delegates callback_query:data events to this method.
+  handleCallback?: (
+    data: string,
+    partial: Record<string, unknown>,
+    athleteId: string
+  ) => Promise<StepHandleResult>;
   // Sent when the dispatcher first transitions into this step. Used by steps
   // with handleMessage to fire the opening question without needing a dummy Question entry.
   initialPrompt?: string;
+  // If set, sent alongside initialPrompt as reply_markup (inline keyboard).
+  initialKeyboard?: InlineKeyboard;
 }

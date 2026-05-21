@@ -1,7 +1,7 @@
 import type { Context } from "grammy";
 import { supabaseAdmin } from "@/lib/db";
 import type { Database } from "@/lib/db-types";
-import { sendAndLog } from "../bot";
+import { sendAndLog, telegramBot } from "../bot";
 import { advanceQuestion, loadOnboardingState } from "./state";
 import type { OnboardingState, Question } from "./types";
 import { onboardingSteps } from "./index";
@@ -73,10 +73,11 @@ export async function handleOnboardingMessage(
         question: 0,
         partial: result.newPartial,
       });
-      await sendAndLog(athleteId, chatId, result.reply);
+      if (result.reply) await sendAndLog(athleteId, chatId, result.reply);
       return true;
     }
     // Step complete: run onComplete then advance to next step
+    if (result.reply) await sendAndLog(athleteId, chatId, result.reply);
     await step.onComplete(athleteId, result.newPartial);
     return await completeStep(athleteId, chatId, { ...state, partial: result.newPartial });
   }
@@ -145,7 +146,18 @@ async function completeStep(
         partial: {},
       };
       await advanceQuestion(athleteId, newState);
-      if (nextStep.initialPrompt) {
+      if (nextStep.initialKeyboard && nextStep.initialPrompt) {
+        // Send initialPrompt with inline keyboard; log separately (sendAndLog uses plain text API)
+        await telegramBot().api.sendMessage(chatId, nextStep.initialPrompt, {
+          reply_markup: nextStep.initialKeyboard,
+        });
+        await supabaseAdmin().from("messages").insert({
+          athlete_id: athleteId,
+          channel: "tg",
+          direction: "out",
+          body: nextStep.initialPrompt,
+        });
+      } else if (nextStep.initialPrompt) {
         await sendAndLog(athleteId, chatId, nextStep.initialPrompt);
       }
       return true;
@@ -177,12 +189,61 @@ async function completeStep(
   };
   await advanceQuestion(athleteId, terminalState);
 
-  // REPLACE-IN-PROMPT-12
+  // REPLACE-IN-PROMPT-13
   await sendAndLog(
     athleteId,
     chatId,
-    "Step 2 complete. Steps 3–5 ship in a later update. Type /restart to go again."
+    "Step 3 complete. (Steps 4–5 ship in subsequent prompts. /restart to go again.)"
   );
 
   return false;
+}
+
+/**
+ * Routes an inbound callback_query:data event through the onboarding state machine.
+ * Mirrors handleOnboardingMessage but delegates to handleCallback instead of handleMessage.
+ */
+export async function handleOnboardingCallback(
+  ctx: Context,
+  athlete: AthleteRow,
+  data: string
+): Promise<void> {
+  const athleteId = athlete.id;
+  const chatId = ctx.chat!.id;
+  const state = await loadOnboardingState(athleteId);
+
+  const step = onboardingSteps[state.step];
+  if (!step?.handleCallback) {
+    await ctx.answerCallbackQuery();
+    return;
+  }
+
+  const result = await step.handleCallback(data, state.partial, athleteId);
+
+  // Dismiss the spinner; show alert if the step requested one
+  if (!result.done && result.alertText) {
+    await ctx.answerCallbackQuery({ text: result.alertText, show_alert: true });
+  } else {
+    await ctx.answerCallbackQuery();
+  }
+
+  if (result.done) {
+    if (result.reply) await sendAndLog(athleteId, chatId, result.reply);
+    await step.onComplete(athleteId, result.newPartial);
+    await completeStep(athleteId, chatId, { ...state, partial: result.newPartial });
+    return;
+  }
+
+  await advanceQuestion(athleteId, {
+    step: state.step,
+    question: 0,
+    partial: result.newPartial,
+  });
+
+  if (result.replyMarkup) {
+    await ctx.editMessageReplyMarkup({ reply_markup: result.replyMarkup });
+  }
+  if (result.reply) {
+    await sendAndLog(athleteId, chatId, result.reply);
+  }
 }

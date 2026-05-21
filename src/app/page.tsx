@@ -1,65 +1,88 @@
-import Image from 'next/image';
+import type { Metadata } from 'next';
+import Link from 'next/link';
+import CheckinBubble from '@/components/CheckinBubble';
+
+export const metadata: Metadata = {
+  title: 'HammyTime',
+  description: 'Marathon coaching, every morning in Telegram.',
+};
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <div className="ht-page">
+      <header className="ht-header">
+        <Link href="/" className="ht-brand">
+          <span className="ht-brand-dot" aria-hidden="true" />
+          HammyTime
+        </Link>
+        <nav className="ht-nav">
+          <Link href="/login">Log in</Link>
+        </nav>
+      </header>
+
+      <main className="ht-main">
+        <section className="ht-hero">
+          <div className="ht-eyebrow">MARATHON COACHING · TELEGRAM · INVITE ONLY</div>
+          <h1 className="ht-h1">
+            Achieve your goals{' '}
+            <span className="ht-h1-accent">without getting injured</span>.
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{' '}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{' '}
-            or the{' '}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{' '}
-            center.
+          <p className="ht-lede">
+            Training plans are helpful, but life and injuries get in the way. HammyTime reads your
+            Strava, remembers your past injuries, and helps you adjust your plan each week to
+            maximize your chance of success and minimize your chance of getting injured.
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+          <div className="ht-cta-row">
+            <Link href="/signup" className="ht-btn ht-btn-primary">
+              Get started <span className="ht-arrow">→</span>
+            </Link>
+            <Link href="#how" className="ht-btn ht-btn-ghost">
+              What it does
+            </Link>
+          </div>
+        </section>
+
+        <CheckinBubble />
+
+        <section id="how" className="ht-steps">
+          <div className="ht-step">
+            <div className="ht-step-num">01</div>
+            <div>
+              <h3>Prevent injuries</h3>
+              <p>
+                HammyTime adjusts your plan as you go to account for flare&#8209;ups, tweaks, and past injuries.
+              </p>
+            </div>
+          </div>
+          <div className="ht-step">
+            <div className="ht-step-num">02</div>
+            <div>
+              <h3>Adjusts to real life</h3>
+              <p>
+                Training plans assume perfectly-spaced rest days, intervals and long runs. But life doesn't always line up that way. HammyTime helps you work through adjustments so that you can stick to the plan while minimizing injury risks.
+              </p>
+            </div>
+          </div>
+          <div className="ht-step">
+            <div className="ht-step-num">03</div>
+            <div>
+              <h3>Daily check&#8209;ins</h3>
+              <p>
+                Research shows that a self-reported check-in beats data like HRV for injury prevention&emdash;and it takes just two minutes a day.
+              </p>
+            </div>
+          </div>
+        </section>
       </main>
+
+      <footer className="ht-footer">
+        <span>© 2026 HammyTime</span>
+        <span className="ht-footer-links">
+          <Link href="/about">About</Link>
+          <Link href="/privacy">Privacy</Link>
+          <Link href="/terms">Terms</Link>
+        </span>
+      </footer>
     </div>
   );
 }
