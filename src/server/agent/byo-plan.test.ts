@@ -14,6 +14,15 @@ vi.mock("@/server/telegram/onboarding/index", () => ({
 vi.mock("@/server/admin/alerts", () => ({
   sendDavidAlert: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("crypto", async () => {
+  const actual = await vi.importActual<typeof import("crypto")>("crypto");
+  return {
+    ...actual,
+    randomBytes: vi.fn().mockReturnValue({
+      toString: () => "mock-paste-token-base64url",
+    }),
+  };
+});
 
 import { supabaseAdmin } from "@/lib/db";
 import { sendAndLog } from "@/server/telegram/bot";
@@ -135,7 +144,12 @@ function makeFullDb(overrides: {
       single: vi.fn().mockResolvedValue({ data: { id: "plan-1" }, error: null }),
     }),
   }));
-  const planVersionInsert = vi.fn().mockResolvedValue({ data: { id: "version-1" }, error: null });
+  const planVersionInsert = vi.fn().mockImplementation(() => ({
+    select: vi.fn().mockReturnValue({
+      single: vi.fn().mockResolvedValue({ data: { id: "version-1" }, error: null }),
+    }),
+  }));
+  const linkTokenInsert = vi.fn().mockResolvedValue({ error: null });
 
   const fromMock = vi.fn().mockImplementation((table: string) => {
     if (table === "athletes") {
@@ -182,10 +196,13 @@ function makeFullDb(overrides: {
     if (table === "plan_versions") {
       return { insert: planVersionInsert };
     }
+    if (table === "link_tokens") {
+      return { insert: linkTokenInsert };
+    }
     return {};
   });
 
-  return { fromMock, insertMock, planVersionInsert };
+  return { fromMock, insertMock, planVersionInsert, linkTokenInsert };
 }
 
 beforeEach(() => {
@@ -216,16 +233,44 @@ describe("handleBuildPath", () => {
     );
   });
 
-  it("sends cover note + at least one template chunk via sendAndLog", async () => {
+  it("mints a link_tokens row with purpose='plan_paste' and athlete_id", async () => {
+    const db = makeFullDb();
+    (supabaseAdmin as AnyMock).mockReturnValue({ from: db.fromMock });
+
+    await handleBuildPath("athlete-1");
+
+    expect(db.linkTokenInsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: "plan_paste",
+        athlete_id: "athlete-1",
+        plan_version_id: "version-1",
+      })
+    );
+  });
+
+  it("sends cover note containing the paste URL", async () => {
     const db = makeFullDb();
     (supabaseAdmin as AnyMock).mockReturnValue({ from: db.fromMock });
 
     await handleBuildPath("athlete-1");
 
     const calls = (sendAndLog as AnyMock).mock.calls as unknown[][];
-    expect(calls.length).toBeGreaterThanOrEqual(2);
-    // First call is the cover note
-    expect(calls[0]![2]).toContain("paste it into Claude or ChatGPT");
+    // Cover note is the first sendAndLog call
+    const coverNote = calls[0]![2] as string;
+    expect(coverNote).toContain("paste it into Claude or ChatGPT");
+    expect(coverNote).toContain("mock-paste-token-base64url");
+  });
+
+  it("sends postfix message containing the paste URL after template chunks", async () => {
+    const db = makeFullDb();
+    (supabaseAdmin as AnyMock).mockReturnValue({ from: db.fromMock });
+
+    await handleBuildPath("athlete-1");
+
+    const calls = (sendAndLog as AnyMock).mock.calls as unknown[][];
+    const lastCall = calls[calls.length - 1]![2] as string;
+    expect(lastCall).toContain("mock-paste-token-base64url");
+    expect(lastCall.toLowerCase()).toContain("paste link");
   });
 
   it("fires sendDavidAlert with 'build path'", async () => {

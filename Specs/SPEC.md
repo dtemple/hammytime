@@ -9,6 +9,16 @@ This doc covers: sequencing + rough costing, technical implementation plan, open
 
 ### Change log
 
+- **v0.4.1 (2026-05-21) — paste page + validator + URL handoff.**
+  - `link_tokens` extended: `purpose ('start'|'plan_paste'|'upload')`, `plan_version_id` FK, `email` made nullable.
+  - New routes: `/p/[token]` (paste page — shows copyable BYO-plan prompt + JSON paste form) and `/api/plans/paste` (validates + persists plan JSON, marks token used, fires Telegram confirmation + David alert).
+  - New `accept_plan_paste` Postgres RPC handles the atomic update (plan_versions → active, plans.current_version_id, link_tokens.used_at).
+  - Plan Zod schema at `src/lib/plan-schema.ts` mirrors `byo_plan_template.md` Output Schema exactly; 3 refinements (target_time_sec required for time goals, weeks.length === total_weeks, phases cover week range with no gaps/overlaps).
+  - 9-rule safety validator at `src/server/agent/plan-validator.ts`; all errors gathered before returning.
+  - `handleBuildPath` now mints a `plan_paste` token (30-day TTL) and includes the paste URL in both the cover note and a postfix message after the template chunks.
+  - Bot's `awaiting_paste` handler looks up the athlete's live paste token and returns the URL, or prompts `/restart` if expired/used.
+  - `loadAthleteData`, `buildTemplateValues`, `extractNotesValue` exported from `byo-plan.ts` so the paste page server component can re-render the prompt without a second data layer.
+
 - **v0.3 (2026-05-18) — scope cuts locked, week 0–1 detailed.**
   - Onboarding is **Telegram-conversational**; web app shrinks to a minimalist signup page + admin. No web onboarding flow.
   - Plan generation is **BYO-plan**: the bot hands the athlete a templated prompt with their onboarding answers baked in; they iterate in their own Claude or ChatGPT session and paste the resulting JSON plan back. Server validates against schema. Removes the server-side plan-generation pipeline from v1 entirely.
