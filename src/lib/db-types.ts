@@ -351,27 +351,33 @@ export type Database = {
         Row: {
           athlete_id: string | null
           created_at: string
-          email: string
+          email: string | null
           expires_at: string
           id: string
+          plan_version_id: string | null
+          purpose: string
           token: string
           used_at: string | null
         }
         Insert: {
           athlete_id?: string | null
           created_at?: string
-          email: string
+          email?: string | null
           expires_at: string
           id?: string
+          plan_version_id?: string | null
+          purpose?: string
           token: string
           used_at?: string | null
         }
         Update: {
           athlete_id?: string | null
           created_at?: string
-          email?: string
+          email?: string | null
           expires_at?: string
           id?: string
+          plan_version_id?: string | null
+          purpose?: string
           token?: string
           used_at?: string | null
         }
@@ -381,6 +387,13 @@ export type Database = {
             columns: ["athlete_id"]
             isOneToOne: false
             referencedRelation: "athletes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "link_tokens_plan_version_id_fkey"
+            columns: ["plan_version_id"]
+            isOneToOne: false
+            referencedRelation: "plan_versions"
             referencedColumns: ["id"]
           },
         ]
@@ -522,7 +535,7 @@ export type Database = {
           generated_by: string
           id: string
           plan_id: string
-          plan_json: Json
+          plan_json: Json | null
           schema_version: number
           status: string
           supersedes_id: string | null
@@ -534,7 +547,7 @@ export type Database = {
           generated_by: string
           id?: string
           plan_id: string
-          plan_json: Json
+          plan_json?: Json | null
           schema_version?: number
           status: string
           supersedes_id?: string | null
@@ -546,7 +559,7 @@ export type Database = {
           generated_by?: string
           id?: string
           plan_id?: string
-          plan_json?: Json
+          plan_json?: Json | null
           schema_version?: number
           status?: string
           supersedes_id?: string | null
@@ -624,6 +637,30 @@ export type Database = {
           },
         ]
       }
+      race_lookups: {
+        Row: {
+          created_at: string
+          expires_at: string
+          id: string
+          name_lower: string
+          result: Json
+        }
+        Insert: {
+          created_at?: string
+          expires_at: string
+          id?: string
+          name_lower: string
+          result: Json
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          name_lower?: string
+          result?: Json
+        }
+        Relationships: []
+      }
       races: {
         Row: {
           athlete_id: string
@@ -697,7 +734,25 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      accept_plan_paste: {
+        Args: {
+          p_link_token_id: string
+          p_plan_id: string
+          p_plan_json: Json
+          p_plan_version_id: string
+          p_start_date: string
+          p_total_weeks: number
+        }
+        Returns: undefined
+      }
+      link_start_handshake: {
+        Args: { p_telegram_chat_id: string; p_token: string }
+        Returns: Json
+      }
+      set_onboarding_state: {
+        Args: { p_athlete_id: string; p_new_state: Json }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
