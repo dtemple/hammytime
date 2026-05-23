@@ -2,12 +2,20 @@
 
 **Author:** dtemple
 **Date:** 2026-05-18 (v0.3); 2026-05-07 (v0.1)
-**Status:** draft v0.3
+**Status:** draft v0.6
 **Constraints baked in:** friends-only audience (~5–25), solo founder full-time, free for friends, 4–6 week launch, advice quality non-negotiable.
 
 This doc covers: sequencing + rough costing, technical implementation plan, open questions, technical risks, business risks. Built off the existing personal coach in this repo (`marathon_training_plan.json` + five memory files + Strava/Garmin/Claude agent loop).
 
 ### Change log
+
+- **v0.6 (2026-05-22) — paste-page removal + fork conditional.**
+  - Removed `/p/[token]` paste-page route and `/api/plans/paste` endpoint (dead surface until server-generate ships).
+  - `handleBuildPath` no longer mints `plan_paste` tokens; cover note no longer includes a paste URL. Still creates `plans` + `plan_versions` (status="awaiting_paste") rows and sends the BYO template. Dormant until server-generate replaces it pre-launch.
+  - Bot's `awaiting_paste` reply simplified to a placeholder ("Your plan is being set up. Daily coaching is coming soon."); link_tokens lookup removed.
+  - Plan fork (step 6) short-circuits if athlete already has an active or awaiting_paste `plan_versions` row — replies "Your plan is already loaded — moving on." and advances to terminal. This fires correctly on `/restart` after Prompt 14b imports a plan.
+  - One-off script `scripts/clear-athlete-plans.ts` added (commit for reproducibility; delete after use).
+  - `link_tokens.purpose`, `link_tokens.plan_version_id`, and `accept_plan_paste` RPC left in place — harmless unused schema; paste flow can be revived without a migration.
 
 - **v0.4.1 (2026-05-21) — paste page + validator + URL handoff.**
   - `link_tokens` extended: `purpose ('start'|'plan_paste'|'upload')`, `plan_version_id` FK, `email` made nullable.

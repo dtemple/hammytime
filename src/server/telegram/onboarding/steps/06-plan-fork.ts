@@ -1,3 +1,4 @@
+import { supabaseAdmin } from "@/lib/db";
 import { handleBuildPath, handleHelpPath } from "@/server/agent/byo-plan";
 import type { OnboardingStep, StepHandleResult } from "../types";
 
@@ -19,6 +20,35 @@ async function planForkHandleMessage(
   partial: Record<string, unknown>,
   athleteId: string
 ): Promise<StepHandleResult> {
+  // Short-circuit if the athlete already has a plan. This fires on /restart after
+  // Prompt 14b imports a plan, and pre-launch once server-generate ships.
+  const db = supabaseAdmin();
+  const { data: existingPlan } = await db
+    .from("plans")
+    .select("id")
+    .eq("athlete_id", athleteId)
+    .limit(1)
+    .maybeSingle();
+
+  if (existingPlan) {
+    const { data: existingVersion } = await db
+      .from("plan_versions")
+      .select("id")
+      .eq("plan_id", existingPlan.id)
+      .in("status", ["active", "awaiting_paste"])
+      .limit(1)
+      .maybeSingle();
+
+    if (existingVersion) {
+      return {
+        done: true,
+        newPartial: {},
+        reply: "Your plan is already loaded — moving on.",
+      };
+    }
+  }
+
+  // No existing plan — run the fork normally.
   const p = partial as Step6Partial;
   const subStep = p.sub_step ?? "choosing_path";
 
@@ -69,7 +99,7 @@ export const planForkStep: OnboardingStep = {
   initialPrompt: INITIAL_PROMPT,
   handleMessage: planForkHandleMessage,
   async onComplete(_athleteId, _partial) {
-    // State already advanced inside handleBuildPath / handleHelpPath.
-    // dispatcher.completeStep will also write the terminal state — harmless double-write.
+    // State already advanced inside handleBuildPath / handleHelpPath (or by the dispatcher
+    // when short-circuiting). dispatcher.completeStep will also write terminal state — harmless.
   },
 };

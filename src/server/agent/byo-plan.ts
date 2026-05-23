@@ -1,6 +1,5 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as crypto from "crypto";
 import { supabaseAdmin } from "@/lib/db";
 import { sendAndLog } from "@/server/telegram/bot";
 import { advanceQuestion } from "@/server/telegram/onboarding/state";
@@ -273,6 +272,9 @@ function capitalize(s: string): string {
 // ---------------------------------------------------------------------------
 // handleBuildPath
 // ---------------------------------------------------------------------------
+// DORMANT IN v0.6: only reached for athletes with no existing plan_versions row.
+// Server-generate path will replace this pre-launch.
+// ---------------------------------------------------------------------------
 
 export async function handleBuildPath(athleteId: string): Promise<void> {
   const db = supabaseAdmin();
@@ -321,41 +323,17 @@ export async function handleBuildPath(athleteId: string): Promise<void> {
     throw new Error(`handleBuildPath: plan_versions insert failed: ${versionErr?.message}`);
   }
 
-  // Mint a 30-day plan_paste token
-  const pasteToken = crypto.randomBytes(32).toString("base64url");
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  const { error: tokenErr } = await db.from("link_tokens").insert({
-    token: pasteToken,
-    purpose: "plan_paste",
-    athlete_id: athleteId,
-    plan_version_id: versionRow.id,
-    expires_at: expiresAt,
-  });
-  if (tokenErr) {
-    throw new Error(`handleBuildPath: link_tokens insert failed: ${tokenErr.message}`);
-  }
-
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-  const pasteUrl = `${baseUrl}/p/${pasteToken}`;
-
-  // Send cover note + chunked template + postfix with URL
+  // Send cover note + chunked template
   await sendAndLog(
     athleteId,
     chatId,
-    `Here's your prompt — paste it into Claude or ChatGPT, work with it until the plan feels right, then use this link to paste your plan back:\n\n${pasteUrl}\n\n(You can also send the JSON directly in this chat if you prefer.)`
+    `Here's your prompt — paste it into Claude or ChatGPT, work with it until the plan feels right, then paste the resulting JSON back here.`
   );
 
   const CHUNK_SIZE = 4096;
   for (let i = 0; i < rendered.length; i += CHUNK_SIZE) {
     await sendAndLog(athleteId, chatId, rendered.slice(i, i + CHUNK_SIZE));
   }
-
-  // Postfix so the URL doesn't get buried
-  await sendAndLog(
-    athleteId,
-    chatId,
-    `Paste link (in case it scrolled away): ${pasteUrl}`
-  );
 
   // Mark onboarding complete
   await advanceQuestion(athleteId, {

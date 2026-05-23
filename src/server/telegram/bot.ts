@@ -120,7 +120,7 @@ async function handleRestart(ctx: CommandContext<Context>): Promise<void> {
   }
 }
 
-async function handleInboundText(ctx: Context): Promise<void> {
+export async function handleInboundText(ctx: Context): Promise<void> {
   const db = supabaseAdmin();
   const { data: athlete, error } = await db
     .from("athletes")
@@ -171,24 +171,7 @@ async function handleInboundText(ctx: Context): Promise<void> {
   }
 
   if (version.status === "awaiting_paste") {
-    const { data: pasteToken } = await db
-      .from("link_tokens")
-      .select("token")
-      .eq("athlete_id", athlete.id)
-      .eq("purpose", "plan_paste")
-      .is("used_at", null)
-      .gt("expires_at", new Date().toISOString())
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (pasteToken) {
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-      const pasteUrl = `${baseUrl}/p/${pasteToken.token}`;
-      await ctx.reply(`Your paste link is still active: ${pasteUrl}\n\n(/restart to start over.)`);
-    } else {
-      await ctx.reply("Looks like your paste link expired or was used. /restart to get a new one.");
-    }
+    await ctx.reply("Your plan is being set up. Daily coaching is coming soon.");
   } else if (version.status === "active") {
     await ctx.reply("All set. Daily check-ins start when that side of the bot ships.");
   } else {
