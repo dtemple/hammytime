@@ -18,6 +18,8 @@
     "webhook:register": "tsx scripts/register-webhook.ts",
     "bot:dev": "tsx scripts/start-bot-polling.ts",
     "clear:plans": "tsx scripts/clear-athlete-plans.ts",
+    "plan:verify": "tsx scripts/verify-plan.ts",
+    "plan:import": "tsx scripts/import-plan.ts",
     "dev:all": "concurrently --names \"db,web,bot\" --prefix-colors \"cyan,magenta,yellow\" \"supabase start && tail -f /dev/null\" \"next dev\" \"npm:bot:dev\""
   },
   "dependencies": {

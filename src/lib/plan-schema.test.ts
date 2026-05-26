@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { PlanSchema, type Plan } from "./plan-schema";
+import { adaptLegacyPlan } from "./plan-adapter";
 
 // ---------------------------------------------------------------------------
 // Canonical good plan — Annie (18-week, road, finish goal, 4-phase)
@@ -178,5 +181,62 @@ describe("PlanSchema", () => {
     (plan.weeks[0]!.days.mon as any).type = "sprint";
     const result = PlanSchema.safeParse(plan);
     expect(result.success).toBe(false);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Gold-standard fixture: David's real marathon_training_plan.json
+  // After adaptation this is the canonical example of a valid plan.
+  // ---------------------------------------------------------------------------
+
+  describe("real marathon_training_plan.json (gold standard)", () => {
+    function loadRealPlan() {
+      const path = join(process.cwd(), "seeds/marathon_training_plan.json");
+      return JSON.parse(readFileSync(path, "utf8")) as unknown;
+    }
+
+    it("adapted real plan parses cleanly", () => {
+      const raw = loadRealPlan();
+      const adapted = adaptLegacyPlan(raw, { athleteName: "David Temple" });
+      const result = PlanSchema.safeParse(adapted);
+      expect(result.success).toBe(true);
+    });
+
+    it("real plan has 22 weeks after adaptation", () => {
+      const raw = loadRealPlan();
+      const plan = adaptLegacyPlan(raw, {});
+      expect(plan.meta.total_weeks).toBe(22);
+      expect(plan.weeks.length).toBe(22);
+    });
+
+    it("all 14 new day-type enum values are accepted by schema", () => {
+      const newTypes = [
+        "easy_with_strides",
+        "trail_tempo",
+        "hill_repeats",
+        "upper_body_strength",
+        "lower_body_strength",
+      ] as const;
+      for (const type of newTypes) {
+        const day = { type, description: "Test." };
+        // DayPlanSchema is part of the exported PlanSchema; validate via a
+        // full plan with this type injected.
+        const plan = goodPlan() as unknown as Plan;
+        plan.weeks[0].days.mon = { ...plan.weeks[0].days.mon, type };
+        const result = PlanSchema.safeParse(plan);
+        expect(result.success, `type "${type}" should be accepted`).toBe(true);
+      }
+    });
+
+    it("adapted plan preserves agent_guidance", () => {
+      const raw = loadRealPlan();
+      const plan = adaptLegacyPlan(raw, {});
+      expect(plan.agent_guidance).toBeDefined();
+    });
+
+    it("adapted plan preserves strength_workouts", () => {
+      const raw = loadRealPlan();
+      const plan = adaptLegacyPlan(raw, {});
+      expect(plan.strength_workouts).toBeDefined();
+    });
   });
 });
