@@ -1,60 +1,89 @@
 import { z } from "zod";
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 // ---------------------------------------------------------------------------
-// DayPlan
-//
-// type enum expanded to cover all values the real marathon_training_plan.json
-// uses (easy_with_strides, trail_tempo, hill_repeats, *_body_strength). The
-// original set covers BYO-plan paste-back; these additions make the schema
-// accept plans from the personal-coach format too.
+// Day types — exactly the values that appear in the canonical plan.
 // ---------------------------------------------------------------------------
 
-export const DayPlanSchema = z.object({
-  type: z.enum([
-    // original BYO types
-    "long_run",
-    "easy",
-    "tempo",
-    "hills",
-    "track",
-    "race",
-    "strength",
-    "cross",
-    "rest",
-    // v0.6 additions — present in the canonical marathon_training_plan.json
-    "easy_with_strides",
-    "trail_tempo",
-    "hill_repeats",
-    "upper_body_strength",
-    "lower_body_strength",
-  ]),
-  distance_mi: z.number().positive().optional(),
-  duration_min: z.number().nonnegative().optional(),
-  // Optional: BYO plans may supply this; the adapter maps target_rpe → this.
-  intensity_rpe: z.number().min(1).max(10).optional(),
+export const DayTypeEnum = z.enum([
+  "long_run",
+  "easy",
+  "easy_with_strides",
+  "hill_repeats",
+  "trail_tempo",
+  "upper_body_strength",
+  "lower_body_strength",
+  "race",
+  "rest",
+]);
+
+export type DayType = z.infer<typeof DayTypeEnum>;
+
+// ---------------------------------------------------------------------------
+// Day — array item in week.days.
+// Fields are a superset of what any single day uses; all are optional except
+// the three required on every day (day, type, description).
+// ---------------------------------------------------------------------------
+
+export const DaySchema = z.object({
+  day: z.string().min(1),                          // "Monday" … "Sunday"
+  date: z.string().regex(ISO_DATE).optional(),
+  type: DayTypeEnum,
+  category: z.enum(["run", "strength", "rest", "race"]).optional(),
   description: z.string().min(1),
-  notes: z.string().optional(),
+
+  // Run fields
+  planned_distance_miles: z.number().nonnegative().optional(),
+  intensity: z.string().optional(),                // "easy" | "hard" | "moderate_hard" etc.
+  target_hr_zone: z.tuple([z.number(), z.number()]).optional(),
+  target_rpe: z.tuple([z.number(), z.number()]).optional(),
+  prefer_trail: z.boolean().optional(),
+  include_elevation: z.boolean().optional(),
+
+  // Strength fields
+  planned_duration_min: z.number().nonnegative().optional(),
+  intensity_level: z.string().optional(),          // "standard" | "taper" | "race_week"
+  use_taper_sets: z.boolean().optional(),
+
+  // easy_with_strides fields
+  strides: z
+    .object({
+      count: z.tuple([z.number().int(), z.number().int()]),
+      duration_sec: z.number().int().positive(),
+      recovery: z.string(),
+    })
+    .optional(),
+
+  // hill_repeats fields
+  warmup_min: z.number().nonnegative().optional(),
+  cooldown_min: z.number().nonnegative().optional(),
+  repeats: z.number().int().positive().optional(),
+  repeat_duration_sec: z.number().int().positive().optional(),
+  recovery: z.string().optional(),
+  target_hill_grade_percent: z.tuple([z.number(), z.number()]).optional(),
+  uphill_hr_zone: z.tuple([z.number(), z.number()]).optional(),
+  uphill_rpe: z.tuple([z.number(), z.number()]).optional(),
+
+  // trail_tempo fields
+  tempo_block_min: z.number().nonnegative().optional(),
+
+  // race day fields
+  elevation_gain_ft: z.number().nonnegative().optional(),
+  target_strategy: z.string().optional(),
+
+  // long_run coaching flags (weeks 9+)
+  nutrition_note: z.string().optional(),
+  nutrition_practice: z.boolean().optional(),
+  power_hike_note: z.string().optional(),
+  power_hike_practice: z.boolean().optional(),
 });
 
-export type DayPlan = z.infer<typeof DayPlanSchema>;
+export type Day = z.infer<typeof DaySchema>;
 
 // ---------------------------------------------------------------------------
-// Week days — canonical shape uses named keys, not an array.
-// The adapter converts days arrays → this shape.
-// ---------------------------------------------------------------------------
-
-const WeekDaysSchema = z.object({
-  mon: DayPlanSchema,
-  tue: DayPlanSchema,
-  wed: DayPlanSchema,
-  thu: DayPlanSchema,
-  fri: DayPlanSchema,
-  sat: DayPlanSchema,
-  sun: DayPlanSchema,
-});
-
-// ---------------------------------------------------------------------------
-// Phase name enum (shared between phases array and weeks)
+// Phase (inside metadata.plan_structure.phases)
+// Uses a week-number list, not start/end ranges.
 // ---------------------------------------------------------------------------
 
 export const PhaseNameSchema = z.enum([
@@ -68,17 +97,10 @@ export const PhaseNameSchema = z.enum([
 
 export type PhaseName = z.infer<typeof PhaseNameSchema>;
 
-// ---------------------------------------------------------------------------
-// Phase entry
-// ---------------------------------------------------------------------------
-
 export const PhaseSchema = z.object({
   name: PhaseNameSchema,
-  start_week: z.number().int().positive(),
-  end_week: z.number().int().positive(),
-  // Optional: the personal-coach format stores a description that becomes
-  // focus after adaptation; BYO plans supply it directly.
-  focus: z.string().optional(),
+  weeks: z.array(z.number().int().positive()).min(1),
+  description: z.string().optional(),
 });
 
 export type Phase = z.infer<typeof PhaseSchema>;
@@ -89,117 +111,179 @@ export type Phase = z.infer<typeof PhaseSchema>;
 
 export const WeekSchema = z.object({
   week_number: z.number().int().positive(),
+  start_date: z.string().regex(ISO_DATE).optional(),
+  end_date: z.string().regex(ISO_DATE).optional(),
   phase: PhaseNameSchema,
-  // Optional: personal-coach plans don't have a per-week focus string.
-  focus: z.string().optional(),
-  planned_volume_mi: z.number().nonnegative(),
-  // Optional: personal-coach plans don't track per-week elevation.
-  planned_elevation_ft: z.number().nonnegative().optional(),
-  key_notes: z.string(),
-  days: WeekDaysSchema,
+  planned_total_run_miles: z.number().nonnegative().optional(),
+  coaching_note: z.string().optional(),
+  days: z.array(DaySchema).min(1),
 });
 
 export type Week = z.infer<typeof WeekSchema>;
 
 // ---------------------------------------------------------------------------
-// Goal race
+// Metadata — matches canonical plan's metadata object exactly.
 // ---------------------------------------------------------------------------
 
-const GoalRaceSchema = z
+const AthleteSchema = z.object({
+  age: z.number().int().positive().optional(),
+  sex: z.string().optional(),
+  baseline_weekly_miles: z
+    .object({ min: z.number().nonnegative(), max: z.number().nonnegative() })
+    .optional(),
+  baseline_long_run_miles: z.number().nonnegative().optional(),
+});
+
+const RaceSchema = z
   .object({
     name: z.string().min(1),
-    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be ISO 8601 date"),
-    distance_mi: z.number().positive(),
-    elevation_ft: z.number().nonnegative(),
-    terrain: z.enum(["road", "trail", "mixed"]),
-    target: z.enum(["finish", "time"]),
+    date: z.string().regex(ISO_DATE, "Must be ISO 8601 date"),
+    day_of_week: z.string().optional(),
+    distance_miles: z.number().positive(),
+    type: z.enum(["road", "trail", "mixed"]).optional(),
+    elevation_gain_ft: z.number().nonnegative().optional(),
+    goal: z.string().optional(),               // "finish" | "time" | freeform
     target_time_sec: z.number().int().positive().optional(),
   })
   .refine(
-    (r) => r.target !== "time" || r.target_time_sec !== undefined,
-    { message: 'target_time_sec is required when target is "time"', path: ["target_time_sec"] }
+    (r) => r.goal !== "time" || r.target_time_sec !== undefined,
+    {
+      message: 'target_time_sec is required when goal is "time"',
+      path: ["target_time_sec"],
+    }
   );
 
-// ---------------------------------------------------------------------------
-// Meta
-// ---------------------------------------------------------------------------
-
-const MetaSchema = z.object({
-  // Optional: personal-coach plans have no athlete name embedded. Import
-  // script injects it from the DB; BYO plans supply it directly.
-  athlete_name: z.string().min(1).optional(),
-  goal_race: GoalRaceSchema,
-  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be ISO 8601 date"),
+const PlanStructureSchema = z.object({
   total_weeks: z.number().int().positive(),
-  weekly_availability: z.object({
-    days_per_week: z.number().int().min(1).max(7),
-    // Optional: personal-coach plans record days_per_week but not hours.
-    hours_per_week: z.number().positive().optional(),
-  }),
+  start_date: z.string().regex(ISO_DATE, "Must be ISO 8601 date"),
+  end_date: z.string().regex(ISO_DATE).optional(),
+  days_per_week: z.number().int().min(1).max(7).optional(),
+  rest_day: z.string().optional(),
+  runs_per_week: z.number().int().nonnegative().optional(),
+  strength_sessions_per_week: z.number().int().nonnegative().optional(),
+  long_run_day: z.string().optional(),
+  phases: z.array(PhaseSchema).optional(),
+});
+
+const MetadataSchema = z.object({
+  athlete: AthleteSchema.optional(),
+  race: RaceSchema,
+  plan_structure: PlanStructureSchema,
 });
 
 // ---------------------------------------------------------------------------
-// Compliance rules
+// Agent guidance — fully typed; compliance_rules is a heterogeneous array
+// where each rule shares rule_id/description/action with optional extras.
 // ---------------------------------------------------------------------------
 
-const ComplianceRulesSchema = z.object({
-  hard_day_min_spacing_days: z.number().int().positive(),
-  max_week_volume_ramp_pct: z.number().positive(),
-  min_rest_days_per_week: z.number().int().nonnegative(),
-  long_run_cap_pct_of_week: z.number().positive(),
-  cutback_week_frequency: z.number().int().positive(),
-  cutback_volume_reduction_pct_min: z.number().positive(),
-  cutback_volume_reduction_pct_max: z.number().positive(),
+const PaceZoneSchema = z.object({
+  description: z.string(),
+  hr_zone: z.tuple([z.number(), z.number()]),
+  hr_percent_max: z.tuple([z.number(), z.number()]),
+  rpe: z.tuple([z.number(), z.number()]),
+});
+
+const ComplianceRuleSchema = z.object({
+  rule_id: z.string(),
+  description: z.string(),
+  action: z.string(),
+  threshold_percent: z.number().optional(),
+  condition: z.string().optional(),
+  max_increase_miles: z.number().optional(),
+  exception: z.string().optional(),
+  target: z.string().optional(),
+});
+
+const AgentGuidanceSchema = z.object({
+  description: z.string().optional(),
+  pace_zones: z
+    .object({
+      note: z.string().optional(),
+      easy: PaceZoneSchema,
+      long_run: PaceZoneSchema,
+      tempo: PaceZoneSchema,
+      hill_repeat: PaceZoneSchema,
+      strides: PaceZoneSchema,
+    })
+    .optional(),
+  compliance_rules: z.array(ComplianceRuleSchema).optional(),
+  modification_triggers: z
+    .object({
+      feeling_great: z.string(),
+      feeling_fatigued: z.string(),
+      time_crunched: z.string(),
+      weather_disruption: z.string(),
+    })
+    .optional(),
 });
 
 // ---------------------------------------------------------------------------
-// Race strategy
+// Strength workouts — typed to the two sessions in the canonical plan.
+// Exercise entries are heterogeneous: most have sets/reps; Foam Rolling has
+// duration_min/areas. All variant fields are optional.
 // ---------------------------------------------------------------------------
 
-const RaceStrategySchema = z.object({
-  pacing_approach: z.string().min(1),
-  fueling_approach: z.string().min(1),
-  key_landmarks_to_brief: z.array(z.string()),
+const ExerciseSchema = z.object({
+  name: z.string(),
+  sets: z.number().int().positive().optional(),
+  reps: z.number().optional(),
+  reps_unit: z.string().optional(),        // "per_side" | "per_leg" | "seconds" | …
+  taper_sets: z.number().int().optional(),
+  taper_reps: z.number().optional(),
+  muscle_group: z.string().optional(),
+  trail_note: z.string().optional(),
+  duration_min: z.number().nonnegative().optional(),     // Foam Rolling
+  taper_duration_min: z.number().nonnegative().optional(),
+  areas: z.array(z.string()).optional(),                  // Foam Rolling areas
+});
+
+const StrengthSessionSchema = z.object({
+  day: z.string(),
+  standard_duration_min: z.number().nonnegative(),
+  taper_duration_min: z.number().nonnegative(),
+  race_week_duration_min: z.number().nonnegative(),
+  exercises: z.array(ExerciseSchema),
+});
+
+const StrengthWorkoutsSchema = z.object({
+  upper_body: StrengthSessionSchema.optional(),
+  lower_body: StrengthSessionSchema.optional(),
 });
 
 // ---------------------------------------------------------------------------
-// Plan (root) — with refinements
+// Plan (root) — matches the canonical plan's top-level shape exactly.
 //
-// compliance_rules and race_strategy are optional because:
-//   - personal-coach plans store compliance rules inside agent_guidance
-//     (different structure entirely — not worth mapping 1:1 here)
-//   - race_strategy is absent from personal-coach plans; the adapter injects
-//     a SHIM placeholder. Making it optional lets the schema accept it as
-//     undefined too, for forward compatibility.
-//
-// agent_guidance and strength_workouts are preserved as-is (z.unknown()) so
-// the coaching wisdom in the personal-coach plan is not silently dropped when
-// the plan JSON is stored in plan_versions.
+// Refinements:
+//   1. weeks.length === metadata.plan_structure.total_weeks
+//   2. If phases are present, their week numbers cover 1..total_weeks exactly once.
 // ---------------------------------------------------------------------------
 
 export const PlanSchema = z
   .object({
-    schema_version: z.literal(1),
-    meta: MetaSchema,
-    phases: z.array(PhaseSchema).min(1),
+    $schema: z.string().optional(),
+    plan_version: z.string().optional(),
+    created: z.string().optional(),
+    metadata: MetadataSchema,
+    agent_guidance: AgentGuidanceSchema.optional(),
+    strength_workouts: StrengthWorkoutsSchema.optional(),
     weeks: z.array(WeekSchema).min(1),
-    compliance_rules: ComplianceRulesSchema.optional(),
-    race_strategy: RaceStrategySchema.optional(),
-    // v0.6 additions — preserve personal-coach plan sections verbatim.
-    agent_guidance: z.unknown().optional(),
-    strength_workouts: z.unknown().optional(),
   })
   .refine(
-    (p) => p.weeks.length === p.meta.total_weeks,
-    { message: "weeks array length must equal meta.total_weeks", path: ["weeks"] }
+    (p) => p.weeks.length === p.metadata.plan_structure.total_weeks,
+    {
+      message:
+        "weeks array length must equal metadata.plan_structure.total_weeks",
+      path: ["weeks"],
+    }
   )
   .refine(
     (p) => {
-      // Every week 1..total_weeks must be covered by exactly one phase
-      const totalWeeks = p.meta.total_weeks;
-      const covered = new Array(totalWeeks + 1).fill(0); // index by week_number
-      for (const ph of p.phases) {
-        for (let w = ph.start_week; w <= ph.end_week; w++) {
+      const phases = p.metadata.plan_structure.phases;
+      if (!phases || phases.length === 0) return true;
+      const totalWeeks = p.metadata.plan_structure.total_weeks;
+      const covered = new Array(totalWeeks + 1).fill(0);
+      for (const ph of phases) {
+        for (const w of ph.weeks) {
           if (w >= 1 && w <= totalWeeks) covered[w]++;
         }
       }
@@ -207,8 +291,8 @@ export const PlanSchema = z
     },
     {
       message:
-        "phases must cover every week from 1 to total_weeks exactly once (no gaps, no overlaps)",
-      path: ["phases"],
+        "metadata.plan_structure.phases must cover every week from 1 to total_weeks exactly once (no gaps, no overlaps)",
+      path: ["metadata", "plan_structure", "phases"],
     }
   );
 

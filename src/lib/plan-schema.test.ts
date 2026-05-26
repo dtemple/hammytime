@@ -1,242 +1,186 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { PlanSchema, type Plan } from "./plan-schema";
-import { adaptLegacyPlan } from "./plan-adapter";
+import { PlanSchema } from "./plan-schema";
 
 // ---------------------------------------------------------------------------
-// Canonical good plan — Annie (18-week, road, finish goal, 4-phase)
-// Uses the minimum set of weeks needed to satisfy all refinements.
-// Phase coverage: base 1-4, build 5-16 (weeks 5,6,7,8 cutback,9,10,11,12 cutback,13,14,15,16), taper 17-19, race 20
-// Keep it small: 4 weeks for a correct-shape plan.
+// Helpers
 // ---------------------------------------------------------------------------
 
-function makeRestDay() {
-  return { type: "rest" as const, description: "Full rest." };
-}
-
-function makeEasyDay(mi: number) {
-  return { type: "easy" as const, distance_mi: mi, intensity_rpe: 3, description: "Easy run." };
-}
-
-function makeLongRunDay(mi: number) {
-  return {
-    type: "long_run" as const,
-    distance_mi: mi,
-    intensity_rpe: 5,
-    description: "Long easy run.",
-  };
-}
-
-function makeWeek(
-  week_number: number,
-  phase: "base" | "build" | "cutback" | "peak" | "taper" | "race",
-  volume: number,
-  longRun: number
-) {
-  return {
-    week_number,
-    phase,
-    focus: "Build aerobic base.",
-    planned_volume_mi: volume,
-    planned_elevation_ft: 500,
-    key_notes: "Key week.",
-    days: {
-      mon: makeLongRunDay(longRun),
-      tue: makeEasyDay(volume * 0.15),
-      wed: makeRestDay(),
-      thu: makeEasyDay(volume * 0.15),
-      fri: makeRestDay(),
-      sat: makeEasyDay(volume * 0.2),
-      sun: makeEasyDay(volume * 0.15),
-    },
-  };
-}
-
-// 4-week plan: base 1-2, build 3, race 4
-function goodPlan() {
-  return {
-    schema_version: 1 as const,
-    meta: {
-      athlete_name: "Annie",
-      goal_race: {
-        name: "NYC Marathon",
-        date: "2026-11-01",
-        distance_mi: 26.2,
-        elevation_ft: 800,
-        terrain: "road" as const,
-        target: "finish" as const,
-      },
-      start_date: "2026-10-05", // 4 weeks before 2026-11-01 (within ±3d)
-      total_weeks: 4,
-      weekly_availability: { days_per_week: 5, hours_per_week: 8 },
-    },
-    phases: [
-      { name: "base" as const, start_week: 1, end_week: 2, focus: "Aerobic base." },
-      { name: "build" as const, start_week: 3, end_week: 3, focus: "Volume build." },
-      { name: "race" as const, start_week: 4, end_week: 4, focus: "Race week." },
-    ],
-    weeks: [
-      makeWeek(1, "base", 20, 6),
-      makeWeek(2, "base", 22, 7),
-      makeWeek(3, "build", 24, 8),
-      makeWeek(4, "race", 5, 1),
-    ],
-    compliance_rules: {
-      hard_day_min_spacing_days: 2,
-      max_week_volume_ramp_pct: 10,
-      min_rest_days_per_week: 1,
-      long_run_cap_pct_of_week: 35,
-      cutback_week_frequency: 4,
-      cutback_volume_reduction_pct_min: 20,
-      cutback_volume_reduction_pct_max: 30,
-    },
-    race_strategy: {
-      pacing_approach: "Even effort throughout.",
-      fueling_approach: "Gel every 45 minutes.",
-      key_landmarks_to_brief: ["mile 18 climb"],
-    },
-  };
+function loadCanonical(): unknown {
+  const path = join(process.cwd(), "seeds/marathon_training_plan.json");
+  return JSON.parse(readFileSync(path, "utf8"));
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// Gold-standard fixture: raw canonical plan parses cleanly, no adapter.
 // ---------------------------------------------------------------------------
 
-describe("PlanSchema", () => {
-  it("accepts a known-good plan", () => {
-    const result = PlanSchema.safeParse(goodPlan());
-    expect(result.success).toBe(true);
-  });
-
-  it("rejects missing schema_version", () => {
-    const plan = goodPlan();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    delete (plan as any).schema_version;
-    const result = PlanSchema.safeParse(plan);
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects schema_version !== 1", () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const plan = { ...goodPlan(), schema_version: 2 as any };
-    const result = PlanSchema.safeParse(plan);
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects target='time' with no target_time_sec (refinement)", () => {
-    const plan = goodPlan() as unknown as Plan;
-    plan.meta.goal_race = { ...plan.meta.goal_race, target: "time" };
-    const result = PlanSchema.safeParse(plan);
-    expect(result.success).toBe(false);
-    expect(JSON.stringify(result)).toContain("target_time_sec");
-  });
-
-  it("accepts target='time' with target_time_sec present", () => {
-    const plan = goodPlan() as unknown as Plan;
-    plan.meta.goal_race = {
-      ...plan.meta.goal_race,
-      target: "time",
-      target_time_sec: 14400,
-    };
-    const result = PlanSchema.safeParse(plan);
-    expect(result.success).toBe(true);
-  });
-
-  it("rejects weeks.length !== meta.total_weeks (refinement)", () => {
-    const plan = goodPlan();
-    plan.meta.total_weeks = 5; // but only 4 weeks in array
-    const result = PlanSchema.safeParse(plan);
-    expect(result.success).toBe(false);
-    expect(JSON.stringify(result)).toContain("total_weeks");
-  });
-
-  it("rejects a phase gap (week 2 not covered)", () => {
-    const plan = goodPlan();
-    // Phases cover only weeks 1, 3, 4 — gap at week 2
-    plan.phases = [
-      { name: "base", start_week: 1, end_week: 1, focus: "Base." },
-      { name: "build", start_week: 3, end_week: 3, focus: "Build." },
-      { name: "race", start_week: 4, end_week: 4, focus: "Race." },
-    ];
-    const result = PlanSchema.safeParse(plan);
-    expect(result.success).toBe(false);
-    expect(JSON.stringify(result)).toContain("phases");
-  });
-
-  it("rejects phase overlap (week 3 covered twice)", () => {
-    const plan = goodPlan();
-    plan.phases = [
-      { name: "base", start_week: 1, end_week: 3, focus: "Base." },
-      { name: "build", start_week: 3, end_week: 4, focus: "Build." },
-    ];
-    const result = PlanSchema.safeParse(plan);
-    expect(result.success).toBe(false);
-    expect(JSON.stringify(result)).toContain("phases");
-  });
-
-  it("rejects invalid day type", () => {
-    const plan = goodPlan();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (plan.weeks[0]!.days.mon as any).type = "sprint";
-    const result = PlanSchema.safeParse(plan);
-    expect(result.success).toBe(false);
-  });
-
-  // ---------------------------------------------------------------------------
-  // Gold-standard fixture: David's real marathon_training_plan.json
-  // After adaptation this is the canonical example of a valid plan.
-  // ---------------------------------------------------------------------------
-
-  describe("real marathon_training_plan.json (gold standard)", () => {
-    function loadRealPlan() {
-      const path = join(process.cwd(), "seeds/marathon_training_plan.json");
-      return JSON.parse(readFileSync(path, "utf8")) as unknown;
+describe("PlanSchema — canonical plan (gold standard)", () => {
+  it("raw plan parses cleanly — no adapter needed", () => {
+    const raw = loadCanonical();
+    const result = PlanSchema.safeParse(raw);
+    if (!result.success) {
+      console.error(
+        "Parse errors:",
+        result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`)
+      );
     }
+    expect(result.success).toBe(true);
+  });
 
-    it("adapted real plan parses cleanly", () => {
-      const raw = loadRealPlan();
-      const adapted = adaptLegacyPlan(raw, { athleteName: "David Temple" });
-      const result = PlanSchema.safeParse(adapted);
-      expect(result.success).toBe(true);
-    });
+  it("has 22 weeks matching metadata.plan_structure.total_weeks", () => {
+    const plan = PlanSchema.parse(loadCanonical());
+    expect(plan.metadata.plan_structure.total_weeks).toBe(22);
+    expect(plan.weeks.length).toBe(22);
+  });
 
-    it("real plan has 22 weeks after adaptation", () => {
-      const raw = loadRealPlan();
-      const plan = adaptLegacyPlan(raw, {});
-      expect(plan.meta.total_weeks).toBe(22);
-      expect(plan.weeks.length).toBe(22);
-    });
+  it("week 1 days is an array with 7 entries", () => {
+    const plan = PlanSchema.parse(loadCanonical());
+    expect(Array.isArray(plan.weeks[0]!.days)).toBe(true);
+    expect(plan.weeks[0]!.days.length).toBe(7);
+  });
 
-    it("all 14 new day-type enum values are accepted by schema", () => {
-      const newTypes = [
-        "easy_with_strides",
-        "trail_tempo",
-        "hill_repeats",
-        "upper_body_strength",
-        "lower_body_strength",
-      ] as const;
-      for (const type of newTypes) {
-        const day = { type, description: "Test." };
-        // DayPlanSchema is part of the exported PlanSchema; validate via a
-        // full plan with this type injected.
-        const plan = goodPlan() as unknown as Plan;
-        plan.weeks[0].days.mon = { ...plan.weeks[0].days.mon, type };
-        const result = PlanSchema.safeParse(plan);
-        expect(result.success, `type "${type}" should be accepted`).toBe(true);
-      }
-    });
+  it("week 1 Monday is a long_run", () => {
+    const plan = PlanSchema.parse(loadCanonical());
+    const monday = plan.weeks[0]!.days.find((d) => d.day === "Monday");
+    expect(monday?.type).toBe("long_run");
+  });
 
-    it("adapted plan preserves agent_guidance", () => {
-      const raw = loadRealPlan();
-      const plan = adaptLegacyPlan(raw, {});
-      expect(plan.agent_guidance).toBeDefined();
-    });
+  it("all 9 day types from the canonical plan are accepted by the schema", () => {
+    const plan = PlanSchema.parse(loadCanonical());
+    const types = new Set(plan.weeks.flatMap((w) => w.days.map((d) => d.type)));
+    const expected = [
+      "long_run", "easy", "easy_with_strides", "hill_repeats",
+      "trail_tempo", "upper_body_strength", "lower_body_strength", "race", "rest",
+    ];
+    for (const t of expected) {
+      expect(types.has(t as never), `type "${t}" should be present`).toBe(true);
+    }
+  });
 
-    it("adapted plan preserves strength_workouts", () => {
-      const raw = loadRealPlan();
-      const plan = adaptLegacyPlan(raw, {});
-      expect(plan.strength_workouts).toBeDefined();
+  it("agent_guidance is parsed and present", () => {
+    const plan = PlanSchema.parse(loadCanonical());
+    expect(plan.agent_guidance).toBeDefined();
+    expect(plan.agent_guidance!.compliance_rules).toBeDefined();
+    expect(plan.agent_guidance!.pace_zones).toBeDefined();
+    expect(plan.agent_guidance!.modification_triggers).toBeDefined();
+  });
+
+  it("strength_workouts is parsed and present", () => {
+    const plan = PlanSchema.parse(loadCanonical());
+    expect(plan.strength_workouts).toBeDefined();
+    expect(plan.strength_workouts!.upper_body).toBeDefined();
+    expect(plan.strength_workouts!.lower_body).toBeDefined();
+  });
+
+  it("no top-level fields silently dropped", () => {
+    const raw = loadCanonical() as Record<string, unknown>;
+    const plan = PlanSchema.parse(raw);
+    const rawKeys = Object.keys(raw).sort();
+    const planKeys = Object.keys(plan).sort();
+    for (const key of rawKeys) {
+      expect(planKeys, `top-level key "${key}" should survive parse`).toContain(key);
+    }
+  });
+
+  it("no week-level fields silently dropped (spot-check week 1)", () => {
+    const raw = loadCanonical() as { weeks: Record<string, unknown>[] };
+    const plan = PlanSchema.parse(raw);
+    const rawWeek1 = raw.weeks[0]!;
+    const parsedWeek1 = plan.weeks[0]!;
+    const rawKeys = Object.keys(rawWeek1).sort();
+    const parsedKeys = Object.keys(parsedWeek1).sort();
+    for (const key of rawKeys) {
+      expect(parsedKeys, `week-level key "${key}" should survive parse`).toContain(key);
+    }
+  });
+
+  it("no day-level fields silently dropped (spot-check week 1 Monday)", () => {
+    const raw = loadCanonical() as {
+      weeks: { days: Record<string, unknown>[] }[];
+    };
+    const plan = PlanSchema.parse(raw);
+    const rawDay = raw.weeks[0]!.days[0]!;
+    const parsedDay = plan.weeks[0]!.days[0]!;
+    const rawKeys = Object.keys(rawDay).sort();
+    const parsedKeys = Object.keys(parsedDay).sort();
+    for (const key of rawKeys) {
+      expect(parsedKeys, `day-level key "${key}" should survive parse`).toContain(key);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Structural rejection tests — the schema must catch specific bad shapes.
+// ---------------------------------------------------------------------------
+
+describe("PlanSchema — rejects malformed plans", () => {
+  it("rejects missing weeks array", () => {
+    const result = PlanSchema.safeParse({
+      metadata: {
+        race: { name: "x", date: "2026-01-01", distance_miles: 26.2 },
+        plan_structure: { total_weeks: 1, start_date: "2025-12-25" },
+      },
     });
+    expect(result.success).toBe(false);
+    const paths = result.error!.issues.map((i) => i.path.join("."));
+    expect(paths.some((p) => p.includes("weeks"))).toBe(true);
+  });
+
+  it("rejects days as an object instead of array", () => {
+    const raw = loadCanonical() as { weeks: { days: unknown }[] };
+    // Replace week 1 days with an object
+    raw.weeks[0]!.days = { mon: { type: "easy", description: "Easy." } };
+    const result = PlanSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an invalid day type", () => {
+    const raw = loadCanonical() as { weeks: { days: { type: string }[] }[] };
+    raw.weeks[0]!.days[0]!.type = "not_a_real_type";
+    const result = PlanSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    const paths = result.error!.issues.map((i) => i.path.join("."));
+    expect(paths.some((p) => p.includes("days"))).toBe(true);
+  });
+
+  it("rejects weeks array length !== total_weeks", () => {
+    const raw = loadCanonical() as { weeks: unknown[] };
+    raw.weeks.pop(); // 21 weeks vs total_weeks: 22
+    const result = PlanSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    const issues = result.error!.issues.map((i) => i.message).join(" ");
+    expect(issues).toContain("total_weeks");
+  });
+
+  it("rejects goal='time' with no target_time_sec", () => {
+    const raw = loadCanonical() as {
+      metadata: { race: Record<string, unknown> };
+    };
+    raw.metadata.race.goal = "time";
+    delete raw.metadata.race.target_time_sec;
+    const result = PlanSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    const paths = result.error!.issues.map((i) => i.path.join("."));
+    expect(paths.some((p) => p.includes("target_time_sec"))).toBe(true);
+  });
+
+  it("rejects phase coverage gap (a week number missing from all phases)", () => {
+    const raw = loadCanonical() as {
+      metadata: {
+        plan_structure: {
+          phases: { name: string; weeks: number[] }[];
+        };
+      };
+    };
+    // Remove week 5 from all phases — creates a gap
+    raw.metadata.plan_structure.phases = raw.metadata.plan_structure.phases.map(
+      (p) => ({ ...p, weeks: p.weeks.filter((w) => w !== 5) })
+    );
+    const result = PlanSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    const issues = result.error!.issues.map((i) => i.message).join(" ");
+    expect(issues).toContain("phases");
   });
 });

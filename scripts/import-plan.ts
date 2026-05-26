@@ -21,7 +21,6 @@ config({ path: ".env.local" });
 import { readFileSync } from "fs";
 import { join } from "path";
 import { supabaseAdmin } from "../src/lib/db";
-import { adaptLegacyPlan } from "../src/lib/plan-adapter";
 import { PlanSchema } from "../src/lib/plan-schema";
 import { sendAndLog } from "../src/server/telegram/bot";
 
@@ -36,9 +35,9 @@ function parseArgs(): { athleteEmail: string; planPath: string } {
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--athlete-email" && args[i + 1]) {
-      athleteEmail = args[++i];
+      athleteEmail = args[++i]!;
     } else if (args[i] === "--plan-path" && args[i + 1]) {
-      planPath = args[++i];
+      planPath = args[++i]!;
     }
   }
 
@@ -100,18 +99,20 @@ async function main() {
 
   console.log(`Athlete: ${athlete.name} (${athlete.id})`);
 
-  // 3. Adapt + validate plan
+  // 3. Validate plan against canonical schema
   let plan: ReturnType<typeof PlanSchema.parse>;
   try {
-    const adapted = adaptLegacyPlan(rawJson, { athleteName: athlete.name });
-    plan = PlanSchema.parse(adapted);
+    plan = PlanSchema.parse(rawJson);
   } catch (err) {
     console.error("Plan validation failed:", err);
     process.exit(1);
   }
 
-  const { meta } = plan;
-  console.log(`Plan: ${meta.total_weeks} weeks, goal: ${meta.goal_race.name} on ${meta.goal_race.date}`);
+  const { metadata } = plan;
+  console.log(
+    `Plan: ${metadata.plan_structure.total_weeks} weeks, ` +
+    `goal: ${metadata.race.name} on ${metadata.race.date}`
+  );
 
   // 4. Idempotency check
   const { data: existingPlan, error: existingErr } = await db
@@ -134,7 +135,7 @@ async function main() {
 
   // 5. Sequential inserts
   // a. Find or create goal race row
-  const goalRace = meta.goal_race;
+  const goalRace = metadata.race;
   let raceId: string;
 
   const { data: existingRace, error: raceSelectErr } = await db
@@ -159,10 +160,10 @@ async function main() {
         athlete_id: athlete.id,
         name: goalRace.name,
         date: goalRace.date,
-        distance_mi: goalRace.distance_mi,
-        elevation_ft: goalRace.elevation_ft,
-        terrain: goalRace.terrain,
-        target_type: goalRace.target,
+        distance_mi: goalRace.distance_miles,
+        elevation_ft: goalRace.elevation_gain_ft ?? 0,
+        terrain: goalRace.type ?? "road",
+        target_type: goalRace.goal ?? "finish",
         ...(goalRace.target_time_sec !== undefined
           ? { target_time_sec: goalRace.target_time_sec }
           : {}),
@@ -185,8 +186,8 @@ async function main() {
     .insert({
       athlete_id: athlete.id,
       goal_race_id: raceId,
-      start_date: meta.start_date,
-      weeks: meta.total_weeks,
+      start_date: metadata.plan_structure.start_date,
+      weeks: metadata.plan_structure.total_weeks,
     })
     .select("id")
     .single();
@@ -230,9 +231,9 @@ async function main() {
 
   // 6. Telegram confirmation
   if (athlete.telegram_chat_id) {
-    const peakVolume = Math.max(...plan.weeks.map((w) => w.planned_volume_mi));
+    const peakVolume = Math.max(...plan.weeks.map((w) => w.planned_total_run_miles ?? 0));
     const confirmText =
-      `Imported your plan — ${meta.total_weeks} weeks, peak ${peakVolume} mi/wk, ` +
+      `Imported your plan — ${metadata.plan_structure.total_weeks} weeks, peak ${peakVolume} mi/wk, ` +
       `goal: ${goalRace.name} on ${goalRace.date}. Daily coaching ships next.`;
 
     try {

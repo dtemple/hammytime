@@ -1,4 +1,4 @@
-import { PlanSchema, Plan, DayPlan, PhaseName } from "@/lib/plan-schema";
+import { PlanSchema, Plan, Day, PhaseName } from "@/lib/plan-schema";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -70,16 +70,26 @@ function humanizeZodMessage(issue: { message: string; path: PropertyKey[] }): st
 }
 
 // ---------------------------------------------------------------------------
-// Helper: day distance for any running day
+// Helpers
 // ---------------------------------------------------------------------------
 
-function dayDistance(day: DayPlan): number {
-  return day.distance_mi ?? 0;
+function dayDistance(day: Day): number {
+  return day.planned_distance_miles ?? 0;
 }
 
-function isHardDay(day: DayPlan): boolean {
-  if (["hills", "tempo", "track", "race"].includes(day.type)) return true;
-  if (day.type === "long_run" && (day.intensity_rpe ?? 0) >= 7) return true;
+function weekVolume(week: Plan["weeks"][0]): number {
+  return week.planned_total_run_miles ?? 0;
+}
+
+function isHardDay(day: Day): boolean {
+  // Type-based: these are always high-intensity
+  if (["hill_repeats", "trail_tempo", "race"].includes(day.type)) return true;
+  // Intensity string: explicitly flagged hard
+  if (day.intensity === "hard") return true;
+  // RPE upper bound ≥ 7
+  if (Array.isArray(day.target_rpe) && day.target_rpe[1] >= 7) return true;
+  // Long run with high RPE
+  if (day.type === "long_run" && Array.isArray(day.target_rpe) && day.target_rpe[0] >= 7) return true;
   return false;
 }
 
@@ -90,14 +100,15 @@ function isHardDay(day: DayPlan): boolean {
 function checkLongRunCap(p: Plan): ValidationError[] {
   const errors: ValidationError[] = [];
   for (const week of p.weeks) {
-    const days = Object.values(week.days);
-    const longRunDays = days.filter((d) => d.type === "long_run");
+    const longRunDays = week.days.filter((d) => d.type === "long_run");
     const maxLongRun = Math.max(0, ...longRunDays.map(dayDistance));
-    const cap = week.planned_volume_mi * 0.35;
+    const vol = weekVolume(week);
+    if (vol === 0) continue;
+    const cap = vol * 0.35;
     if (maxLongRun > cap + 0.01) {
       errors.push({
         code: "long_run_cap",
-        message: `Week ${week.week_number}: long run is ${maxLongRun} mi but the cap is 35% of ${week.planned_volume_mi} mi/week = ${cap.toFixed(1)} mi. Pull back the long run or increase weekly volume.`,
+        message: `Week ${week.week_number}: long run is ${maxLongRun} mi but the cap is 35% of ${vol} mi/week = ${cap.toFixed(1)} mi. Pull back the long run or increase weekly volume.`,
         location: `week ${week.week_number}`,
       });
     }
@@ -112,7 +123,7 @@ function checkLongRunCap(p: Plan): ValidationError[] {
 function checkColdStartCap(p: Plan, ctx: AthleteValidationContext): ValidationError[] {
   const week1 = p.weeks.find((w) => w.week_number === 1);
   if (!week1) return [];
-  const maxDay = Math.max(0, ...Object.values(week1.days).map(dayDistance));
+  const maxDay = Math.max(0, ...week1.days.map(dayDistance));
   const cap = ctx.longest_recent_mi * 1.5;
   if (maxDay > cap + 0.01) {
     return [
@@ -127,26 +138,24 @@ function checkColdStartCap(p: Plan, ctx: AthleteValidationContext): ValidationEr
 }
 
 // ---------------------------------------------------------------------------
-// Rule 3: volume_ramp — ≤10%/week in build phases; one 15% jump per phase tolerated as warning
+// Rule 3: volume_ramp — ≤10%/week in build phases; one 15% jump per phase tolerated
 // ---------------------------------------------------------------------------
 
 function checkVolumeRamp(p: Plan): ValidationError[] {
   const errors: ValidationError[] = [];
-
-  // Group weeks by phase for per-phase 15%-jump tracking
   const phaseJumps: Partial<Record<PhaseName, number>> = {};
-
   const buildPhases: PhaseName[] = ["base", "build", "peak"];
 
   for (let i = 1; i < p.weeks.length; i++) {
     const prev = p.weeks[i - 1]!;
     const curr = p.weeks[i]!;
 
-    // Only check consecutive weeks in the same build-type phase
     if (!buildPhases.includes(curr.phase) || curr.phase !== prev.phase) continue;
-    if (prev.planned_volume_mi === 0) continue;
+    const prevVol = weekVolume(prev);
+    const currVol = weekVolume(curr);
+    if (prevVol === 0) continue;
 
-    const ramp = (curr.planned_volume_mi - prev.planned_volume_mi) / prev.planned_volume_mi;
+    const ramp = (currVol - prevVol) / prevVol;
 
     if (ramp > 0.15 + 0.001) {
       errors.push({
@@ -176,7 +185,7 @@ function checkVolumeRamp(p: Plan): ValidationError[] {
 function checkRestDays(p: Plan): ValidationError[] {
   const errors: ValidationError[] = [];
   for (const week of p.weeks) {
-    const hasRest = Object.values(week.days).some((d) => d.type === "rest");
+    const hasRest = week.days.some((d) => d.type === "rest");
     if (!hasRest) {
       errors.push({
         code: "rest_days",
@@ -190,18 +199,15 @@ function checkRestDays(p: Plan): ValidationError[] {
 
 // ---------------------------------------------------------------------------
 // Rule 5: hard_day_spacing — ≤2 hard days per any rolling 7-day window
+// Days are iterated in the order they appear in each week's days array
+// (canonical plan orders Mon → Sun).
 // ---------------------------------------------------------------------------
 
 function checkHardDaySpacing(p: Plan): ValidationError[] {
-  // Linearize all days across all weeks
-  const dayOrder = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
-  type DayKey = (typeof dayOrder)[number];
-
   const linearDays: { week: number; day: string; hard: boolean }[] = [];
   for (const week of p.weeks) {
-    for (const key of dayOrder) {
-      const d = week.days[key as DayKey];
-      linearDays.push({ week: week.week_number, day: key, hard: isHardDay(d) });
+    for (const d of week.days) {
+      linearDays.push({ week: week.week_number, day: d.day, hard: isHardDay(d) });
     }
   }
 
@@ -238,7 +244,6 @@ function checkCutbackCadence(p: Plan): ValidationError[] {
     const cutback = p.weeks[i]!;
     const prev = p.weeks[i - 1]!;
 
-    // Taper and race weeks are intentionally not cutback weeks — skip them
     if (cutback.phase === "taper" || cutback.phase === "race") continue;
 
     if (cutback.phase !== "cutback") {
@@ -250,8 +255,10 @@ function checkCutbackCadence(p: Plan): ValidationError[] {
       continue;
     }
 
-    if (prev.planned_volume_mi === 0) continue;
-    const drop = (prev.planned_volume_mi - cutback.planned_volume_mi) / prev.planned_volume_mi;
+    const prevVol = weekVolume(prev);
+    if (prevVol === 0) continue;
+    const cutbackVol = weekVolume(cutback);
+    const drop = (prevVol - cutbackVol) / prevVol;
 
     if (drop < 0.20 - 0.001) {
       errors.push({
@@ -275,21 +282,19 @@ function checkCutbackCadence(p: Plan): ValidationError[] {
 // ---------------------------------------------------------------------------
 
 function checkTaperStructure(p: Plan): ValidationError[] {
-  // Find race week (phase === 'race')
   const raceWeek = p.weeks.find((w) => w.phase === "race");
   if (!raceWeek) return [];
 
   const raceIdx = p.weeks.indexOf(raceWeek);
-  if (raceIdx < 3) return []; // not enough weeks to check
+  if (raceIdx < 3) return [];
 
   const taperWeeks = p.weeks.slice(raceIdx - 3, raceIdx);
   if (taperWeeks.length < 3) return [];
 
-  // Peak volume = max over all non-taper, non-race weeks
   const peakVolume = Math.max(
     ...p.weeks
       .filter((w) => w.phase !== "taper" && w.phase !== "race")
-      .map((w) => w.planned_volume_mi)
+      .map(weekVolume)
   );
   if (peakVolume === 0) return [];
 
@@ -309,11 +314,11 @@ function checkTaperStructure(p: Plan): ValidationError[] {
       return;
     }
 
-    const actual = week.planned_volume_mi / peakVolume;
+    const actual = weekVolume(week) / peakVolume;
     if (Math.abs(actual - target) > tolerance + 0.001) {
       errors.push({
         code: "taper_structure",
-        message: `Week ${week.week_number} (taper): volume is ${Math.round(actual * 100)}% of peak (${week.planned_volume_mi} mi), expected ~${Math.round(target * 100)}% ±10pp (${Math.round((target - tolerance) * peakVolume)}–${Math.round((target + tolerance) * peakVolume)} mi).`,
+        message: `Week ${week.week_number} (taper): volume is ${Math.round(actual * 100)}% of peak (${weekVolume(week)} mi), expected ~${Math.round(target * 100)}% ±10pp (${Math.round((target - tolerance) * peakVolume)}–${Math.round((target + tolerance) * peakVolume)} mi).`,
         location: `week ${week.week_number}`,
       });
     }
@@ -327,11 +332,12 @@ function checkTaperStructure(p: Plan): ValidationError[] {
 // ---------------------------------------------------------------------------
 
 function checkTimelineMath(p: Plan): ValidationError[] {
-  const startMs = Date.parse(p.meta.start_date);
-  const raceMs = Date.parse(p.meta.goal_race.date);
+  const startMs = Date.parse(p.metadata.plan_structure.start_date);
+  const raceMs = Date.parse(p.metadata.race.date);
   if (isNaN(startMs) || isNaN(raceMs)) return [];
 
-  const expectedRaceMs = startMs + p.meta.total_weeks * 7 * 24 * 60 * 60 * 1000;
+  const totalWeeks = p.metadata.plan_structure.total_weeks;
+  const expectedRaceMs = startMs + totalWeeks * 7 * 24 * 60 * 60 * 1000;
   const diffDays = Math.abs(expectedRaceMs - raceMs) / (24 * 60 * 60 * 1000);
 
   if (diffDays > 3) {
@@ -339,8 +345,8 @@ function checkTimelineMath(p: Plan): ValidationError[] {
     return [
       {
         code: "timeline_math",
-        message: `start_date (${p.meta.start_date}) + ${p.meta.total_weeks} weeks lands ${Math.round(diffDays)} days ${direction} goal race date (${p.meta.goal_race.date}). Adjust start_date or total_weeks so they align within 3 days.`,
-        location: "meta",
+        message: `start_date (${p.metadata.plan_structure.start_date}) + ${totalWeeks} weeks lands ${Math.round(diffDays)} days ${direction} goal race date (${p.metadata.race.date}). Adjust start_date or total_weeks so they align within 3 days.`,
+        location: "metadata.plan_structure",
       },
     ];
   }
@@ -351,18 +357,24 @@ function checkTimelineMath(p: Plan): ValidationError[] {
 // Rule 9: target_time_consistency — sanity range by distance
 // ---------------------------------------------------------------------------
 
-const TIME_SANITY: Array<{ minMi: number; maxMi: number; minSec: number; maxSec: number; label: string }> = [
+const TIME_SANITY: Array<{
+  minMi: number;
+  maxMi: number;
+  minSec: number;
+  maxSec: number;
+  label: string;
+}> = [
   { minMi: 13.0, maxMi: 13.5, minSec: 3000, maxSec: 9000, label: "half marathon" },
   { minMi: 26.0, maxMi: 26.5, minSec: 7200, maxSec: 18000, label: "marathon" },
   { minMi: 31.0, maxMi: 31.5, minSec: 10800, maxSec: 25200, label: "50k" },
 ];
 
 function checkTargetTimeConsistency(p: Plan): ValidationError[] {
-  const { target, target_time_sec, distance_mi } = p.meta.goal_race;
-  if (target !== "time" || !target_time_sec) return [];
+  const { goal, target_time_sec, distance_miles } = p.metadata.race;
+  if (goal !== "time" || !target_time_sec) return [];
 
   for (const range of TIME_SANITY) {
-    if (distance_mi >= range.minMi && distance_mi <= range.maxMi) {
+    if (distance_miles >= range.minMi && distance_miles <= range.maxMi) {
       if (target_time_sec < range.minSec || target_time_sec > range.maxSec) {
         const fmtSec = (s: number) => {
           const h = Math.floor(s / 3600);
@@ -373,7 +385,7 @@ function checkTargetTimeConsistency(p: Plan): ValidationError[] {
           {
             code: "target_time_consistency",
             message: `target_time_sec ${target_time_sec}s (${fmtSec(target_time_sec)}) is outside the sanity range for a ${range.label} (${fmtSec(range.minSec)}–${fmtSec(range.maxSec)}). Please double-check the goal time.`,
-            location: "meta.goal_race.target_time_sec",
+            location: "metadata.race.target_time_sec",
           },
         ];
       }

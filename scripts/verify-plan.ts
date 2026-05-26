@@ -2,9 +2,9 @@
  * verify-plan.ts
  *
  * Validates a marathon training plan JSON against the hammytime PlanSchema.
- * Produces a structured discrepancy report on failure — grouped into three
- * categories so you know whether to fix the schema, write an adapter, or
- * inject missing data.
+ * After the schema refactor, the canonical plan should parse cleanly with no
+ * adapter intervention. Exit 0 on clean parse; exit 1 with a grouped issue
+ * report on failure.
  *
  * Usage:
  *   npm run plan:verify
@@ -18,55 +18,6 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { ZodIssue } from "zod";
 import { PlanSchema } from "../src/lib/plan-schema";
-import { adaptLegacyPlan } from "../src/lib/plan-adapter";
-
-// ---------------------------------------------------------------------------
-// Categorization — hardcoded judgment calls based on the known diff between
-// the health-agent plan shape and the hammytime schema.
-// ---------------------------------------------------------------------------
-
-type IssueCategory =
-  | "Schema bug"
-  | "Naming mismatch"
-  | "Plan structure missing";
-
-function categorize(issue: ZodIssue): IssueCategory {
-  const path = issue.path.map(String).join(".");
-
-  // Schema bugs: wrong type, missing enum value, structural mismatch we own
-  const schemaBugPatterns = [
-    /^weeks\.\d+\.days$/,             // days should be array, schema has object
-    /^weeks\.\d+\.days\.\d+\.type$/,  // enum missing real-plan day types
-    /^weeks\.\d+\.days\.\d+\.target_rpe/, // schema doesn't know target_rpe
-    /^weeks\.\d+\.days\.\d+\.intensity_rpe/, // schema requires number, plan has array
-    /^schema_version$/,               // schema expects literal 1, plan has none
-  ];
-
-  if (schemaBugPatterns.some((re) => re.test(path))) {
-    return "Schema bug";
-  }
-
-  // Naming mismatches: same data, different field name / location
-  const namingMismatchPatterns = [
-    /^plan_version$/,
-    /^metadata/,
-    /^weeks\.\d+\.planned_total_run_miles/,
-    /^weeks\.\d+\.coaching_note/,
-    /^weeks\.\d+\.days\.\d+\.planned_distance_miles/,
-    /^weeks\.\d+\.start_date/,
-    /^weeks\.\d+\.end_date/,
-    /^phases/,
-    /^agent_guidance/,
-    /^strength_workouts/,
-  ];
-
-  if (namingMismatchPatterns.some((re) => re.test(path))) {
-    return "Naming mismatch";
-  }
-
-  // Everything else: plan is genuinely missing something the schema requires
-  return "Plan structure missing";
-}
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -106,66 +57,17 @@ async function main() {
 
   console.log(`Verifying: ${planPath}\n`);
 
-  // First: try raw (no adapter needed if this passes).
-  const rawResult = PlanSchema.safeParse(planJson);
+  const result = PlanSchema.safeParse(planJson);
 
-  if (rawResult.success) {
+  if (result.success) {
     console.log("✓ Plan parses cleanly against current schema. No adapter needed.");
     process.exit(0);
   }
 
-  // Second: try with adapter. This tells us whether the adapter resolves all issues.
-  try {
-    const adapted = adaptLegacyPlan(planJson);
-    const adaptedResult = PlanSchema.safeParse(adapted);
-    if (adaptedResult.success) {
-      console.log(
-        "✓ Plan parses cleanly after adaptation (src/lib/plan-adapter.ts).\n" +
-        "  The raw plan has discrepancies below, but the adapter resolves all of them.\n"
-      );
-    } else {
-      console.error(
-        `✗ Even after adaptation, ${adaptedResult.error.issues.length} issue(s) remain — ` +
-        "adapter may need updating.\n"
-      );
-    }
-  } catch (adapterErr) {
-    console.error("✗ Adapter threw during adaptation:", adapterErr, "\n");
-  }
-
-  const issues = rawResult.error.issues;
-  console.error(`Raw plan has ${issues.length} issue(s) against current schema:\n`);
-
-  const grouped: Record<IssueCategory, ZodIssue[]> = {
-    "Schema bug": [],
-    "Naming mismatch": [],
-    "Plan structure missing": [],
-  };
-
+  const issues = result.error.issues;
+  console.error(`✗ Plan has ${issues.length} issue(s) against current schema:\n`);
   for (const issue of issues) {
-    grouped[categorize(issue)].push(issue);
-  }
-
-  const categoryOrder: IssueCategory[] = [
-    "Schema bug",
-    "Naming mismatch",
-    "Plan structure missing",
-  ];
-
-  const descriptions: Record<IssueCategory, string> = {
-    "Schema bug": "Schema bug — the schema is wrong; fix it to match the canonical plan.",
-    "Naming mismatch": "Naming mismatch — same data, different field name; write an adapter or rename in schema.",
-    "Plan structure missing": "Plan structure missing — the plan genuinely lacks data the schema requires; relax the schema or inject defaults.",
-  };
-
-  for (const cat of categoryOrder) {
-    const items = grouped[cat];
-    if (items.length === 0) continue;
-    console.error(`── ${descriptions[cat]} (${items.length})\n`);
-    for (const issue of items) {
-      console.error(formatIssue(issue));
-    }
-    console.error("");
+    console.error(formatIssue(issue));
   }
 
   process.exit(1);
