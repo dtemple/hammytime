@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-05-26 (session 12 — Prompt 15: /checkin wellness battery state machine)_
+_Updated: 2026-05-26 (session 13 — Prompt 16: daily coaching response after wellness battery)_
 
 ---
 
@@ -12,18 +12,16 @@ A multi-tenant Telegram-based marathon coaching bot for ~5–25 friends. Daily c
 
 ## Current status
 
-**Prompt 15 complete — `/checkin` command + wellness battery state machine.**
+**Prompt 16 complete — daily coaching response after wellness battery.**
 
-Athletes can now `/checkin` post-onboarding. The bot runs the 3-question daily wellness battery (readiness, soreness + body part, optional note), writes the result to `wellness_log.md`, and sends a placeholder ack. The real coaching response fires in Prompt 16.
+After completing `/checkin`, the bot now calls Claude (Sonnet 4.6, single call) with the athlete's full context and sends a real coaching response. The response is appended to `checkin_log.md` and the call is persisted to `agent_runs`.
 
 Key artifacts:
-- `supabase/migrations/20260526000000_checkin_state.sql` — `athletes.checkin_state jsonb DEFAULT '{}'`
-- `src/server/telegram/checkin/types.ts` — `WellnessState`, `WellnessEntry`, `WellnessSubStep`
-- `src/server/telegram/checkin/wellness.ts` — `parseReadiness`, `parseSoreness`, `parseNote`, `isConcerning`; canonical question strings
-- `src/server/telegram/checkin/wellness-log.ts` — `appendWellnessRow` (append-to-table, not section-replace)
-- `src/server/telegram/checkin/dispatcher.ts` — `handleCheckinCommand`, `handleWellnessMessage`, `onWellnessComplete`
-- `bot.ts` updated — `/checkin`, `/cancel` commands; wellness routing in `handleInboundText` before onboarding check
-- 308 tests passing (36 new)
+- `src/server/strava/activities.ts` — `fetchRecentActivities` with token load, expiry check, refresh, and Strava API call
+- `src/server/agent/prompts/daily-checkin.system.md` — coaching system prompt (role/tone, wellness battery framing, plan-of-record rule, date-of-record rule, prehab orientation, response format)
+- `src/server/agent/daily-checkin.ts` — `runDailyCheckin` single-call runtime; `buildUserMessage` context builder (profile, injuries, recent check-ins, Strava activities, today's planned workout, wellness); `appendCheckinEntry` append-only log helper
+- `src/server/telegram/checkin/dispatcher.ts` — `onWellnessComplete` wired: calls `runDailyCheckin`, appends to `checkin_log.md`, sends response chunked at 4096 chars, Sentry on failure
+- 317 tests passing (9 new)
 
 ---
 
@@ -78,6 +76,7 @@ Key artifacts:
 - [ ] **Day 1.5** End-to-end self-test: re-onboard from scratch, verify all DB rows, fix conversational tone.
 - [x] **Prompt 14b** v0.6 schema verify + plan adapter + import script.
 - [x] **Prompt 15** `/checkin` command + wellness battery state machine + `wellness_log.md` write.
+- [x] **Prompt 16** Daily coaching response after wellness battery — single-call Claude runtime, `checkin_log.md` append, `agent_runs` persist, Sentry error fallback.
 
 ### Week 2 — Strava OAuth + BYO-plan paste-back
 
@@ -146,13 +145,13 @@ Key artifacts:
 
 ## Likely next task
 
-**Manual verification for Prompt 15** (checkin state machine):
+**Manual verification for Prompt 16** (coaching response):
 1. `npm run dev:all` — start Supabase + Next.js + polling bot
-2. In Telegram: `/checkin` → answer readiness (try "ten" first to verify re-ask, then "7") → soreness ("3 left hamstring") → note ("felt good")
-3. Verify final ack reply.
-4. In Supabase Studio: query `memory_files WHERE file_name = 'wellness_log.md'` — confirm new row with correct columns.
-5. `/checkin` again immediately — should start fresh (state cleared).
-6. `/checkin`, answer readiness "3" → verify concerning-value flag ("Worth a closer look...").
-7. `/checkin`, then `/cancel` → verify "Cancelled."
+2. In Telegram: `/checkin` → walk through readiness → soreness → note
+3. After the note, wait ~5–15s. Bot replies with a coaching response. Read it — does it engage with actual wellness values and today's planned workout?
+4. Try readiness=2 to verify concerning-value behavior.
+5. In Supabase Studio: `memory_files WHERE file_name = 'checkin_log.md'` → confirm today's response appended with date header. `agent_runs` → row with `kind='daily_checkin'`, non-null `cost_usd`.
 
-**Prompt 16**: Agent runtime — wire the daily coach response after wellness battery completes. Replace the `// REPLACE-IN-PROMPT-16` placeholder in `dispatcher.ts:onWellnessComplete`.
+**Prompt 17**: Daily cron worker — enqueue `daily_checkin` jobs for athletes in the 6:30–7:00 AM local window. Drain via Vercel cron + `job_queue` table (FOR UPDATE SKIP LOCKED).
+
+Note: `fetchRecentActivities` will return empty until Strava OAuth in Telegram (not yet wired). The agent handles the empty-activities case gracefully with a fallback text in the user message.
