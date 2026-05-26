@@ -22,11 +22,26 @@ async function main() {
 
   const db = supabaseAdmin();
 
-  // Look up athlete by email
+  // Look up athlete via users.email → athletes.user_id (athletes has no email column)
+  const { data: user, error: userErr } = await db
+    .from("users")
+    .select("id")
+    .eq("email", email)
+    .maybeSingle();
+
+  if (userErr) {
+    console.error("Error looking up user:", userErr.message);
+    process.exit(1);
+  }
+  if (!user) {
+    console.error(`No user found with email: ${email}`);
+    process.exit(1);
+  }
+
   const { data: athlete, error: athleteErr } = await db
     .from("athletes")
-    .select("id, name, email")
-    .eq("email", email)
+    .select("id, name")
+    .eq("user_id", user.id)
     .maybeSingle();
 
   if (athleteErr) {
@@ -34,7 +49,7 @@ async function main() {
     process.exit(1);
   }
   if (!athlete) {
-    console.error(`No athlete found with email: ${email}`);
+    console.error(`No athlete found for user ${email}. Has the athlete completed Telegram linking?`);
     process.exit(1);
   }
 
