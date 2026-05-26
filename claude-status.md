@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-05-26 (session 13 — Prompt 16: daily coaching response after wellness battery)_
+_Updated: 2026-05-26 (session 14 — Prompt 17: /connect_strava command + agent graceful degradation)_
 
 ---
 
@@ -12,16 +12,17 @@ A multi-tenant Telegram-based marathon coaching bot for ~5–25 friends. Daily c
 
 ## Current status
 
-**Prompt 16 complete — daily coaching response after wellness battery.**
+**Prompt 17 complete — /connect_strava command + agent graceful degradation.**
 
-After completing `/checkin`, the bot now calls Claude (Sonnet 4.6, single call) with the athlete's full context and sends a real coaching response. The response is appended to `checkin_log.md` and the call is persisted to `agent_runs`.
+Athletes can now connect Strava from inside Telegram with `/connect_strava`. The callback sends an immediate "Strava connected" Telegram confirmation. The daily agent is resilient when Strava is missing or broken — it substitutes a clear fallback message and tells the athlete to `/connect_strava` rather than silently producing worse coaching.
 
 Key artifacts:
-- `src/server/strava/activities.ts` — `fetchRecentActivities` with token load, expiry check, refresh, and Strava API call
-- `src/server/agent/prompts/daily-checkin.system.md` — coaching system prompt (role/tone, wellness battery framing, plan-of-record rule, date-of-record rule, prehab orientation, response format)
-- `src/server/agent/daily-checkin.ts` — `runDailyCheckin` single-call runtime; `buildUserMessage` context builder (profile, injuries, recent check-ins, Strava activities, today's planned workout, wellness); `appendCheckinEntry` append-only log helper
-- `src/server/telegram/checkin/dispatcher.ts` — `onWellnessComplete` wired: calls `runDailyCheckin`, appends to `checkin_log.md`, sends response chunked at 4096 chars, Sentry on failure
-- 317 tests passing (9 new)
+- `src/server/strava/activities.ts` — added `hasStravaConnection(athleteId)` to distinguish "no token row" from "connected but no recent runs" (both previously returned [] silently)
+- `src/server/telegram/bot.ts` — `handleConnectStravaCommand` exported; guards on onboarding complete, logs inbound, sends signed `/strava/connect?athlete_id=` URL; `_resetBotForTest()` helper for singleton reset in tests
+- `src/app/strava/callback/route.ts` — after successful token upsert, fetches athlete and sends "Strava connected" via `sendAndLog`; failure is non-fatal (Sentry + continue)
+- `src/server/agent/daily-checkin.ts` — checks `hasStravaConnection` before `fetchRecentActivities`; `stravaFallback` field in `buildUserMessage` opts; broken-token error logged to `agent_runs.error`; TODO comment on pre-existing `kind='daily_checkin'` constraint mismatch
+- `src/app/strava/callback/route.test.ts` — new file; 5 tests
+- 328 tests passing (11 new)
 
 ---
 
@@ -81,7 +82,7 @@ Key artifacts:
 ### Week 2 — Strava OAuth + BYO-plan paste-back
 
 - [x] Strava OAuth bones (connect route, callback, token encryption, health check) — accessible via direct URL with manually-seeded athlete UUID.
-- [ ] Strava OAuth in Telegram (bot sends the athlete a /strava/connect link).
+- [x] Strava OAuth in Telegram (`/connect_strava` command sends URL; callback sends confirmation) — Prompt 17.
 - [ ] Strava webhook subscription (app-level, route by `owner_id`).
 - [ ] Token refresh cron (every 4 hours, lazy fallback).
 - [ ] BYO-plan paste-back flow (detect JSON paste, Zod validate, accept or structured reject).
@@ -145,13 +146,14 @@ Key artifacts:
 
 ## Likely next task
 
-**Manual verification for Prompt 16** (coaching response):
+**Manual verification for Prompt 17** (`/connect_strava` + graceful degradation):
 1. `npm run dev:all` — start Supabase + Next.js + polling bot
-2. In Telegram: `/checkin` → walk through readiness → soreness → note
-3. After the note, wait ~5–15s. Bot replies with a coaching response. Read it — does it engage with actual wellness values and today's planned workout?
-4. Try readiness=2 to verify concerning-value behavior.
-5. In Supabase Studio: `memory_files WHERE file_name = 'checkin_log.md'` → confirm today's response appended with date header. `agent_runs` → row with `kind='daily_checkin'`, non-null `cost_usd`.
+2. In Telegram: `/connect_strava` → verify bot replies with URL containing `/strava/connect?athlete_id=`
+3. Tap the URL, complete Strava OAuth. Verify `/strava/connected` page renders. Within ~1 second, Telegram should receive "Strava connected" message.
+4. In Supabase Studio: confirm `oauth_tokens` row with `provider='strava'` for your athlete.
+5. `/checkin` → complete wellness battery → agent response should reference actual training data.
+6. Temporarily DELETE the `oauth_tokens` row, `/checkin` again → agent should still respond; response should acknowledge no Strava data and suggest `/connect_strava`. Restore with `/connect_strava`.
 
-**Prompt 17**: Daily cron worker — enqueue `daily_checkin` jobs for athletes in the 6:30–7:00 AM local window. Drain via Vercel cron + `job_queue` table (FOR UPDATE SKIP LOCKED).
+**Known deferred issue**: `agent_runs.kind` CHECK constraint only allows `('daily', 'adhoc', 'weekly', 'plan_validate')` but code inserts `kind='daily_checkin'`. The insert fails silently (non-fatal catch). Fix requires a migration adding `'daily_checkin'` to the constraint.
 
-Note: `fetchRecentActivities` will return empty until Strava OAuth in Telegram (not yet wired). The agent handles the empty-activities case gracefully with a fallback text in the user message.
+**Prompt 18 candidate**: Daily cron worker — enqueue `daily_checkin` jobs for athletes in the 6:30–7:00 AM local window. Drain via Vercel cron + `job_queue` table (FOR UPDATE SKIP LOCKED).
