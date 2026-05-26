@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-05-21 (session 10 — onboarding steps 4-5 + plan-acquisition fork + BYO handoff)_
+_Updated: 2026-05-26 (session 11 — v0.6 schema verify + plan adapter + import script)_
 
 ---
 
@@ -12,9 +12,16 @@ A multi-tenant Telegram-based marathon coaching bot for ~5–25 friends. Daily c
 
 ## Current status
 
-**Week 1, Day 1.4 complete — full onboarding conversation (steps 0–6) ships. First friend can now reach `awaiting_paste` state.**
+**Prompt 14b complete — schema verified, adapter written, import script wired.**
 
-All 7 onboarding steps are in place. The bot captures everything it needs, sends the BYO-plan prompt template, and alerts David. The `awaiting_paste` terminal state is wired; plan paste-back validation is Week 2.
+The `marathon_training_plan.json` (22-week trail marathon, 2026-08-30) is now importable into the DB. Running `npm run plan:import -- --athlete-email <email>` seeds `races`, `plans`, and `plan_versions` (status=active) for any linked athlete. After import, onboarding's plan-fork (step 6) short-circuits correctly on `/restart`. The daily loop can run against a real plan as soon as Week 3 ships.
+
+Key artifacts:
+- `scripts/verify-plan.ts` — schema discrepancy reporter (raw plan has 69 issues; adapter resolves all of them)
+- `src/lib/plan-adapter.ts` — transforms health-agent plan_version:2.0 → hammytime schema_version:1
+- `src/lib/plan-schema.ts` — revised: new day-type enum values, optional fields, agent_guidance/strength_workouts preserved
+- `scripts/import-plan.ts` — CLI import with idempotency guard + Telegram confirmation
+- 272 tests passing
 
 ---
 
@@ -67,6 +74,7 @@ All 7 onboarding steps are in place. The bot captures everything it needs, sends
   - [x] Steps 4–5 + plan-fork (step 6) — free text, recent mileage, BYO handoff (Prompt 13)
   - [x] BYO-plan prompt send + David alert — done
 - [ ] **Day 1.5** End-to-end self-test: re-onboard from scratch, verify all DB rows, fix conversational tone.
+- [x] **Prompt 14b** v0.6 schema verify + plan adapter + import script (this session).
 
 ### Week 2 — Strava OAuth + BYO-plan paste-back
 
@@ -114,7 +122,7 @@ All 7 onboarding steps are in place. The bot captures everything it needs, sends
 | ------------------------------------------- | ------------- | ----------- |
 | `/api/health` returns 200 (all green)       | End of Week 0 | Not started |
 | First friend reaches `awaiting_paste` state | End of Week 1 | ✅ Wired (pending e2e test) |
-| First active plan in the system             | End of Week 2 | Not started |
+| First active plan in the system             | End of Week 2 | ✅ Ready to import (pending `plan:import` run) |
 | Daily loop running on David for 5 days      | End of Week 4 | Not started |
 | First alpha friend onboarded                | Week 5        | Not started |
 | All ~25 friends onboarded                   | Week 6        | Not started |
@@ -135,9 +143,11 @@ All 7 onboarding steps are in place. The bot captures everything it needs, sends
 
 ## Likely next task
 
-Day 1.5 end-to-end self-test (Prompt 14):
-- Set `DAVID_TELEGRAM_CHAT_ID` in `.env.local`
-- Apply migration (`supabase db reset` or push `20260521000002_plan_versions_json_nullable.sql`)
-- `/restart` → walk all 7 steps, choose `build` → verify DB rows and David alert
-- Review conversational tone, fix anything that reads wrong
-- Then: Week 2 — Strava OAuth bot-side trigger + BYO-plan paste-back validation (Prompt 15)
+Manual verification for Prompt 14b:
+1. Ensure Supabase is running locally and David's athlete row exists (completed onboarding)
+2. `npm run plan:import -- --athlete-email dtemple@gmail.com`
+3. Verify races, plans, plan_versions rows in Supabase Studio
+4. Confirm Telegram confirmation message received
+5. `/restart` in Telegram → plan-fork step should reply "Your plan is already loaded — moving on."
+
+Then: Day 1.5 end-to-end self-test or Week 2 (Strava OAuth bot-side + BYO paste-back, Prompt 15)
