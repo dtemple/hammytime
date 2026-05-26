@@ -275,6 +275,16 @@ function getBot(): Bot {
 
       await handleOnboardingCallback(ctx, athlete, data);
     });
+    _bot.catch((err) => {
+      const ctx = err.ctx;
+      console.error(
+        "[bot] unhandled error",
+        `chat=${ctx?.chat?.id ?? "no-chat"}`,
+        err.error
+      );
+      // Best-effort reply — .catch(() => undefined) so a failed reply doesn't re-throw.
+      ctx?.reply("Something went wrong on our end — ping David.").catch(() => undefined);
+    });
   }
   return _bot;
 }
