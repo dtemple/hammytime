@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-05-26 (session 11 — v0.6 schema verify + plan adapter + import script)_
+_Updated: 2026-05-26 (session 12 — Prompt 15: /checkin wellness battery state machine)_
 
 ---
 
@@ -12,16 +12,18 @@ A multi-tenant Telegram-based marathon coaching bot for ~5–25 friends. Daily c
 
 ## Current status
 
-**Prompt 14b complete — schema verified, adapter written, import script wired.**
+**Prompt 15 complete — `/checkin` command + wellness battery state machine.**
 
-The `marathon_training_plan.json` (22-week trail marathon, 2026-08-30) is now importable into the DB. Running `npm run plan:import -- --athlete-email <email>` seeds `races`, `plans`, and `plan_versions` (status=active) for any linked athlete. After import, onboarding's plan-fork (step 6) short-circuits correctly on `/restart`. The daily loop can run against a real plan as soon as Week 3 ships.
+Athletes can now `/checkin` post-onboarding. The bot runs the 3-question daily wellness battery (readiness, soreness + body part, optional note), writes the result to `wellness_log.md`, and sends a placeholder ack. The real coaching response fires in Prompt 16.
 
 Key artifacts:
-- `scripts/verify-plan.ts` — schema discrepancy reporter (raw plan has 69 issues; adapter resolves all of them)
-- `src/lib/plan-adapter.ts` — transforms health-agent plan_version:2.0 → hammytime schema_version:1
-- `src/lib/plan-schema.ts` — revised: new day-type enum values, optional fields, agent_guidance/strength_workouts preserved
-- `scripts/import-plan.ts` — CLI import with idempotency guard + Telegram confirmation
-- 272 tests passing
+- `supabase/migrations/20260526000000_checkin_state.sql` — `athletes.checkin_state jsonb DEFAULT '{}'`
+- `src/server/telegram/checkin/types.ts` — `WellnessState`, `WellnessEntry`, `WellnessSubStep`
+- `src/server/telegram/checkin/wellness.ts` — `parseReadiness`, `parseSoreness`, `parseNote`, `isConcerning`; canonical question strings
+- `src/server/telegram/checkin/wellness-log.ts` — `appendWellnessRow` (append-to-table, not section-replace)
+- `src/server/telegram/checkin/dispatcher.ts` — `handleCheckinCommand`, `handleWellnessMessage`, `onWellnessComplete`
+- `bot.ts` updated — `/checkin`, `/cancel` commands; wellness routing in `handleInboundText` before onboarding check
+- 308 tests passing (36 new)
 
 ---
 
@@ -74,7 +76,8 @@ Key artifacts:
   - [x] Steps 4–5 + plan-fork (step 6) — free text, recent mileage, BYO handoff (Prompt 13)
   - [x] BYO-plan prompt send + David alert — done
 - [ ] **Day 1.5** End-to-end self-test: re-onboard from scratch, verify all DB rows, fix conversational tone.
-- [x] **Prompt 14b** v0.6 schema verify + plan adapter + import script (this session).
+- [x] **Prompt 14b** v0.6 schema verify + plan adapter + import script.
+- [x] **Prompt 15** `/checkin` command + wellness battery state machine + `wellness_log.md` write.
 
 ### Week 2 — Strava OAuth + BYO-plan paste-back
 
@@ -90,7 +93,7 @@ Key artifacts:
 
 - [ ] Daily cron worker: enqueue `daily_checkin` jobs for athletes in 6:30–7:00 AM local window.
 - [ ] Daily agent run per §3.7 (memory load, Strava pull, Claude Agent SDK, structured response, memory write-back, Telegram send, shadow-bcc mirror).
-- [ ] Daily wellness battery in morning check-in.
+- [x] Daily wellness battery in morning check-in — `/checkin` state machine (Prompt 15). Agent reads from `wellness_log.md` in Prompt 16.
 - [ ] Ad-hoc reply mode (lighter context, Haiku router, Sonnet response).
 - [ ] Per-athlete advisory lock for concurrent write safety.
 
@@ -143,11 +146,13 @@ Key artifacts:
 
 ## Likely next task
 
-Manual verification for Prompt 14b:
-1. Ensure Supabase is running locally and David's athlete row exists (completed onboarding)
-2. `npm run plan:import -- --athlete-email dtemple@gmail.com`
-3. Verify races, plans, plan_versions rows in Supabase Studio
-4. Confirm Telegram confirmation message received
-5. `/restart` in Telegram → plan-fork step should reply "Your plan is already loaded — moving on."
+**Manual verification for Prompt 15** (checkin state machine):
+1. `npm run dev:all` — start Supabase + Next.js + polling bot
+2. In Telegram: `/checkin` → answer readiness (try "ten" first to verify re-ask, then "7") → soreness ("3 left hamstring") → note ("felt good")
+3. Verify final ack reply.
+4. In Supabase Studio: query `memory_files WHERE file_name = 'wellness_log.md'` — confirm new row with correct columns.
+5. `/checkin` again immediately — should start fresh (state cleared).
+6. `/checkin`, answer readiness "3" → verify concerning-value flag ("Worth a closer look...").
+7. `/checkin`, then `/cancel` → verify "Cancelled."
 
-Then: Day 1.5 end-to-end self-test or Week 2 (Strava OAuth bot-side + BYO paste-back, Prompt 15)
+**Prompt 16**: Agent runtime — wire the daily coach response after wellness battery completes. Replace the `// REPLACE-IN-PROMPT-16` placeholder in `dispatcher.ts:onWellnessComplete`.
