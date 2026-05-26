@@ -192,6 +192,47 @@ export async function handleInboundText(ctx: Context): Promise<void> {
   }
 }
 
+export async function handleConnectStravaCommand(ctx: CommandContext<Context>): Promise<void> {
+  const db = supabaseAdmin();
+  const chatId = String(ctx.chat.id);
+
+  const { data: athlete } = await db
+    .from("athletes")
+    .select("*")
+    .eq("telegram_chat_id", chatId)
+    .maybeSingle();
+
+  if (!athlete) {
+    await ctx.reply("Use your invite link to get started.");
+    return;
+  }
+
+  const obState = athlete.onboarding_state as { step?: number } | null;
+  if ((typeof obState?.step === "number" ? obState.step : 0) < onboardingSteps.length) {
+    await ctx.reply("Finish onboarding first.");
+    return;
+  }
+
+  // Log inbound command now that we have an athlete_id.
+  await db.from("messages").insert({
+    athlete_id: athlete.id,
+    channel: "tg",
+    direction: "in",
+    body: "/connect_strava",
+  });
+
+  const baseUrl =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+  const connectUrl = `${baseUrl}/strava/connect?athlete_id=${athlete.id}`;
+
+  await sendAndLog(
+    athlete.id,
+    ctx.chat.id,
+    `Tap here to connect Strava: ${connectUrl}\n\nI'll confirm when you're back.`
+  );
+}
+
 function getBot(): Bot {
   if (!_bot) {
     const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -218,6 +259,7 @@ function getBot(): Bot {
       }
       await handleCheckinCommand(ctx, athlete);
     });
+    _bot.command("connect_strava", handleConnectStravaCommand);
     _bot.command("cancel", async (ctx) => {
       const db = supabaseAdmin();
       const { data: athlete } = await db
@@ -297,4 +339,13 @@ export async function pingTelegram(): Promise<{ latency_ms: number }> {
   const start = Date.now();
   await getBot().api.getMe();
   return { latency_ms: Date.now() - start };
+}
+
+/**
+ * Resets the bot singleton. Test-only — allows tests to reinitialize the Bot
+ * mock between cases without module re-imports.
+ * @internal
+ */
+export function _resetBotForTest(): void {
+  _bot = null;
 }

@@ -3,7 +3,7 @@ import * as path from "path";
 import { supabaseAdmin } from "@/lib/db";
 import { anthropicClient } from "@/lib/anthropic";
 import { loadAthleteData } from "./byo-plan";
-import { fetchRecentActivities } from "@/server/strava/activities";
+import { fetchRecentActivities, hasStravaConnection } from "@/server/strava/activities";
 import type { StravaActivitySummary } from "@/server/strava/activities";
 import type { Day, Week } from "@/lib/plan-schema";
 
@@ -227,6 +227,8 @@ export function buildUserMessage(opts: {
   injuryLogMd: string;
   recentCheckinsMd: string;
   activities: StravaActivitySummary[];
+  /** When set, replaces the Strava table with this text (no connection or broken token). */
+  stravaFallback?: string;
   plannedDay: Day | null;
   wellness: WellnessInput;
   asthma: boolean;
@@ -239,6 +241,7 @@ export function buildUserMessage(opts: {
     injuryLogMd,
     recentCheckinsMd,
     activities,
+    stravaFallback,
     plannedDay,
     wellness,
     asthma,
@@ -270,7 +273,7 @@ export function buildUserMessage(opts: {
     recentCheckinsMd,
     "",
     `Last 14 days of training (from Strava)`,
-    formatStravaTable(activities),
+    stravaFallback ?? formatStravaTable(activities),
     "",
     `Today's planned workout (week ${weekN}, ${dayOfWeek})`,
     formatDayForPrompt(plannedDay),
@@ -292,12 +295,16 @@ async function persistRun(
   startedAt: string,
   inputTokens: number,
   outputTokens: number,
-  resultSummary: string
+  resultSummary: string,
+  error?: string
 ): Promise<void> {
   const costUsd =
     (inputTokens / 1_000_000) * COST_PER_M_INPUT +
     (outputTokens / 1_000_000) * COST_PER_M_OUTPUT;
 
+  // TODO: kind "daily_checkin" is not in the agent_runs CHECK constraint
+  // ('daily', 'adhoc', 'weekly', 'plan_validate'). This insert silently fails.
+  // Fix: add a migration to include 'daily_checkin' in the constraint.
   await supabaseAdmin().from("agent_runs").insert({
     athlete_id: athleteId,
     kind: "daily_checkin",
@@ -308,6 +315,7 @@ async function persistRun(
     output_tokens: outputTokens,
     cost_usd: costUsd,
     result_summary: resultSummary.slice(0, 200),
+    ...(error ? { error } : {}),
   });
 }
 
@@ -427,15 +435,36 @@ export async function runDailyCheckin(
 ): Promise<{ telegramMessage: string; checkinLogEntry: string }> {
   const startedAt = new Date().toISOString();
 
-  // Load all context in parallel.
-  const [athleteData, injuryLogMd, checkinLogMd, activePlan, activities] =
+  // Load all context in parallel (Strava fetched separately — see below).
+  const [athleteData, injuryLogMd, checkinLogMd, activePlan] =
     await Promise.all([
       loadAthleteData(athleteId),
       loadMemoryFile(athleteId, "injury_log.md"),
       loadMemoryFile(athleteId, CHECKIN_LOG_FILE),
       loadActivePlan(athleteId),
-      fetchRecentActivities(athleteId, 14),
     ]);
+
+  // Strava: distinguish "no connection" from "connected but no recent runs".
+  // fetchRecentActivities returns [] silently for both, so we check first.
+  let activities: StravaActivitySummary[] = [];
+  let stravaFallback: string | undefined;
+  let stravaError: string | undefined;
+
+  const stravaConnected = await hasStravaConnection(athleteId);
+
+  if (!stravaConnected) {
+    stravaFallback =
+      "_No Strava connection on file. Athlete should run /connect\\_strava to enable training-data-aware coaching._";
+  } else {
+    try {
+      activities = await fetchRecentActivities(athleteId, 14);
+    } catch (err) {
+      stravaFallback =
+        "_Strava token refresh failed — connection appears broken. Athlete should run /connect\\_strava to reconnect._";
+      stravaError = err instanceof Error ? err.message : String(err);
+      console.error("[daily-checkin] Strava refresh failed for athlete", athleteId, err);
+    }
+  }
 
   const { athlete, profileMd } = athleteData;
   const tz = athlete.timezone ?? "America/Los_Angeles";
@@ -460,6 +489,7 @@ export async function runDailyCheckin(
     injuryLogMd,
     recentCheckinsMd,
     activities,
+    stravaFallback,
     plannedDay,
     wellness: wellnessEntry,
     asthma: athlete.asthma,
@@ -482,7 +512,8 @@ export async function runDailyCheckin(
     startedAt,
     response.usage.input_tokens,
     response.usage.output_tokens,
-    responseText
+    responseText,
+    stravaError
   ).catch(() => {/* non-fatal */});
 
   return { telegramMessage: responseText, checkinLogEntry: responseText };

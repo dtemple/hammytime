@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@/lib/db", () => ({ supabaseAdmin: vi.fn() }));
 vi.mock("./onboarding/index", () => ({
@@ -12,12 +12,12 @@ vi.mock("./checkin/dispatcher", () => ({
   handleWellnessMessage: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("child_process", () => ({ execSync: vi.fn().mockReturnValue("abc1234 — test commit") }));
-// Prevent Bot constructor from throwing — we never call getBot() in these tests
 vi.mock("grammy", () => ({ Bot: vi.fn(), Context: vi.fn() }));
 
 import { supabaseAdmin } from "@/lib/db";
+import { Bot } from "grammy";
 import { handleWellnessMessage } from "./checkin/dispatcher";
-import { handleInboundText } from "./bot";
+import { handleInboundText, handleConnectStravaCommand, _resetBotForTest } from "./bot";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyMock = any;
@@ -174,5 +174,127 @@ describe("handleInboundText — wellness routing", () => {
     await handleInboundText(ctx as AnyMock);
 
     expect(handleWellnessMessage).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /connect_strava command
+// ---------------------------------------------------------------------------
+
+describe("/connect_strava command", () => {
+  beforeEach(() => {
+    _resetBotForTest();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    delete process.env.TELEGRAM_BOT_TOKEN;
+    delete process.env.NEXT_PUBLIC_APP_URL;
+  });
+
+  it("replies with invite-link message when athlete is not found", async () => {
+    (supabaseAdmin as AnyMock).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+          }),
+        }),
+      }),
+    });
+    const ctx = makeCtx();
+
+    await handleConnectStravaCommand(ctx as AnyMock);
+
+    expect(ctx.reply).toHaveBeenCalledWith("Use your invite link to get started.");
+  });
+
+  it("replies with 'Finish onboarding first' when onboarding is incomplete", async () => {
+    (supabaseAdmin as AnyMock).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: {
+                id: ATHLETE_ID,
+                telegram_chat_id: String(CHAT_ID),
+                onboarding_state: { step: 3 }, // < 7 → incomplete
+              },
+              error: null,
+            }),
+          }),
+        }),
+      }),
+    });
+    const ctx = makeCtx();
+
+    await handleConnectStravaCommand(ctx as AnyMock);
+
+    expect(ctx.reply).toHaveBeenCalledWith("Finish onboarding first.");
+  });
+
+  it("sends URL reply containing /strava/connect?athlete_id= for completed athlete", async () => {
+    process.env.TELEGRAM_BOT_TOKEN = "test-token";
+    process.env.NEXT_PUBLIC_APP_URL = "https://hammytime.example.com";
+
+    // Configure grammy Bot mock so `new Bot(token)` returns a usable instance.
+    // Must use a regular function (not arrow) since arrow functions can't be constructors.
+    // Returning an object from a constructor causes `new` to yield that object.
+    const sendMessageMock = vi.fn().mockResolvedValue(undefined);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (Bot as AnyMock).mockImplementation(function(this: any) {
+      return { api: { sendMessage: sendMessageMock }, command: vi.fn(), on: vi.fn(), catch: vi.fn() };
+    });
+
+    // Track messages inserts so we can verify the outbound message body
+    const messagesInserts: unknown[] = [];
+    (supabaseAdmin as AnyMock).mockReturnValue({
+      from: vi.fn().mockImplementation((table: string) => {
+        if (table === "athletes") {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({
+                  data: {
+                    id: ATHLETE_ID,
+                    telegram_chat_id: String(CHAT_ID),
+                    onboarding_state: { step: 7 }, // complete
+                  },
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === "messages") {
+          return {
+            insert: vi.fn().mockImplementation((row: unknown) => {
+              messagesInserts.push(row);
+              return Promise.resolve({ error: null });
+            }),
+          };
+        }
+        return {};
+      }),
+    });
+
+    const ctx = makeCtx();
+
+    await handleConnectStravaCommand(ctx as AnyMock);
+
+    // No refusal reply
+    expect(ctx.reply).not.toHaveBeenCalled();
+
+    // Telegram message sent via Bot.api.sendMessage
+    expect(sendMessageMock).toHaveBeenCalledOnce();
+    const [, sentText] = (sendMessageMock as AnyMock).mock.calls[0] as [unknown, string];
+    expect(sentText).toContain(`/strava/connect?athlete_id=${ATHLETE_ID}`);
+    expect(sentText).toContain("https://hammytime.example.com");
+
+    // Outbound logged to messages table
+    const outbound = (messagesInserts as Array<{ direction: string; body: string }>)
+      .find((r) => r.direction === "out");
+    expect(outbound).toBeDefined();
+    expect(outbound!.body).toContain(`/strava/connect?athlete_id=${ATHLETE_ID}`);
   });
 });

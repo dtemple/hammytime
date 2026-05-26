@@ -122,6 +122,24 @@ async function callStravaActivities(
 // ---------------------------------------------------------------------------
 
 /**
+ * Returns true if the athlete has a Strava oauth_tokens row on file.
+ *
+ * Does not decrypt or validate the token. Use this to distinguish
+ * "no connection" from "connected but no recent activities" before
+ * calling fetchRecentActivities — the latter returns [] silently for
+ * both cases, which is ambiguous.
+ */
+export async function hasStravaConnection(athleteId: string): Promise<boolean> {
+  const { data } = await supabaseAdmin()
+    .from("oauth_tokens")
+    .select("id")
+    .eq("athlete_id", athleteId)
+    .eq("provider", "strava")
+    .maybeSingle();
+  return !!data;
+}
+
+/**
  * Returns the last `days` days of Strava activities for an athlete.
  *
  * Returns an empty array if:

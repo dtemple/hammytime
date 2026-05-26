@@ -6,7 +6,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/db", () => ({ supabaseAdmin: vi.fn() }));
 vi.mock("@/lib/anthropic", () => ({ anthropicClient: vi.fn() }));
-vi.mock("@/server/strava/activities", () => ({ fetchRecentActivities: vi.fn() }));
+vi.mock("@/server/strava/activities", () => ({
+  fetchRecentActivities: vi.fn(),
+  hasStravaConnection: vi.fn(),
+}));
 
 // byo-plan loadAthleteData is imported inside daily-checkin.ts.
 // We mock it at the module level so tests control the return value.
@@ -19,7 +22,7 @@ vi.mock("fs", () => ({
 
 import { supabaseAdmin } from "@/lib/db";
 import { anthropicClient } from "@/lib/anthropic";
-import { fetchRecentActivities } from "@/server/strava/activities";
+import { fetchRecentActivities, hasStravaConnection } from "@/server/strava/activities";
 import { loadAthleteData } from "../byo-plan";
 import { runDailyCheckin, appendCheckinEntry, buildUserMessage } from "../daily-checkin";
 import type { StravaActivitySummary } from "@/server/strava/activities";
@@ -208,6 +211,7 @@ describe("runDailyCheckin", () => {
     const db = makeDb();
     (supabaseAdmin as AnyMock).mockReturnValue(db);
     (loadAthleteData as AnyMock).mockResolvedValue(ATHLETE_DATA);
+    (hasStravaConnection as AnyMock).mockResolvedValue(true);
     (fetchRecentActivities as AnyMock).mockResolvedValue(TWO_ACTIVITIES);
     const client = makeAnthropicClient("Good form today. Easy 6 at RPE 4.");
     (anthropicClient as AnyMock).mockReturnValue(client);
@@ -230,6 +234,7 @@ describe("runDailyCheckin", () => {
     const db = makeDb();
     (supabaseAdmin as AnyMock).mockReturnValue(db);
     (loadAthleteData as AnyMock).mockResolvedValue(ATHLETE_DATA);
+    (hasStravaConnection as AnyMock).mockResolvedValue(true);
     (fetchRecentActivities as AnyMock).mockResolvedValue([]);
     const client = makeAnthropicClient();
     (anthropicClient as AnyMock).mockReturnValue(client);
@@ -250,6 +255,7 @@ describe("runDailyCheckin", () => {
     const db = makeDb();
     (supabaseAdmin as AnyMock).mockReturnValue(db);
     (loadAthleteData as AnyMock).mockResolvedValue(ATHLETE_DATA);
+    (hasStravaConnection as AnyMock).mockResolvedValue(true);
     (fetchRecentActivities as AnyMock).mockResolvedValue([]);
     const client = makeAnthropicClient("Rest day looks right given the zeros.");
     (anthropicClient as AnyMock).mockReturnValue(client);
@@ -261,6 +267,81 @@ describe("runDailyCheckin", () => {
     const [call] = (client.messages.create as AnyMock).mock.calls[0] as [Record<string, unknown>];
     const msgs = call.messages as Array<{ content: string }>;
     expect(msgs[0]!.content).toContain("No Strava activities found");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runDailyCheckin — Strava graceful degradation
+// ---------------------------------------------------------------------------
+
+describe("runDailyCheckin — Strava graceful degradation", () => {
+  it("no oauth_tokens row: skips Strava fetch, message tells athlete to /connect_strava", async () => {
+    const db = makeDb();
+    (supabaseAdmin as AnyMock).mockReturnValue(db);
+    (loadAthleteData as AnyMock).mockResolvedValue(ATHLETE_DATA);
+    (hasStravaConnection as AnyMock).mockResolvedValue(false);
+    const client = makeAnthropicClient("No Strava yet — let's work from your wellness data.");
+    (anthropicClient as AnyMock).mockReturnValue(client);
+
+    const result = await runDailyCheckin(ATHLETE_ID, WELLNESS);
+
+    // fetchRecentActivities should never be called when there's no connection
+    expect(fetchRecentActivities).not.toHaveBeenCalled();
+
+    // Claude still got called and produced a response
+    expect(result.telegramMessage).toBeTruthy();
+
+    // The user message passed to Claude should contain the fallback text
+    const [call] = (client.messages.create as AnyMock).mock.calls[0] as [Record<string, unknown>];
+    const msgs = call.messages as Array<{ content: string }>;
+    expect(msgs[0]!.content).toContain("/connect\\_strava");
+    expect(msgs[0]!.content).not.toContain("No Strava activities found");
+  });
+
+  it("broken token: fetchRecentActivities throws → fallback message, error logged in agent_runs", async () => {
+    const db = makeDb();
+    (supabaseAdmin as AnyMock).mockReturnValue(db);
+    (loadAthleteData as AnyMock).mockResolvedValue(ATHLETE_DATA);
+    (hasStravaConnection as AnyMock).mockResolvedValue(true);
+    (fetchRecentActivities as AnyMock).mockRejectedValue(new Error("refresh_token rejected by Strava"));
+    const client = makeAnthropicClient("Token broken — coach response without training data.");
+    (anthropicClient as AnyMock).mockReturnValue(client);
+
+    const result = await runDailyCheckin(ATHLETE_ID, WELLNESS);
+
+    // Still produces a response
+    expect(result.telegramMessage).toBeTruthy();
+
+    // Fallback text in the Claude user message
+    const [call] = (client.messages.create as AnyMock).mock.calls[0] as [Record<string, unknown>];
+    const msgs = call.messages as Array<{ content: string }>;
+    expect(msgs[0]!.content).toContain("/connect\\_strava");
+
+    // agent_runs insert should include the error string
+    expect(db.agentRunsInsertMock).toHaveBeenCalledOnce();
+    const [insertArg] = (db.agentRunsInsertMock as AnyMock).mock.calls[0] as [Record<string, unknown>];
+    expect(typeof insertArg.error).toBe("string");
+    expect((insertArg.error as string).length).toBeGreaterThan(0);
+  });
+
+  it("valid token: fetchRecentActivities called and activities appear in message", async () => {
+    const db = makeDb();
+    (supabaseAdmin as AnyMock).mockReturnValue(db);
+    (loadAthleteData as AnyMock).mockResolvedValue(ATHLETE_DATA);
+    (hasStravaConnection as AnyMock).mockResolvedValue(true);
+    (fetchRecentActivities as AnyMock).mockResolvedValue(TWO_ACTIVITIES);
+    const client = makeAnthropicClient("Strong week — 14 miles logged.");
+    (anthropicClient as AnyMock).mockReturnValue(client);
+
+    await runDailyCheckin(ATHLETE_ID, WELLNESS);
+
+    expect(fetchRecentActivities).toHaveBeenCalledOnce();
+
+    // Activities should appear in the Claude user message (the table rows)
+    const [call] = (client.messages.create as AnyMock).mock.calls[0] as [Record<string, unknown>];
+    const msgs = call.messages as Array<{ content: string }>;
+    expect(msgs[0]!.content).toContain("2026-05-24"); // first activity date
+    expect(msgs[0]!.content).not.toContain("/connect\\_strava");
   });
 });
 

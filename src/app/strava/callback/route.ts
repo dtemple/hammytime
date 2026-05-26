@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { verify } from "@/lib/state-sign";
 import { exchangeCode } from "@/server/strava/client";
 import { encryptToken } from "@/lib/crypto";
 import { supabaseAdmin } from "@/lib/db";
+import { sendAndLog } from "@/server/telegram/bot";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
@@ -67,6 +69,26 @@ export async function GET(req: NextRequest) {
       { error: `DB upsert failed: ${upsertErr.message}` },
       { status: 500 }
     );
+  }
+
+  // Telegram confirmation — best-effort, never fails the callback.
+  try {
+    const { data: confirmedAthlete } = await db
+      .from("athletes")
+      .select("id, telegram_chat_id")
+      .eq("id", athleteId)
+      .maybeSingle();
+
+    if (confirmedAthlete?.telegram_chat_id) {
+      await sendAndLog(
+        confirmedAthlete.id,
+        confirmedAthlete.telegram_chat_id,
+        "Strava connected. I can now read your training when you /checkin."
+      );
+    }
+  } catch (err) {
+    Sentry.captureException(err);
+    // Continue — browser still gets the connected page.
   }
 
   const redirectUrl = new URL("/strava/connected", req.nextUrl.origin);
