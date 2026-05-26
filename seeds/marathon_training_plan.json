@@ -1,0 +1,2943 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "plan_version": "2.0",
+  "created": "2026-03-26",
+  "metadata": {
+    "athlete": {
+      "age": 43,
+      "sex": "male",
+      "baseline_weekly_miles": {
+        "min": 10,
+        "max": 15
+      },
+      "baseline_long_run_miles": 7
+    },
+    "race": {
+      "name": "Trail Marathon",
+      "date": "2026-08-30",
+      "day_of_week": "Sunday",
+      "distance_miles": 26.2,
+      "type": "trail",
+      "elevation_gain_ft": 4000,
+      "goal": "finish"
+    },
+    "plan_structure": {
+      "total_weeks": 22,
+      "start_date": "2026-03-30",
+      "end_date": "2026-08-30",
+      "days_per_week": 6,
+      "rest_day": "Sunday",
+      "runs_per_week": 4,
+      "strength_sessions_per_week": 2,
+      "long_run_day": "Monday",
+      "phases": [
+        {
+          "name": "base",
+          "weeks": [
+            1,
+            2,
+            3
+          ],
+          "description": "Build aerobic foundation and adapt to training structure"
+        },
+        {
+          "name": "build",
+          "weeks": [
+            5,
+            6,
+            7,
+            9,
+            10,
+            11
+          ],
+          "description": "Progressive mileage increase with hill and tempo work"
+        },
+        {
+          "name": "cutback",
+          "weeks": [
+            4,
+            8,
+            12,
+            16
+          ],
+          "description": "Recovery weeks \u2014 reduce volume ~20% to absorb training"
+        },
+        {
+          "name": "peak",
+          "weeks": [
+            13,
+            14,
+            15,
+            17,
+            18
+          ],
+          "description": "Highest volume and intensity; race-specific preparation"
+        },
+        {
+          "name": "taper",
+          "weeks": [
+            19,
+            20,
+            21
+          ],
+          "description": "Reduce volume while maintaining intensity; freshen legs"
+        },
+        {
+          "name": "race",
+          "weeks": [
+            22
+          ],
+          "description": "Race week \u2014 minimal running, maximum rest"
+        }
+      ]
+    }
+  },
+  "agent_guidance": {
+    "description": "Rules and thresholds for an AI agent to evaluate athlete compliance and suggest modifications based on watch data.",
+    "pace_zones": {
+      "note": "Trail paces vary widely by terrain and elevation. Use heart rate zones as primary intensity guide; pace as secondary.",
+      "easy": {
+        "description": "Conversational effort; can speak in full sentences",
+        "hr_zone": [
+          1,
+          2
+        ],
+        "hr_percent_max": [
+          60,
+          75
+        ],
+        "rpe": [
+          3,
+          5
+        ]
+      },
+      "long_run": {
+        "description": "Slightly slower than easy; focus on time on feet",
+        "hr_zone": [
+          1,
+          2
+        ],
+        "hr_percent_max": [
+          60,
+          72
+        ],
+        "rpe": [
+          3,
+          5
+        ]
+      },
+      "tempo": {
+        "description": "Comfortably hard; can speak in short phrases only",
+        "hr_zone": [
+          3,
+          4
+        ],
+        "hr_percent_max": [
+          76,
+          87
+        ],
+        "rpe": [
+          6,
+          7
+        ]
+      },
+      "hill_repeat": {
+        "description": "Hard uphill effort; recovery jog/walk downhill",
+        "hr_zone": [
+          4,
+          5
+        ],
+        "hr_percent_max": [
+          85,
+          95
+        ],
+        "rpe": [
+          7,
+          9
+        ]
+      },
+      "strides": {
+        "description": "Short 20-sec bursts at fast but relaxed effort; full recovery between",
+        "hr_zone": [
+          4,
+          5
+        ],
+        "hr_percent_max": [
+          85,
+          95
+        ],
+        "rpe": [
+          7,
+          8
+        ]
+      }
+    },
+    "compliance_rules": [
+      {
+        "rule_id": "distance_tolerance",
+        "description": "Planned vs actual distance tolerance",
+        "threshold_percent": 15,
+        "action": "If actual distance deviates more than 15% from planned, flag for review. Under = possible fatigue or injury. Over = risk of overtraining."
+      },
+      {
+        "rule_id": "easy_pace_too_fast",
+        "description": "Easy and long runs should stay in zone 1-2",
+        "condition": "avg_hr_percent_max > 75 on easy or long_run workouts",
+        "action": "Advise athlete to slow down. Running easy runs too fast is the #1 amateur mistake and increases injury risk."
+      },
+      {
+        "rule_id": "long_run_progression",
+        "description": "Long run distance should not jump more than ~2 miles week over week (except after cutback)",
+        "max_increase_miles": 2,
+        "exception": "Week following a cutback week may increase up to 3 miles",
+        "action": "If athlete ran significantly longer than planned, warn about injury risk."
+      },
+      {
+        "rule_id": "weekly_volume_cap",
+        "description": "Weekly mileage should not exceed planned by more than 15%",
+        "threshold_percent": 15,
+        "action": "Flag overtraining risk. Suggest reducing an easy run next week."
+      },
+      {
+        "rule_id": "missed_workout",
+        "description": "Athlete missed a planned workout",
+        "action": "If missed workout is easy run: no adjustment needed. If missed workout is long run: do NOT try to make it up mid-week; shift to next Monday. If missed hill session: swap one easy run for strides to maintain some intensity."
+      },
+      {
+        "rule_id": "missed_week",
+        "description": "Athlete missed an entire week",
+        "action": "Repeat the previous week's plan rather than jumping forward. If in taper, continue taper as planned."
+      },
+      {
+        "rule_id": "elevated_resting_hr",
+        "description": "Resting heart rate elevated >5 bpm above baseline for 2+ days",
+        "action": "Possible overtraining, illness, or under-recovery. Suggest replacing next quality session with easy run or rest day."
+      },
+      {
+        "rule_id": "pain_or_injury_flag",
+        "description": "Athlete reports pain or watch detects unusual gait/cadence patterns",
+        "action": "Reduce volume by 30% for the current week. Replace hill repeats with flat easy runs. If pain persists 3+ days, recommend rest and medical evaluation."
+      },
+      {
+        "rule_id": "cutback_week_compliance",
+        "description": "Cutback weeks must be honored",
+        "action": "If athlete ran more than planned during a cutback week, advise them that recovery weeks are essential and the next week should not increase from the pre-cutback level."
+      },
+      {
+        "rule_id": "elevation_training",
+        "description": "Long runs should include elevation gain when possible to prepare for race-day 4000 ft",
+        "target": "At least 50% of long runs (weeks 5+) should include meaningful elevation",
+        "action": "If watch data shows flat long runs for 3+ consecutive weeks, suggest seeking hillier routes."
+      },
+      {
+        "rule_id": "heat_adaptation",
+        "description": "Race is August 30; summer heat is a factor",
+        "action": "If watch data shows high temps (>80F) on workout days, advise: run earlier in the day, reduce pace expectations by 30-60 sec/mile, increase hydration, watch for HR drift (HR climbing at same pace = heat stress)."
+      }
+    ],
+    "modification_triggers": {
+      "feeling_great": "If athlete consistently runs faster than easy pace with HR in zone 1-2, they may be fitter than expected. Consider adding 0.5-1 mile to easy runs, but do NOT increase long run distance beyond plan.",
+      "feeling_fatigued": "If HR is consistently higher than expected at planned paces, or athlete reports fatigue: reduce easy run distances by 20%, keep long run distance but slow pace, consider extra rest day replacing a strength session.",
+      "time_crunched": "If athlete cannot fit all 6 sessions: priority order is (1) Monday long run, (2) Thursday hills/tempo, (3) Friday lower strength, (4) Tuesday easy run, (5) Wednesday upper strength, (6) Saturday easy run.",
+      "weather_disruption": "If outdoor running not possible: treadmill with incline is acceptable substitute. Set 4-8% incline for hill sessions. For strength days, no change needed."
+    }
+  },
+  "strength_workouts": {
+    "upper_body": {
+      "day": "Wednesday",
+      "standard_duration_min": 40,
+      "taper_duration_min": 30,
+      "race_week_duration_min": 20,
+      "exercises": [
+        {
+          "name": "Push-ups or Bench Press",
+          "sets": 3,
+          "reps": 10,
+          "taper_sets": 2,
+          "taper_reps": 10,
+          "muscle_group": "chest"
+        },
+        {
+          "name": "Bent-Over Rows",
+          "sets": 3,
+          "reps": 10,
+          "taper_sets": 2,
+          "taper_reps": 10,
+          "muscle_group": "back"
+        },
+        {
+          "name": "Overhead Shoulder Press",
+          "sets": 3,
+          "reps": 10,
+          "taper_sets": 2,
+          "taper_reps": 10,
+          "muscle_group": "shoulders"
+        },
+        {
+          "name": "Pull-ups or Lat Pulldown",
+          "sets": 3,
+          "reps": 8,
+          "taper_sets": 2,
+          "taper_reps": 8,
+          "muscle_group": "back"
+        },
+        {
+          "name": "Plank Hold",
+          "sets": 3,
+          "reps_unit": "seconds",
+          "reps": 45,
+          "taper_sets": 2,
+          "taper_reps": 30,
+          "muscle_group": "core"
+        },
+        {
+          "name": "Dead Bug",
+          "sets": 3,
+          "reps": 10,
+          "reps_unit": "per_side",
+          "taper_sets": 2,
+          "taper_reps": 8,
+          "muscle_group": "core"
+        },
+        {
+          "name": "Pallof Press",
+          "sets": 3,
+          "reps": 10,
+          "reps_unit": "per_side",
+          "taper_sets": 2,
+          "taper_reps": 8,
+          "muscle_group": "core"
+        },
+        {
+          "name": "Bird Dog",
+          "sets": 3,
+          "reps": 10,
+          "reps_unit": "per_side",
+          "taper_sets": 2,
+          "taper_reps": 8,
+          "muscle_group": "core"
+        }
+      ]
+    },
+    "lower_body": {
+      "day": "Friday",
+      "standard_duration_min": 40,
+      "taper_duration_min": 30,
+      "race_week_duration_min": 0,
+      "exercises": [
+        {
+          "name": "Goblet/Barbell Squats",
+          "sets": 3,
+          "reps": 10,
+          "taper_sets": 2,
+          "taper_reps": 10,
+          "muscle_group": "quads/glutes"
+        },
+        {
+          "name": "Single-Leg Romanian Deadlift",
+          "sets": 3,
+          "reps": 8,
+          "reps_unit": "per_leg",
+          "taper_sets": 2,
+          "taper_reps": 8,
+          "muscle_group": "hamstrings/balance",
+          "trail_note": "Key trail exercise for uneven terrain stability"
+        },
+        {
+          "name": "Walking Lunges",
+          "sets": 3,
+          "reps": 10,
+          "reps_unit": "per_leg",
+          "taper_sets": 2,
+          "taper_reps": 8,
+          "muscle_group": "quads/glutes"
+        },
+        {
+          "name": "Step-Ups (high box)",
+          "sets": 3,
+          "reps": 10,
+          "reps_unit": "per_leg",
+          "taper_sets": 2,
+          "taper_reps": 8,
+          "muscle_group": "quads/glutes",
+          "trail_note": "Simulates trail climbing"
+        },
+        {
+          "name": "Single-Leg Glute Bridges",
+          "sets": 3,
+          "reps": 10,
+          "reps_unit": "per_leg",
+          "taper_sets": 2,
+          "taper_reps": 10,
+          "muscle_group": "glutes"
+        },
+        {
+          "name": "Eccentric Calf Raises",
+          "sets": 3,
+          "reps": 15,
+          "taper_sets": 2,
+          "taper_reps": 12,
+          "muscle_group": "calves",
+          "trail_note": "Slow 3-sec lowering protects against downhill strain"
+        },
+        {
+          "name": "Ankle Band Work",
+          "sets": 2,
+          "reps": 15,
+          "reps_unit": "per_direction",
+          "taper_sets": 2,
+          "taper_reps": 15,
+          "muscle_group": "ankles",
+          "trail_note": "Prevents ankle sprains on uneven terrain"
+        },
+        {
+          "name": "Single-Leg Balance",
+          "sets": 3,
+          "reps": 30,
+          "reps_unit": "seconds_per_leg",
+          "taper_sets": 3,
+          "taper_reps": 30,
+          "muscle_group": "proprioception"
+        },
+        {
+          "name": "Foam Rolling",
+          "duration_min": 10,
+          "areas": [
+            "quads",
+            "hamstrings",
+            "IT band",
+            "calves",
+            "glutes"
+          ],
+          "taper_duration_min": 10
+        }
+      ]
+    }
+  },
+  "weeks": [
+    {
+      "week_number": 1,
+      "start_date": "2026-03-30",
+      "end_date": "2026-04-05",
+      "phase": "base",
+      "planned_total_run_miles": 16,
+      "coaching_note": "Settle into new schedule; all easy effort",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-03-30",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 7 miles",
+          "planned_distance_miles": 7,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": false
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-03-31",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 3 miles",
+          "planned_distance_miles": 3,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-04-01",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-04-02",
+          "type": "easy_with_strides",
+          "category": "run",
+          "description": "Easy run with 4-6 x 20-sec strides \u2014 3 miles",
+          "planned_distance_miles": 3,
+          "intensity": "easy",
+          "strides": {
+            "count": [
+              4,
+              6
+            ],
+            "duration_sec": 20,
+            "recovery": "full"
+          },
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ]
+        },
+        {
+          "day": "Friday",
+          "date": "2026-04-03",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-04-04",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 3 miles",
+          "planned_distance_miles": 3,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-04-05",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 2,
+      "start_date": "2026-04-06",
+      "end_date": "2026-04-12",
+      "phase": "base",
+      "planned_total_run_miles": 17.5,
+      "coaching_note": "Find trails for long runs; practice footing",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-04-06",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 8 miles",
+          "planned_distance_miles": 8,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": false
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-04-07",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 3 miles",
+          "planned_distance_miles": 3,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-04-08",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-04-09",
+          "type": "easy_with_strides",
+          "category": "run",
+          "description": "Easy run with 4-6 x 20-sec strides \u2014 3.5 miles",
+          "planned_distance_miles": 3.5,
+          "intensity": "easy",
+          "strides": {
+            "count": [
+              4,
+              6
+            ],
+            "duration_sec": 20,
+            "recovery": "full"
+          },
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ]
+        },
+        {
+          "day": "Friday",
+          "date": "2026-04-10",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-04-11",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 3 miles",
+          "planned_distance_miles": 3,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-04-12",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 3,
+      "start_date": "2026-04-13",
+      "end_date": "2026-04-19",
+      "phase": "base",
+      "planned_total_run_miles": 20.0,
+      "coaching_note": "First hill session: 4x90 sec uphill, jog down",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-04-13",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 9 miles",
+          "planned_distance_miles": 9,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": false
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-04-14",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 3.5 miles",
+          "planned_distance_miles": 3.5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-04-15",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-04-16",
+          "type": "hill_repeats",
+          "category": "run",
+          "description": "4x90 sec uphill, jog/walk down recovery",
+          "planned_distance_miles": 4,
+          "intensity": "hard",
+          "warmup_min": 10,
+          "cooldown_min": 10,
+          "repeats": 4,
+          "repeat_duration_sec": 90,
+          "recovery": "jog/walk back downhill",
+          "target_hill_grade_percent": [
+            6,
+            8
+          ],
+          "uphill_hr_zone": [
+            4,
+            5
+          ],
+          "uphill_rpe": [
+            7,
+            9
+          ],
+          "target_hr_zone": [
+            3,
+            5
+          ],
+          "target_rpe": [
+            5,
+            9
+          ]
+        },
+        {
+          "day": "Friday",
+          "date": "2026-04-17",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-04-18",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 3.5 miles",
+          "planned_distance_miles": 3.5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-04-19",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 4,
+      "start_date": "2026-04-20",
+      "end_date": "2026-04-26",
+      "phase": "cutback",
+      "planned_total_run_miles": 16,
+      "coaching_note": "Recovery week \u2014 absorb 3 weeks of training",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-04-20",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 7 miles",
+          "planned_distance_miles": 7,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": false
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-04-21",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 3 miles",
+          "planned_distance_miles": 3,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-04-22",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-04-23",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 3 miles",
+          "planned_distance_miles": 3,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Friday",
+          "date": "2026-04-24",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-04-25",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 3 miles",
+          "planned_distance_miles": 3,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-04-26",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 5,
+      "start_date": "2026-04-27",
+      "end_date": "2026-05-03",
+      "phase": "build",
+      "planned_total_run_miles": 21.0,
+      "coaching_note": "First double digits! 5x90 sec hills",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-04-27",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 10 miles",
+          "planned_distance_miles": 10,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": true
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-04-28",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 3.5 miles",
+          "planned_distance_miles": 3.5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-04-29",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-04-30",
+          "type": "hill_repeats",
+          "category": "run",
+          "description": "5x90 sec uphill, jog/walk down recovery",
+          "planned_distance_miles": 4,
+          "intensity": "hard",
+          "warmup_min": 10,
+          "cooldown_min": 10,
+          "repeats": 5,
+          "repeat_duration_sec": 90,
+          "recovery": "jog/walk back downhill",
+          "target_hill_grade_percent": [
+            6,
+            8
+          ],
+          "uphill_hr_zone": [
+            4,
+            5
+          ],
+          "uphill_rpe": [
+            7,
+            9
+          ],
+          "target_hr_zone": [
+            3,
+            5
+          ],
+          "target_rpe": [
+            5,
+            9
+          ]
+        },
+        {
+          "day": "Friday",
+          "date": "2026-05-01",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-05-02",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 3.5 miles",
+          "planned_distance_miles": 3.5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-05-03",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 6,
+      "start_date": "2026-05-04",
+      "end_date": "2026-05-10",
+      "phase": "build",
+      "planned_total_run_miles": 23.5,
+      "coaching_note": "20 min at comfortably hard effort on trails",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-05-04",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 11 miles",
+          "planned_distance_miles": 11,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": true
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-05-05",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 4 miles",
+          "planned_distance_miles": 4,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-05-06",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-05-07",
+          "type": "trail_tempo",
+          "category": "run",
+          "description": "20 min comfortably hard on trails",
+          "planned_distance_miles": 4.5,
+          "intensity": "moderate_hard",
+          "warmup_min": 10,
+          "cooldown_min": 10,
+          "tempo_block_min": 20,
+          "target_hr_zone": [
+            3,
+            4
+          ],
+          "target_rpe": [
+            6,
+            7
+          ],
+          "prefer_trail": true
+        },
+        {
+          "day": "Friday",
+          "date": "2026-05-08",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-05-09",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 4 miles",
+          "planned_distance_miles": 4,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-05-10",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 7,
+      "start_date": "2026-05-11",
+      "end_date": "2026-05-17",
+      "phase": "build",
+      "planned_total_run_miles": 24.5,
+      "coaching_note": "6x90 sec hills; practice downhill running form",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-05-11",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 12 miles",
+          "planned_distance_miles": 12,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": true
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-05-12",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 4 miles",
+          "planned_distance_miles": 4,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-05-13",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-05-14",
+          "type": "hill_repeats",
+          "category": "run",
+          "description": "6x90 sec uphill, jog/walk down recovery",
+          "planned_distance_miles": 4.5,
+          "intensity": "hard",
+          "warmup_min": 10,
+          "cooldown_min": 10,
+          "repeats": 6,
+          "repeat_duration_sec": 90,
+          "recovery": "jog/walk back downhill",
+          "target_hill_grade_percent": [
+            6,
+            8
+          ],
+          "uphill_hr_zone": [
+            4,
+            5
+          ],
+          "uphill_rpe": [
+            7,
+            9
+          ],
+          "target_hr_zone": [
+            3,
+            5
+          ],
+          "target_rpe": [
+            5,
+            9
+          ]
+        },
+        {
+          "day": "Friday",
+          "date": "2026-05-15",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-05-16",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 4 miles",
+          "planned_distance_miles": 4,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-05-17",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 8,
+      "start_date": "2026-05-18",
+      "end_date": "2026-05-24",
+      "phase": "cutback",
+      "planned_total_run_miles": 20.0,
+      "coaching_note": "Recovery week \u2014 focus on sleep and mobility",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-05-18",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 10 miles",
+          "planned_distance_miles": 10,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": true
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-05-19",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 3.5 miles",
+          "planned_distance_miles": 3.5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-05-20",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-05-21",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 3.5 miles",
+          "planned_distance_miles": 3.5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Friday",
+          "date": "2026-05-22",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-05-23",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 3 miles",
+          "planned_distance_miles": 3,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-05-24",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 9,
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-31",
+      "phase": "build",
+      "planned_total_run_miles": 26,
+      "coaching_note": "Half marathon distance! 6x2 min hills",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-05-25",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 13 miles",
+          "planned_distance_miles": 13,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": true,
+          "nutrition_practice": true,
+          "nutrition_note": "Practice race-day fueling: 30-60g carbs/hour"
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-05-26",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 4 miles",
+          "planned_distance_miles": 4,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-05-27",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-05-28",
+          "type": "hill_repeats",
+          "category": "run",
+          "description": "6x2 min uphill, jog/walk down recovery",
+          "planned_distance_miles": 5,
+          "intensity": "hard",
+          "warmup_min": 10,
+          "cooldown_min": 10,
+          "repeats": 6,
+          "repeat_duration_sec": 120,
+          "recovery": "jog/walk back downhill",
+          "target_hill_grade_percent": [
+            6,
+            8
+          ],
+          "uphill_hr_zone": [
+            4,
+            5
+          ],
+          "uphill_rpe": [
+            7,
+            9
+          ],
+          "target_hr_zone": [
+            3,
+            5
+          ],
+          "target_rpe": [
+            5,
+            9
+          ]
+        },
+        {
+          "day": "Friday",
+          "date": "2026-05-29",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-05-30",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 4 miles",
+          "planned_distance_miles": 4,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-05-31",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 10,
+      "start_date": "2026-06-01",
+      "end_date": "2026-06-07",
+      "phase": "build",
+      "planned_total_run_miles": 27.5,
+      "coaching_note": "25 min tempo; practice nutrition on long runs",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-06-01",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 14 miles",
+          "planned_distance_miles": 14,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": true,
+          "nutrition_practice": true,
+          "nutrition_note": "Practice race-day fueling: 30-60g carbs/hour"
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-06-02",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 4.5 miles",
+          "planned_distance_miles": 4.5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-06-03",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-06-04",
+          "type": "trail_tempo",
+          "category": "run",
+          "description": "25 min comfortably hard on trails",
+          "planned_distance_miles": 5,
+          "intensity": "moderate_hard",
+          "warmup_min": 10,
+          "cooldown_min": 10,
+          "tempo_block_min": 25,
+          "target_hr_zone": [
+            3,
+            4
+          ],
+          "target_rpe": [
+            6,
+            7
+          ],
+          "prefer_trail": true
+        },
+        {
+          "day": "Friday",
+          "date": "2026-06-05",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-06-06",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 4 miles",
+          "planned_distance_miles": 4,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-06-07",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 11,
+      "start_date": "2026-06-08",
+      "end_date": "2026-06-14",
+      "phase": "build",
+      "planned_total_run_miles": 29.0,
+      "coaching_note": "7x2 min hills; simulate race elevation",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-06-08",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 15 miles",
+          "planned_distance_miles": 15,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": true,
+          "nutrition_practice": true,
+          "nutrition_note": "Practice race-day fueling: 30-60g carbs/hour"
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-06-09",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 4.5 miles",
+          "planned_distance_miles": 4.5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-06-10",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-06-11",
+          "type": "hill_repeats",
+          "category": "run",
+          "description": "7x2 min uphill, jog/walk down recovery",
+          "planned_distance_miles": 5,
+          "intensity": "hard",
+          "warmup_min": 10,
+          "cooldown_min": 10,
+          "repeats": 7,
+          "repeat_duration_sec": 120,
+          "recovery": "jog/walk back downhill",
+          "target_hill_grade_percent": [
+            6,
+            8
+          ],
+          "uphill_hr_zone": [
+            4,
+            5
+          ],
+          "uphill_rpe": [
+            7,
+            9
+          ],
+          "target_hr_zone": [
+            3,
+            5
+          ],
+          "target_rpe": [
+            5,
+            9
+          ]
+        },
+        {
+          "day": "Friday",
+          "date": "2026-06-12",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-06-13",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 4.5 miles",
+          "planned_distance_miles": 4.5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-06-14",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 12,
+      "start_date": "2026-06-15",
+      "end_date": "2026-06-21",
+      "phase": "cutback",
+      "planned_total_run_miles": 23.5,
+      "coaching_note": "Recovery week \u2014 you've earned it",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-06-15",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 12 miles",
+          "planned_distance_miles": 12,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": true
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-06-16",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 4 miles",
+          "planned_distance_miles": 4,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-06-17",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-06-18",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 4 miles",
+          "planned_distance_miles": 4,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Friday",
+          "date": "2026-06-19",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-06-20",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 3.5 miles",
+          "planned_distance_miles": 3.5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-06-21",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 13,
+      "start_date": "2026-06-22",
+      "end_date": "2026-06-28",
+      "phase": "peak",
+      "planned_total_run_miles": 30.0,
+      "coaching_note": "Long run on hilly trail if possible",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-06-22",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 16 miles",
+          "planned_distance_miles": 16,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": true,
+          "nutrition_practice": true,
+          "nutrition_note": "Practice race-day fueling: 30-60g carbs/hour",
+          "power_hike_practice": true,
+          "power_hike_note": "Power-hike grades steeper than 15%"
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-06-23",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 4.5 miles",
+          "planned_distance_miles": 4.5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-06-24",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-06-25",
+          "type": "trail_tempo",
+          "category": "run",
+          "description": "25 min comfortably hard on trails",
+          "planned_distance_miles": 5,
+          "intensity": "moderate_hard",
+          "warmup_min": 10,
+          "cooldown_min": 10,
+          "tempo_block_min": 25,
+          "target_hr_zone": [
+            3,
+            4
+          ],
+          "target_rpe": [
+            6,
+            7
+          ],
+          "prefer_trail": true
+        },
+        {
+          "day": "Friday",
+          "date": "2026-06-26",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-06-27",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 4.5 miles",
+          "planned_distance_miles": 4.5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-06-28",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 14,
+      "start_date": "2026-06-29",
+      "end_date": "2026-07-05",
+      "phase": "peak",
+      "planned_total_run_miles": 31.5,
+      "coaching_note": "8x2 min hills; practice power hiking",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-06-29",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 17 miles",
+          "planned_distance_miles": 17,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": true,
+          "nutrition_practice": true,
+          "nutrition_note": "Practice race-day fueling: 30-60g carbs/hour",
+          "power_hike_practice": true,
+          "power_hike_note": "Power-hike grades steeper than 15%"
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-06-30",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 5 miles",
+          "planned_distance_miles": 5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-07-01",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-07-02",
+          "type": "hill_repeats",
+          "category": "run",
+          "description": "8x2 min uphill, jog/walk down recovery",
+          "planned_distance_miles": 5,
+          "intensity": "hard",
+          "warmup_min": 10,
+          "cooldown_min": 10,
+          "repeats": 8,
+          "repeat_duration_sec": 120,
+          "recovery": "jog/walk back downhill",
+          "target_hill_grade_percent": [
+            6,
+            8
+          ],
+          "uphill_hr_zone": [
+            4,
+            5
+          ],
+          "uphill_rpe": [
+            7,
+            9
+          ],
+          "target_hr_zone": [
+            3,
+            5
+          ],
+          "target_rpe": [
+            5,
+            9
+          ]
+        },
+        {
+          "day": "Friday",
+          "date": "2026-07-03",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-07-04",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 4.5 miles",
+          "planned_distance_miles": 4.5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-07-05",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 15,
+      "start_date": "2026-07-06",
+      "end_date": "2026-07-12",
+      "phase": "peak",
+      "planned_total_run_miles": 33,
+      "coaching_note": "Rehearse race-day gear, nutrition, pacing",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-07-06",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 18 miles",
+          "planned_distance_miles": 18,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": true,
+          "nutrition_practice": true,
+          "nutrition_note": "Practice race-day fueling: 30-60g carbs/hour",
+          "power_hike_practice": true,
+          "power_hike_note": "Power-hike grades steeper than 15%"
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-07-07",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 5 miles",
+          "planned_distance_miles": 5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-07-08",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-07-09",
+          "type": "trail_tempo",
+          "category": "run",
+          "description": "25 min comfortably hard on trails",
+          "planned_distance_miles": 5,
+          "intensity": "moderate_hard",
+          "warmup_min": 10,
+          "cooldown_min": 10,
+          "tempo_block_min": 25,
+          "target_hr_zone": [
+            3,
+            4
+          ],
+          "target_rpe": [
+            6,
+            7
+          ],
+          "prefer_trail": true
+        },
+        {
+          "day": "Friday",
+          "date": "2026-07-10",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-07-11",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 5 miles",
+          "planned_distance_miles": 5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-07-12",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 16,
+      "start_date": "2026-07-13",
+      "end_date": "2026-07-19",
+      "phase": "cutback",
+      "planned_total_run_miles": 26,
+      "coaching_note": "Recovery before final peak push",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-07-13",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 14 miles",
+          "planned_distance_miles": 14,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": true,
+          "nutrition_practice": true,
+          "nutrition_note": "Practice race-day fueling: 30-60g carbs/hour"
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-07-14",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 4 miles",
+          "planned_distance_miles": 4,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-07-15",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-07-16",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 4 miles",
+          "planned_distance_miles": 4,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Friday",
+          "date": "2026-07-17",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-07-18",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 4 miles",
+          "planned_distance_miles": 4,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-07-19",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 17,
+      "start_date": "2026-07-20",
+      "end_date": "2026-07-26",
+      "phase": "peak",
+      "planned_total_run_miles": 35,
+      "coaching_note": "LONGEST RUN \u2014 on race-like terrain if possible",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-07-20",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 20 miles",
+          "planned_distance_miles": 20,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": true,
+          "nutrition_practice": true,
+          "nutrition_note": "Practice race-day fueling: 30-60g carbs/hour",
+          "power_hike_practice": true,
+          "power_hike_note": "Power-hike grades steeper than 15%"
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-07-21",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 5 miles",
+          "planned_distance_miles": 5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-07-22",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-07-23",
+          "type": "hill_repeats",
+          "category": "run",
+          "description": "8x2 min uphill, jog/walk down recovery",
+          "planned_distance_miles": 5,
+          "intensity": "hard",
+          "warmup_min": 10,
+          "cooldown_min": 10,
+          "repeats": 8,
+          "repeat_duration_sec": 120,
+          "recovery": "jog/walk back downhill",
+          "target_hill_grade_percent": [
+            6,
+            8
+          ],
+          "uphill_hr_zone": [
+            4,
+            5
+          ],
+          "uphill_rpe": [
+            7,
+            9
+          ],
+          "target_hr_zone": [
+            3,
+            5
+          ],
+          "target_rpe": [
+            5,
+            9
+          ]
+        },
+        {
+          "day": "Friday",
+          "date": "2026-07-24",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-07-25",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 5 miles",
+          "planned_distance_miles": 5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-07-26",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 18,
+      "start_date": "2026-07-27",
+      "end_date": "2026-08-02",
+      "phase": "peak",
+      "planned_total_run_miles": 32,
+      "coaching_note": "Confidence builder; trust your hill legs",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-07-27",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 18 miles",
+          "planned_distance_miles": 18,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": true,
+          "nutrition_practice": true,
+          "nutrition_note": "Practice race-day fueling: 30-60g carbs/hour",
+          "power_hike_practice": true,
+          "power_hike_note": "Power-hike grades steeper than 15%"
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-07-28",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 5 miles",
+          "planned_distance_miles": 5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-07-29",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-07-30",
+          "type": "trail_tempo",
+          "category": "run",
+          "description": "25-30 min comfortably hard on trails",
+          "planned_distance_miles": 5,
+          "intensity": "moderate_hard",
+          "warmup_min": 10,
+          "cooldown_min": 10,
+          "tempo_block_min": 30,
+          "target_hr_zone": [
+            3,
+            4
+          ],
+          "target_rpe": [
+            6,
+            7
+          ],
+          "prefer_trail": true
+        },
+        {
+          "day": "Friday",
+          "date": "2026-07-31",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 40 min",
+          "planned_duration_min": 40,
+          "intensity_level": "standard",
+          "use_taper_sets": false
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-08-01",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 4 miles",
+          "planned_distance_miles": 4,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-08-02",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 19,
+      "start_date": "2026-08-03",
+      "end_date": "2026-08-09",
+      "phase": "taper",
+      "planned_total_run_miles": 25.5,
+      "coaching_note": "Taper begins \u2014 same intensity, less volume",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-08-03",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 14 miles",
+          "planned_distance_miles": 14,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": true,
+          "nutrition_practice": true,
+          "nutrition_note": "Practice race-day fueling: 30-60g carbs/hour"
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-08-04",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 4 miles",
+          "planned_distance_miles": 4,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-08-05",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 30 min",
+          "planned_duration_min": 30,
+          "intensity_level": "taper",
+          "use_taper_sets": true
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-08-06",
+          "type": "easy_with_strides",
+          "category": "run",
+          "description": "Easy run with 4-6 x 20-sec strides \u2014 4 miles",
+          "planned_distance_miles": 4,
+          "intensity": "easy",
+          "strides": {
+            "count": [
+              4,
+              6
+            ],
+            "duration_sec": 20,
+            "recovery": "full"
+          },
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ]
+        },
+        {
+          "day": "Friday",
+          "date": "2026-08-07",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 30 min",
+          "planned_duration_min": 30,
+          "intensity_level": "taper",
+          "use_taper_sets": true
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-08-08",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 3.5 miles",
+          "planned_distance_miles": 3.5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-08-09",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 20,
+      "start_date": "2026-08-10",
+      "end_date": "2026-08-16",
+      "phase": "taper",
+      "planned_total_run_miles": 22.0,
+      "coaching_note": "Legs freshening up; stay loose and active",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-08-10",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 12 miles",
+          "planned_distance_miles": 12,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": true
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-08-11",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 3.5 miles",
+          "planned_distance_miles": 3.5,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-08-12",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 30 min",
+          "planned_duration_min": 30,
+          "intensity_level": "taper",
+          "use_taper_sets": true
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-08-13",
+          "type": "easy_with_strides",
+          "category": "run",
+          "description": "Easy run with 4-6 x 20-sec strides \u2014 3.5 miles",
+          "planned_distance_miles": 3.5,
+          "intensity": "easy",
+          "strides": {
+            "count": [
+              4,
+              6
+            ],
+            "duration_sec": 20,
+            "recovery": "full"
+          },
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ]
+        },
+        {
+          "day": "Friday",
+          "date": "2026-08-14",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 30 min",
+          "planned_duration_min": 30,
+          "intensity_level": "taper",
+          "use_taper_sets": true
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-08-15",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 3 miles",
+          "planned_distance_miles": 3,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-08-16",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 21,
+      "start_date": "2026-08-17",
+      "end_date": "2026-08-23",
+      "phase": "taper",
+      "planned_total_run_miles": 14,
+      "coaching_note": "Light running only; carb-load last 2-3 days",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-08-17",
+          "type": "long_run",
+          "category": "run",
+          "description": "Long run on trails \u2014 8 miles",
+          "planned_distance_miles": 8,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            5
+          ],
+          "prefer_trail": true,
+          "include_elevation": true
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-08-18",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 3 miles",
+          "planned_distance_miles": 3,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-08-19",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 30 min",
+          "planned_duration_min": 30,
+          "intensity_level": "taper",
+          "use_taper_sets": true
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-08-20",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy run \u2014 3 miles",
+          "planned_distance_miles": 3,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Friday",
+          "date": "2026-08-21",
+          "type": "lower_body_strength",
+          "category": "strength",
+          "description": "Lower body + stability \u2014 30 min",
+          "planned_duration_min": 30,
+          "intensity_level": "taper",
+          "use_taper_sets": true
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-08-22",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest"
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-08-23",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest day"
+        }
+      ]
+    },
+    {
+      "week_number": 22,
+      "start_date": "2026-08-24",
+      "end_date": "2026-08-30",
+      "phase": "race",
+      "planned_total_run_miles": 4,
+      "coaching_note": "RACE WEEK \u2014 Trust your training!",
+      "days": [
+        {
+          "day": "Monday",
+          "date": "2026-08-24",
+          "type": "easy",
+          "category": "run",
+          "description": "Shakeout jog",
+          "planned_distance_miles": 2,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            2,
+            4
+          ]
+        },
+        {
+          "day": "Tuesday",
+          "date": "2026-08-25",
+          "type": "easy",
+          "category": "run",
+          "description": "Easy recovery run \u2014 2 miles",
+          "planned_distance_miles": 2,
+          "intensity": "easy",
+          "target_hr_zone": [
+            1,
+            2
+          ],
+          "target_rpe": [
+            3,
+            4
+          ]
+        },
+        {
+          "day": "Wednesday",
+          "date": "2026-08-26",
+          "type": "upper_body_strength",
+          "category": "strength",
+          "description": "Upper body + core \u2014 20 min",
+          "planned_duration_min": 20,
+          "intensity_level": "race_week",
+          "use_taper_sets": true
+        },
+        {
+          "day": "Thursday",
+          "date": "2026-08-27",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest",
+          "planned_distance_miles": 0
+        },
+        {
+          "day": "Friday",
+          "date": "2026-08-28",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest before race"
+        },
+        {
+          "day": "Saturday",
+          "date": "2026-08-29",
+          "type": "rest",
+          "category": "rest",
+          "description": "Full rest"
+        },
+        {
+          "day": "Sunday",
+          "date": "2026-08-30",
+          "type": "race",
+          "category": "race",
+          "description": "RACE DAY \u2014 Trail Marathon",
+          "planned_distance_miles": 26.2,
+          "elevation_gain_ft": 4000,
+          "target_strategy": "Start conservative, power-hike steep uphills, fuel at every aid station, run the second half strong"
+        }
+      ]
+    }
+  ]
+}
