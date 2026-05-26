@@ -8,7 +8,13 @@ vi.mock("@/lib/db", () => ({ supabaseAdmin: vi.fn() }));
 vi.mock("@/lib/anthropic", () => ({ anthropicClient: vi.fn() }));
 vi.mock("@/server/strava/activities", () => ({
   fetchRecentActivities: vi.fn(),
-  hasStravaConnection: vi.fn(),
+  StravaTokenBrokenError: class StravaTokenBrokenError extends Error {
+    constructor(cause?: unknown) {
+      super("Strava token refresh failed or was revoked");
+      this.name = "StravaTokenBrokenError";
+      if (cause instanceof Error) this.cause = cause;
+    }
+  },
 }));
 
 // byo-plan loadAthleteData is imported inside daily-checkin.ts.
@@ -22,7 +28,7 @@ vi.mock("fs", () => ({
 
 import { supabaseAdmin } from "@/lib/db";
 import { anthropicClient } from "@/lib/anthropic";
-import { fetchRecentActivities, hasStravaConnection } from "@/server/strava/activities";
+import { fetchRecentActivities, StravaTokenBrokenError } from "@/server/strava/activities";
 import { loadAthleteData } from "../byo-plan";
 import { runDailyCheckin, appendCheckinEntry, buildUserMessage } from "../daily-checkin";
 import type { StravaActivitySummary } from "@/server/strava/activities";
@@ -211,7 +217,6 @@ describe("runDailyCheckin", () => {
     const db = makeDb();
     (supabaseAdmin as AnyMock).mockReturnValue(db);
     (loadAthleteData as AnyMock).mockResolvedValue(ATHLETE_DATA);
-    (hasStravaConnection as AnyMock).mockResolvedValue(true);
     (fetchRecentActivities as AnyMock).mockResolvedValue(TWO_ACTIVITIES);
     const client = makeAnthropicClient("Good form today. Easy 6 at RPE 4.");
     (anthropicClient as AnyMock).mockReturnValue(client);
@@ -234,7 +239,6 @@ describe("runDailyCheckin", () => {
     const db = makeDb();
     (supabaseAdmin as AnyMock).mockReturnValue(db);
     (loadAthleteData as AnyMock).mockResolvedValue(ATHLETE_DATA);
-    (hasStravaConnection as AnyMock).mockResolvedValue(true);
     (fetchRecentActivities as AnyMock).mockResolvedValue([]);
     const client = makeAnthropicClient();
     (anthropicClient as AnyMock).mockReturnValue(client);
@@ -255,7 +259,6 @@ describe("runDailyCheckin", () => {
     const db = makeDb();
     (supabaseAdmin as AnyMock).mockReturnValue(db);
     (loadAthleteData as AnyMock).mockResolvedValue(ATHLETE_DATA);
-    (hasStravaConnection as AnyMock).mockResolvedValue(true);
     (fetchRecentActivities as AnyMock).mockResolvedValue([]);
     const client = makeAnthropicClient("Rest day looks right given the zeros.");
     (anthropicClient as AnyMock).mockReturnValue(client);
@@ -271,64 +274,36 @@ describe("runDailyCheckin", () => {
 });
 
 // ---------------------------------------------------------------------------
-// runDailyCheckin — Strava graceful degradation
+// runDailyCheckin — Strava hard requirement
 // ---------------------------------------------------------------------------
 
-describe("runDailyCheckin — Strava graceful degradation", () => {
-  it("no oauth_tokens row: skips Strava fetch, message tells athlete to /connect_strava", async () => {
+describe("runDailyCheckin — Strava hard requirement", () => {
+  it("broken token: throws StravaTokenBrokenError, agent_runs row recorded, Claude not called", async () => {
     const db = makeDb();
     (supabaseAdmin as AnyMock).mockReturnValue(db);
     (loadAthleteData as AnyMock).mockResolvedValue(ATHLETE_DATA);
-    (hasStravaConnection as AnyMock).mockResolvedValue(false);
-    const client = makeAnthropicClient("No Strava yet — let's work from your wellness data.");
-    (anthropicClient as AnyMock).mockReturnValue(client);
-
-    const result = await runDailyCheckin(ATHLETE_ID, WELLNESS);
-
-    // fetchRecentActivities should never be called when there's no connection
-    expect(fetchRecentActivities).not.toHaveBeenCalled();
-
-    // Claude still got called and produced a response
-    expect(result.telegramMessage).toBeTruthy();
-
-    // The user message passed to Claude should contain the fallback text
-    const [call] = (client.messages.create as AnyMock).mock.calls[0] as [Record<string, unknown>];
-    const msgs = call.messages as Array<{ content: string }>;
-    expect(msgs[0]!.content).toContain("/connect\\_strava");
-    expect(msgs[0]!.content).not.toContain("No Strava activities found");
-  });
-
-  it("broken token: fetchRecentActivities throws → fallback message, error logged in agent_runs", async () => {
-    const db = makeDb();
-    (supabaseAdmin as AnyMock).mockReturnValue(db);
-    (loadAthleteData as AnyMock).mockResolvedValue(ATHLETE_DATA);
-    (hasStravaConnection as AnyMock).mockResolvedValue(true);
     (fetchRecentActivities as AnyMock).mockRejectedValue(new Error("refresh_token rejected by Strava"));
-    const client = makeAnthropicClient("Token broken — coach response without training data.");
+    const client = makeAnthropicClient();
     (anthropicClient as AnyMock).mockReturnValue(client);
 
-    const result = await runDailyCheckin(ATHLETE_ID, WELLNESS);
+    await expect(runDailyCheckin(ATHLETE_ID, WELLNESS)).rejects.toThrow("Strava token refresh failed or was revoked");
 
-    // Still produces a response
-    expect(result.telegramMessage).toBeTruthy();
+    // Claude must not be called
+    expect(client.messages.create).not.toHaveBeenCalled();
 
-    // Fallback text in the Claude user message
-    const [call] = (client.messages.create as AnyMock).mock.calls[0] as [Record<string, unknown>];
-    const msgs = call.messages as Array<{ content: string }>;
-    expect(msgs[0]!.content).toContain("/connect\\_strava");
-
-    // agent_runs insert should include the error string
+    // agent_runs row recorded with zero tokens and strava_token_broken error
     expect(db.agentRunsInsertMock).toHaveBeenCalledOnce();
     const [insertArg] = (db.agentRunsInsertMock as AnyMock).mock.calls[0] as [Record<string, unknown>];
-    expect(typeof insertArg.error).toBe("string");
-    expect((insertArg.error as string).length).toBeGreaterThan(0);
+    expect(insertArg.error).toBe("strava_token_broken");
+    expect(insertArg.input_tokens).toBe(0);
+    expect(insertArg.output_tokens).toBe(0);
+    expect(insertArg.result_summary).toBe("aborted: broken strava token");
   });
 
   it("valid token: fetchRecentActivities called and activities appear in message", async () => {
     const db = makeDb();
     (supabaseAdmin as AnyMock).mockReturnValue(db);
     (loadAthleteData as AnyMock).mockResolvedValue(ATHLETE_DATA);
-    (hasStravaConnection as AnyMock).mockResolvedValue(true);
     (fetchRecentActivities as AnyMock).mockResolvedValue(TWO_ACTIVITIES);
     const client = makeAnthropicClient("Strong week — 14 miles logged.");
     (anthropicClient as AnyMock).mockReturnValue(client);
@@ -341,7 +316,6 @@ describe("runDailyCheckin — Strava graceful degradation", () => {
     const [call] = (client.messages.create as AnyMock).mock.calls[0] as [Record<string, unknown>];
     const msgs = call.messages as Array<{ content: string }>;
     expect(msgs[0]!.content).toContain("2026-05-24"); // first activity date
-    expect(msgs[0]!.content).not.toContain("/connect\\_strava");
   });
 });
 

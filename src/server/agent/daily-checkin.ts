@@ -3,7 +3,8 @@ import * as path from "path";
 import { supabaseAdmin } from "@/lib/db";
 import { anthropicClient } from "@/lib/anthropic";
 import { loadAthleteData } from "./byo-plan";
-import { fetchRecentActivities, hasStravaConnection } from "@/server/strava/activities";
+import * as Sentry from "@sentry/nextjs";
+import { fetchRecentActivities, StravaTokenBrokenError } from "@/server/strava/activities";
 import type { StravaActivitySummary } from "@/server/strava/activities";
 import type { Day, Week } from "@/lib/plan-schema";
 
@@ -227,8 +228,6 @@ export function buildUserMessage(opts: {
   injuryLogMd: string;
   recentCheckinsMd: string;
   activities: StravaActivitySummary[];
-  /** When set, replaces the Strava table with this text (no connection or broken token). */
-  stravaFallback?: string;
   plannedDay: Day | null;
   wellness: WellnessInput;
   asthma: boolean;
@@ -241,7 +240,6 @@ export function buildUserMessage(opts: {
     injuryLogMd,
     recentCheckinsMd,
     activities,
-    stravaFallback,
     plannedDay,
     wellness,
     asthma,
@@ -273,7 +271,7 @@ export function buildUserMessage(opts: {
     recentCheckinsMd,
     "",
     `Last 14 days of training (from Strava)`,
-    stravaFallback ?? formatStravaTable(activities),
+    formatStravaTable(activities),
     "",
     `Today's planned workout (week ${weekN}, ${dayOfWeek})`,
     formatDayForPrompt(plannedDay),
@@ -290,7 +288,7 @@ export function buildUserMessage(opts: {
 // agent_runs persistence
 // ---------------------------------------------------------------------------
 
-async function persistRun(
+export async function persistRun(
   athleteId: string,
   startedAt: string,
   inputTokens: number,
@@ -444,26 +442,17 @@ export async function runDailyCheckin(
       loadActivePlan(athleteId),
     ]);
 
-  // Strava: distinguish "no connection" from "connected but no recent runs".
-  // fetchRecentActivities returns [] silently for both, so we check first.
-  let activities: StravaActivitySummary[] = [];
-  let stravaFallback: string | undefined;
-  let stravaError: string | undefined;
-
-  const stravaConnected = await hasStravaConnection(athleteId);
-
-  if (!stravaConnected) {
-    stravaFallback =
-      "_No Strava connection on file. Athlete should run /connect\\_strava to enable training-data-aware coaching._";
-  } else {
-    try {
-      activities = await fetchRecentActivities(athleteId, 14);
-    } catch (err) {
-      stravaFallback =
-        "_Strava token refresh failed — connection appears broken. Athlete should run /connect\\_strava to reconnect._";
-      stravaError = err instanceof Error ? err.message : String(err);
-      console.error("[daily-checkin] Strava refresh failed for athlete", athleteId, err);
-    }
+  // Fetch Strava data before any LLM work. Caller (dispatcher) must have already
+  // verified hasStravaConnection — if the token is broken we record the failure
+  // and throw so no LLM tokens are wasted.
+  let activities: StravaActivitySummary[];
+  try {
+    activities = await fetchRecentActivities(athleteId, 14);
+  } catch (err) {
+    console.error("[daily-checkin] Strava token broken for athlete", athleteId, err);
+    Sentry.captureException(err);
+    await persistRun(athleteId, startedAt, 0, 0, "aborted: broken strava token", "strava_token_broken").catch(() => {});
+    throw new StravaTokenBrokenError(err);
   }
 
   const { athlete, profileMd } = athleteData;
@@ -489,7 +478,6 @@ export async function runDailyCheckin(
     injuryLogMd,
     recentCheckinsMd,
     activities,
-    stravaFallback,
     plannedDay,
     wellness: wellnessEntry,
     asthma: athlete.asthma,
@@ -512,8 +500,7 @@ export async function runDailyCheckin(
     startedAt,
     response.usage.input_tokens,
     response.usage.output_tokens,
-    responseText,
-    stravaError
+    responseText
   ).catch(() => {/* non-fatal */});
 
   return { telegramMessage: responseText, checkinLogEntry: responseText };

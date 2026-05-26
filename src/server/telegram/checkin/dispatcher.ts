@@ -15,7 +15,8 @@ import {
   isConcerning,
 } from "./wellness";
 import type { WellnessState, WellnessEntry } from "./types";
-import { runDailyCheckin, appendCheckinEntry } from "@/server/agent/daily-checkin";
+import { runDailyCheckin, appendCheckinEntry, persistRun } from "@/server/agent/daily-checkin";
+import { hasStravaConnection, StravaTokenBrokenError } from "@/server/strava/activities";
 
 type AthleteRow = Database["public"]["Tables"]["athletes"]["Row"];
 
@@ -83,8 +84,23 @@ async function onWellnessComplete(
   athlete: AthleteRow,
   entry: WellnessEntry
 ): Promise<void> {
+  // Persist wellness first — this data has standalone value regardless of
+  // whether the agent can run.
   await appendWellnessRow(athlete.id, entry);
   await writeCheckinState(athlete.id, {});
+
+  // Gate on Strava before spending LLM tokens. If no connection, tell the
+  // athlete and stop — don't invoke the agent.
+  const stravaConnected = await hasStravaConnection(athlete.id);
+  if (!stravaConnected) {
+    await sendAndLog(
+      athlete.id,
+      chatId,
+      `Logged your wellness — readiness ${entry.readiness}, soreness ${entry.soreness}. I can't coach you without your training data, though. Run /connect_strava to wire it up, then send me /checkin again.`
+    );
+    await persistRun(athlete.id, new Date().toISOString(), 0, 0, "aborted: no strava connection", "strava_not_connected").catch(() => {});
+    return;
+  }
 
   const wellnessInput = {
     readiness: entry.readiness,
@@ -99,6 +115,15 @@ async function onWellnessComplete(
   try {
     ({ telegramMessage, checkinLogEntry } = await runDailyCheckin(athlete.id, wellnessInput));
   } catch (err) {
+    if (err instanceof StravaTokenBrokenError) {
+      // runDailyCheckin already wrote the agent_runs row before throwing.
+      await sendAndLog(
+        athlete.id,
+        chatId,
+        `Logged your wellness — readiness ${entry.readiness}, soreness ${entry.soreness}. Your Strava connection broke (token expired or revoked) — run /connect_strava again to reconnect, then send /checkin.`
+      );
+      return;
+    }
     Sentry.captureException(err);
     await sendAndLog(
       athlete.id,
