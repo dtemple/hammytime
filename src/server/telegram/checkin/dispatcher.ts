@@ -1,4 +1,5 @@
 import type { Context } from "grammy";
+import * as Sentry from "@sentry/nextjs";
 import { supabaseAdmin } from "@/lib/db";
 import type { Database } from "@/lib/db-types";
 import { sendAndLog } from "../bot";
@@ -14,6 +15,7 @@ import {
   isConcerning,
 } from "./wellness";
 import type { WellnessState, WellnessEntry } from "./types";
+import { runDailyCheckin, appendCheckinEntry } from "@/server/agent/daily-checkin";
 
 type AthleteRow = Database["public"]["Tables"]["athletes"]["Row"];
 
@@ -84,11 +86,40 @@ async function onWellnessComplete(
   await appendWellnessRow(athlete.id, entry);
   await writeCheckinState(athlete.id, {});
 
-  const bodyPartSuffix = entry.body_part !== "—" ? ` (${entry.body_part})` : "";
-  const notePart = entry.note !== "—" ? entry.note : "no note";
-  // REPLACE-IN-PROMPT-16: swap placeholder for real coaching response trigger
-  const ack = `Logged. Readiness ${entry.readiness}, soreness ${entry.soreness}${bodyPartSuffix}, ${notePart}. Coaching response will fire in the next prompt's work.`;
-  await sendAndLog(athlete.id, chatId, ack);
+  const wellnessInput = {
+    readiness: entry.readiness,
+    soreness_score: entry.soreness,
+    soreness_body_part: entry.body_part !== "—" ? entry.body_part : null,
+    note: entry.note !== "—" ? entry.note : null,
+  };
+
+  let telegramMessage: string;
+  let checkinLogEntry: string;
+
+  try {
+    ({ telegramMessage, checkinLogEntry } = await runDailyCheckin(athlete.id, wellnessInput));
+  } catch (err) {
+    Sentry.captureException(err);
+    await sendAndLog(
+      athlete.id,
+      chatId,
+      "Logged your check-in. Coaching response delayed — I'll follow up shortly."
+    );
+    return;
+  }
+
+  // Append to checkin_log.md before sending so the log stays consistent even
+  // if Telegram delivery fails.
+  const { date } = nowInTimezone(athlete.timezone);
+  await appendCheckinEntry(athlete.id, date, checkinLogEntry).catch((err) => {
+    Sentry.captureException(err);
+  });
+
+  // Chunk at 4096 chars (Telegram hard limit).
+  const CHUNK = 4096;
+  for (let i = 0; i < telegramMessage.length; i += CHUNK) {
+    await sendAndLog(athlete.id, chatId, telegramMessage.slice(i, i + CHUNK));
+  }
 
   if (isConcerning(entry.readiness, entry.soreness, entry.body_part !== "—" ? entry.body_part : null)) {
     await sendAndLog(athlete.id, chatId, CONCERNING_LINE);

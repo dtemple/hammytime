@@ -4,10 +4,20 @@ vi.mock("@/lib/db", () => ({ supabaseAdmin: vi.fn() }));
 vi.mock("../wellness-log", () => ({ appendWellnessRow: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("../../bot", () => ({ sendAndLog: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("grammy", () => ({ Bot: vi.fn(), Context: vi.fn() }));
+vi.mock("@sentry/nextjs", () => ({ captureException: vi.fn() }));
+vi.mock("@/server/agent/daily-checkin", () => ({
+  runDailyCheckin: vi.fn().mockResolvedValue({
+    telegramMessage: "Solid check-in. Easy 6 miles today at RPE 4–5.",
+    checkinLogEntry: "Solid check-in. Easy 6 miles today at RPE 4–5.",
+  }),
+  appendCheckinEntry: vi.fn().mockResolvedValue(undefined),
+}));
 
 import { supabaseAdmin } from "@/lib/db";
 import { sendAndLog } from "../../bot";
 import { appendWellnessRow } from "../wellness-log";
+import { runDailyCheckin, appendCheckinEntry } from "@/server/agent/daily-checkin";
+import * as Sentry from "@sentry/nextjs";
 import { handleCheckinCommand, handleWellnessMessage } from "../dispatcher";
 import {
   READINESS_PROMPT,
@@ -222,7 +232,7 @@ describe("handleWellnessMessage — awaiting_soreness", () => {
 // handleWellnessMessage — awaiting_note / onWellnessComplete
 // ---------------------------------------------------------------------------
 describe("handleWellnessMessage — awaiting_note", () => {
-  it("calls appendWellnessRow, clears state, and sends ack", async () => {
+  it("calls appendWellnessRow, clears state, calls runDailyCheckin, and sends coaching response", async () => {
     const db = makeDb();
     (supabaseAdmin as AnyMock).mockReturnValue(db);
 
@@ -246,12 +256,27 @@ describe("handleWellnessMessage — awaiting_note", () => {
       expect.objectContaining({ checkin_state: {} })
     );
 
-    // Ack sent
+    // runDailyCheckin called with correct wellness input
+    expect(runDailyCheckin).toHaveBeenCalledOnce();
+    const [calledAthleteId, calledWellness] = (runDailyCheckin as AnyMock).mock.calls[0];
+    expect(calledAthleteId).toBe(ATHLETE_ID);
+    expect(calledWellness.readiness).toBe(7);
+    expect(calledWellness.soreness_score).toBe(3);
+    expect(calledWellness.soreness_body_part).toBeNull();
+    expect(calledWellness.note).toBe("felt good on yesterday's run");
+
+    // Coaching response sent to Telegram
     expect(sendAndLog).toHaveBeenCalledWith(
       ATHLETE_ID,
       CHAT_ID,
-      expect.stringContaining("Logged. Readiness 7")
+      "Solid check-in. Easy 6 miles today at RPE 4–5."
     );
+
+    // checkin_log.md written
+    expect(appendCheckinEntry).toHaveBeenCalledOnce();
+    const [entryAthleteId, , entryContent] = (appendCheckinEntry as AnyMock).mock.calls[0];
+    expect(entryAthleteId).toBe(ATHLETE_ID);
+    expect(entryContent).toBe("Solid check-in. Easy 6 miles today at RPE 4–5.");
   });
 
   it("skips note on 'skip' reply", async () => {
@@ -330,5 +355,38 @@ describe("handleWellnessMessage — awaiting_note", () => {
     await handleWellnessMessage(ctx as AnyMock, athlete as AnyMock);
 
     expect(sendAndLog).toHaveBeenCalledWith(ATHLETE_ID, CHAT_ID, CONCERNING_LINE);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// onWellnessComplete — Claude failure fallback
+// ---------------------------------------------------------------------------
+describe("onWellnessComplete — Claude failure fallback", () => {
+  it("sends fallback reply and captures to Sentry when runDailyCheckin throws", async () => {
+    const db = makeDb();
+    (supabaseAdmin as AnyMock).mockReturnValue(db);
+
+    (runDailyCheckin as AnyMock).mockRejectedValueOnce(new Error("Claude timeout"));
+
+    const ctx = makeCtx("skip");
+    const athlete = makeAthlete({
+      sub_step: "awaiting_note",
+      partial: { readiness: 5, soreness_score: 2, soreness_body_part: null },
+    });
+
+    await handleWellnessMessage(ctx as AnyMock, athlete as AnyMock);
+
+    // Fallback sent
+    expect(sendAndLog).toHaveBeenCalledWith(
+      ATHLETE_ID,
+      CHAT_ID,
+      expect.stringContaining("Coaching response delayed")
+    );
+
+    // Sentry captured
+    expect(Sentry.captureException).toHaveBeenCalledOnce();
+
+    // checkin_log.md NOT written on failure
+    expect(appendCheckinEntry).not.toHaveBeenCalled();
   });
 });
