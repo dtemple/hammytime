@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-05-26 (session 14 — Prompt 17: /connect_strava command + agent graceful degradation)_
+_Updated: 2026-05-26 (session 15 — Prompt 18: Strava hard requirement; fail loudly when missing or broken)_
 
 ---
 
@@ -12,17 +12,15 @@ A multi-tenant Telegram-based marathon coaching bot for ~5–25 friends. Daily c
 
 ## Current status
 
-**Prompt 17 complete — /connect_strava command + agent graceful degradation.**
+**Prompt 18 complete — Strava is a hard requirement; fail loudly when missing or broken.**
 
-Athletes can now connect Strava from inside Telegram with `/connect_strava`. The callback sends an immediate "Strava connected" Telegram confirmation. The daily agent is resilient when Strava is missing or broken — it substitutes a clear fallback message and tells the athlete to `/connect_strava` rather than silently producing worse coaching.
+The graceful-degradation path from Prompt 17 is removed. The agent is never invoked without valid Strava data — both missing-connection and broken-token paths now send a two-sentence refusal to Telegram, record an aborted `agent_runs` row with zero tokens, and stop. Wellness data is always captured first.
 
 Key artifacts:
-- `src/server/strava/activities.ts` — added `hasStravaConnection(athleteId)` to distinguish "no token row" from "connected but no recent runs" (both previously returned [] silently)
-- `src/server/telegram/bot.ts` — `handleConnectStravaCommand` exported; guards on onboarding complete, logs inbound, sends signed `/strava/connect?athlete_id=` URL; `_resetBotForTest()` helper for singleton reset in tests
-- `src/app/strava/callback/route.ts` — after successful token upsert, fetches athlete and sends "Strava connected" via `sendAndLog`; failure is non-fatal (Sentry + continue)
-- `src/server/agent/daily-checkin.ts` — checks `hasStravaConnection` before `fetchRecentActivities`; `stravaFallback` field in `buildUserMessage` opts; broken-token error logged to `agent_runs.error`; TODO comment on pre-existing `kind='daily_checkin'` constraint mismatch
-- `src/app/strava/callback/route.test.ts` — new file; 5 tests
-- 328 tests passing (11 new)
+- `src/server/strava/activities.ts` — added `StravaTokenBrokenError` (typed error for broken-token abort)
+- `src/server/agent/daily-checkin.ts` — removed `stravaFallback`/`stravaError` mechanism; `fetchRecentActivities` is now the first async operation; throws `StravaTokenBrokenError` on failure before any LLM work; `persistRun` exported
+- `src/server/telegram/checkin/dispatcher.ts` — gates `runDailyCheckin` on `hasStravaConnection`; inserts aborted `agent_runs` row on no-connection; catches `StravaTokenBrokenError` for broken-token path
+- Tests: 329 passing (removed 3 degradation tests, added 3 abort tests)
 
 ---
 
@@ -146,14 +144,13 @@ Key artifacts:
 
 ## Likely next task
 
-**Manual verification for Prompt 17** (`/connect_strava` + graceful degradation):
+**Manual verification for Prompt 18** (Strava hard requirement):
 1. `npm run dev:all` — start Supabase + Next.js + polling bot
-2. In Telegram: `/connect_strava` → verify bot replies with URL containing `/strava/connect?athlete_id=`
-3. Tap the URL, complete Strava OAuth. Verify `/strava/connected` page renders. Within ~1 second, Telegram should receive "Strava connected" message.
-4. In Supabase Studio: confirm `oauth_tokens` row with `provider='strava'` for your athlete.
-5. `/checkin` → complete wellness battery → agent response should reference actual training data.
-6. Temporarily DELETE the `oauth_tokens` row, `/checkin` again → agent should still respond; response should acknowledge no Strava data and suggest `/connect_strava`. Restore with `/connect_strava`.
+2. Normal flow: `/checkin` → wellness battery → coaching response with Strava data.
+3. DELETE `oauth_tokens` row in Supabase Studio. `/checkin` → wellness battery completes → refusal message arrives mentioning `/connect_strava`. Confirm `wellness_log.md` has entry, `checkin_log.md` does NOT, `agent_runs` has `strava_not_connected` row.
+4. Reconnect via `/connect_strava`. `/checkin` again → normal flow resumes.
+5. Broken-token test: corrupt `refresh_token_enc` in DB. `/checkin` → wellness battery → broken-token refusal. `agent_runs` has `strava_token_broken` row.
 
 **Known deferred issue**: `agent_runs.kind` CHECK constraint only allows `('daily', 'adhoc', 'weekly', 'plan_validate')` but code inserts `kind='daily_checkin'`. The insert fails silently (non-fatal catch). Fix requires a migration adding `'daily_checkin'` to the constraint.
 
-**Prompt 18 candidate**: Daily cron worker — enqueue `daily_checkin` jobs for athletes in the 6:30–7:00 AM local window. Drain via Vercel cron + `job_queue` table (FOR UPDATE SKIP LOCKED).
+**Prompt 19 candidate**: Daily cron worker — enqueue `daily_checkin` jobs for athletes in the 6:30–7:00 AM local window. Drain via Vercel cron + `job_queue` table (FOR UPDATE SKIP LOCKED).
