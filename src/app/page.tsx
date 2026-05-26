@@ -4,7 +4,7 @@ import CheckinBubble from '@/components/CheckinBubble';
 
 export const metadata: Metadata = {
   title: 'HammyTime',
-  description: 'Marathon coaching, every morning in Telegram.',
+  description: 'A dynamic training calendar, to make sure you don\'t get injured.',
 };
 
 export default function Home() {
@@ -22,15 +22,14 @@ export default function Home() {
 
       <main className="ht-main">
         <section className="ht-hero">
-          <div className="ht-eyebrow">MARATHON COACHING · TELEGRAM · INVITE ONLY</div>
+          <div className="ht-eyebrow">INVITE ONLY RUNNING COACH</div>
           <h1 className="ht-h1">
-            Achieve your goals{' '}
-            <span className="ht-h1-accent">without getting injured</span>.
+            <span className="ht-h1-accent">A dynamic training calendar</span>, to make sure you don't get injured.
           </h1>
           <p className="ht-lede">
-            Training plans are helpful, but life and injuries get in the way. HammyTime reads your
-            Strava, remembers your past injuries, and helps you adjust your plan each week to
-            maximize your chance of success and minimize your chance of getting injured.
+            Training plans are helpful, but always out of date.{''}
+            
+            Hammytime takes into account your injury history, recent runs, and race dates. And then keeps your Google/Apple calendars updated with the latest.
           </p>
           <div className="ht-cta-row">
             <Link href="/signup" className="ht-btn ht-btn-primary">
