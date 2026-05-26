@@ -7,6 +7,10 @@ import {
   onboardingSteps,
   resetOnboarding,
 } from "./onboarding/index";
+import {
+  handleCheckinCommand,
+  handleWellnessMessage,
+} from "./checkin/dispatcher";
 
 let _bot: Bot | null = null;
 
@@ -133,6 +137,15 @@ export async function handleInboundText(ctx: Context): Promise<void> {
     return;
   }
 
+  // Route to wellness battery if a check-in is in progress.
+  // This check must come before the onboarding check — in practice the two
+  // states won't coexist, but wellness wins if they ever do.
+  const checkinState = athlete.checkin_state as Record<string, unknown> | null;
+  if (checkinState?.sub_step) {
+    await handleWellnessMessage(ctx, athlete);
+    return;
+  }
+
   const state = athlete.onboarding_state as { step?: number } | null;
   const step = typeof state?.step === "number" ? state.step : 0;
 
@@ -187,6 +200,46 @@ function getBot(): Bot {
     _bot.command("ping", (ctx) => ctx.reply("pong"));
     _bot.command("start", handleStart);
     _bot.command("restart", handleRestart);
+    _bot.command("checkin", async (ctx) => {
+      const db = supabaseAdmin();
+      const { data: athlete } = await db
+        .from("athletes")
+        .select("*")
+        .eq("telegram_chat_id", String(ctx.chat.id))
+        .maybeSingle();
+      if (!athlete) {
+        await ctx.reply("Use your invite link to get started.");
+        return;
+      }
+      const obState = athlete.onboarding_state as { step?: number } | null;
+      if ((typeof obState?.step === "number" ? obState.step : 0) < onboardingSteps.length) {
+        await ctx.reply("Finish onboarding first.");
+        return;
+      }
+      await handleCheckinCommand(ctx, athlete);
+    });
+    _bot.command("cancel", async (ctx) => {
+      const db = supabaseAdmin();
+      const { data: athlete } = await db
+        .from("athletes")
+        .select("id, checkin_state")
+        .eq("telegram_chat_id", String(ctx.chat.id))
+        .maybeSingle();
+      if (!athlete) {
+        await ctx.reply("Nothing to cancel.");
+        return;
+      }
+      const cs = athlete.checkin_state as Record<string, unknown> | null;
+      if (!cs?.sub_step) {
+        await ctx.reply("No active check-in to cancel.");
+        return;
+      }
+      await db
+        .from("athletes")
+        .update({ checkin_state: {} })
+        .eq("id", athlete.id);
+      await ctx.reply("Cancelled.");
+    });
     _bot.on("message:text", async (ctx) => {
       if (!ctx.message.text.startsWith("/")) {
         await handleInboundText(ctx);

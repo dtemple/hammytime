@@ -190,6 +190,7 @@ export type Database = {
       athletes: {
         Row: {
           asthma: boolean
+          checkin_state: Json
           created_at: string
           dob: string | null
           id: string
@@ -205,6 +206,7 @@ export type Database = {
         }
         Insert: {
           asthma?: boolean
+          checkin_state?: Json
           created_at?: string
           dob?: string | null
           id?: string
@@ -220,6 +222,7 @@ export type Database = {
         }
         Update: {
           asthma?: boolean
+          checkin_state?: Json
           created_at?: string
           dob?: string | null
           id?: string
