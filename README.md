@@ -79,6 +79,14 @@ npm run webhook:register
 
 Make sure `TELEGRAM_BOT_MODE=webhook` is set in your Vercel environment variables (the default when the var is unset).
 
+### Production cron
+
+The morning wellness check-in fires from a Vercel cron at `30 13 * * *` (UTC) — 6:30 AM PDT / 5:30 AM PST. After deploy:
+
+1. Verify the cron is registered: Vercel project → Settings → Cron Jobs. You should see `/api/cron/daily-checkin` listed with the schedule above.
+2. Set `CRON_SECRET` in Vercel project → Settings → Environment Variables (Production). Generate with `openssl rand -base64 32`. Vercel automatically attaches `Authorization: Bearer ${CRON_SECRET}` to its own cron requests, and the route rejects anything else with 401.
+3. Smoke test from a terminal: `curl -H "Authorization: Bearer $CRON_SECRET" https://<prod-url>/api/cron/daily-checkin` — expect `{ "ok": true, "fired": "<athlete_id>" }` (or a `skipped` reason).
+
 ## Manual operations
 
 ### Verify a plan JSON against the schema

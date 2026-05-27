@@ -33,7 +33,7 @@ async function logInbound(athleteId: string, body: string): Promise<void> {
   });
 }
 
-async function writeCheckinState(
+export async function writeCheckinState(
   athleteId: string,
   state: WellnessState | Record<string, never>
 ): Promise<void> {
@@ -48,7 +48,7 @@ async function writeCheckinState(
  * Returns the current date and time in the athlete's timezone.
  * Falls back to America/Los_Angeles if the timezone is null or invalid.
  */
-function nowInTimezone(tz: string | null): { date: string; time: string } {
+export function nowInTimezone(tz: string | null): { date: string; time: string } {
   const timezone = tz ?? "America/Los_Angeles";
   const now = new Date();
 

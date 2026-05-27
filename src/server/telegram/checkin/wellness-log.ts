@@ -73,3 +73,21 @@ export async function appendWellnessRow(
 
   if (error) throw new Error(`appendWellnessRow(append) failed: ${error.message}`);
 }
+
+/**
+ * Returns true if wellness_log.md contains a row for the given athlete-local date.
+ * Used by the daily-checkin cron for idempotency.
+ */
+export async function wellnessLogContains(
+  athleteId: string,
+  date: string
+): Promise<boolean> {
+  const { data } = await supabaseAdmin()
+    .from("memory_files")
+    .select("content_md")
+    .eq("athlete_id", athleteId)
+    .eq("file_name", FILE_NAME)
+    .maybeSingle();
+  if (!data) return false;
+  return data.content_md.includes(`| ${date} |`);
+}
