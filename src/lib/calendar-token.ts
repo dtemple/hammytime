@@ -4,10 +4,10 @@ import { supabaseAdmin } from '@/lib/db';
 const FIVE_YEARS_MS = 5 * 365 * 24 * 60 * 60 * 1000;
 
 export function appBaseUrl(): string {
-  return (
+  const raw =
     process.env.NEXT_PUBLIC_APP_URL ||
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
-  );
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+  return raw.replace(/\/+$/, '');
 }
 
 export function calendarUrlForToken(token: string): string {
