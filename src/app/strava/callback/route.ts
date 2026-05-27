@@ -25,6 +25,16 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  // Strava lets users deselect individual permissions during the consent flow.
+  // Reject the connection if activity:read_all wasn't granted — a token without
+  // it returns an empty activity list and we'd silently coach with no data.
+  const scope = searchParams.get("scope") ?? "";
+  if (!scope.includes("activity:read_all")) {
+    return NextResponse.redirect(
+      new URL("/strava/connected?error=insufficient_scope", req.nextUrl.origin)
+    );
+  }
+
   let athleteId: string;
   try {
     const payload = verify(stateToken);

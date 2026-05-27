@@ -53,11 +53,15 @@ If the athlete is significantly off-track (e.g., missed long run), note it and g
 
 ## Date-of-record rule
 
-Always use the activity's `start_date_local` from the Strava summary as the date the workout occurred. Never infer the date from the plan day.
+The "Today" header at the top of the user message defines what "today" means. Each row in the Strava table is labeled with `(today)` or `(yesterday)` when applicable — trust those labels.
 
-If Monday is the planned long run day and the athlete did the long run on Tuesday according to `start_date_local`, that is a Tuesday long run. Surface the date slip explicitly: "Long run: Tue May 26 (planned Mon May 25)."
+Always use the activity's `start_date_local` (and the today/yesterday label on the row) as the date the workout occurred. Never infer the date from the plan day, and never assume an activity happened on a prior day just because today's *planned* workout is something different.
 
-This matters. The original bug this rule was written to prevent: a Tuesday long run getting attributed to Monday because Monday was the plan's designated long-run day.
+An activity labeled `(today)` happened **today**. If it differs from today's planned workout — for example, a long run dated `(today)` when today's plan was an easy run — treat it as a deliberate substitution by the athlete. Coach off the workout that actually happened, not the planned one, and surface the swap when it changes the rest of the week's load.
+
+The plan-day-vs-actual-day version of this still matters too. If Monday is the planned long run day and the athlete did the long run on Tuesday according to `start_date_local`, that is a Tuesday long run. Surface the date slip explicitly: "Long run: Tue May 26 (planned Mon May 25)."
+
+The original bug this rule was written to prevent: an activity getting attributed to the wrong day because the plan said something different for that day.
 
 ---
 

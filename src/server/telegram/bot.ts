@@ -11,6 +11,10 @@ import {
   handleCheckinCommand,
   handleWellnessMessage,
 } from "./checkin/dispatcher";
+import {
+  fetchRecentActivities,
+  hasStravaConnection,
+} from "@/server/strava/activities";
 
 let _bot: Bot | null = null;
 
@@ -233,6 +237,53 @@ export async function handleConnectStravaCommand(ctx: CommandContext<Context>): 
   );
 }
 
+async function handleStravaStatusCommand(ctx: CommandContext<Context>): Promise<void> {
+  const db = supabaseAdmin();
+  const chatId = String(ctx.chat.id);
+
+  const { data: athlete } = await db
+    .from("athletes")
+    .select("id")
+    .eq("telegram_chat_id", chatId)
+    .maybeSingle();
+
+  if (!athlete) {
+    await ctx.reply("No athlete record found for this chat.");
+    return;
+  }
+
+  const connected = await hasStravaConnection(athlete.id);
+  if (!connected) {
+    await ctx.reply("No Strava connection on file. Run /connect_strava.");
+    return;
+  }
+
+  const { data: tokenRow } = await db
+    .from("oauth_tokens")
+    .select("provider_athlete_id, expires_at")
+    .eq("athlete_id", athlete.id)
+    .eq("provider", "strava")
+    .maybeSingle();
+
+  let activityCount = 0;
+  let fetchError: string | null = null;
+  try {
+    const activities = await fetchRecentActivities(athlete.id, 14);
+    activityCount = activities.length;
+  } catch (err) {
+    fetchError = err instanceof Error ? err.message : String(err);
+  }
+
+  const lines = [
+    `Strava athlete ID on file: ${tokenRow?.provider_athlete_id ?? "unknown"}`,
+    `Token expires: ${tokenRow?.expires_at ?? "unknown"}`,
+    fetchError
+      ? `Activities fetch error: ${fetchError}`
+      : `Activities in past 14 days: ${activityCount}`,
+  ];
+  await ctx.reply(lines.join("\n"));
+}
+
 function getBot(): Bot {
   if (!_bot) {
     const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -260,6 +311,7 @@ function getBot(): Bot {
       await handleCheckinCommand(ctx, athlete);
     });
     _bot.command("connect_strava", handleConnectStravaCommand);
+    _bot.command("strava_status", handleStravaStatusCommand);
     _bot.command("cancel", async (ctx) => {
       const db = supabaseAdmin();
       const { data: athlete } = await db

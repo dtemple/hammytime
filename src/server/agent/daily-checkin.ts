@@ -122,13 +122,29 @@ function secondsToHHMM(s: number): string {
   return `${m}m`;
 }
 
-function formatStravaTable(activities: StravaActivitySummary[]): string {
+function formatStravaTable(
+  activities: StravaActivitySummary[],
+  todayDateStr: string
+): string {
   if (activities.length === 0) {
     return "No Strava activities found for the past 14 days.";
   }
 
+  const yesterdayDateStr = (() => {
+    const parts = todayDateStr.split("-").map(Number) as [number, number, number];
+    const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+    dt.setUTCDate(dt.getUTCDate() - 1);
+    return dt.toISOString().slice(0, 10);
+  })();
+
   const rows = activities.map((a) => {
-    const date = a.start_date_local.slice(0, 10); // YYYY-MM-DD
+    const rawDate = a.start_date_local.slice(0, 10); // YYYY-MM-DD
+    const date =
+      rawDate === todayDateStr
+        ? `${rawDate} (today)`
+        : rawDate === yesterdayDateStr
+          ? `${rawDate} (yesterday)`
+          : rawDate;
     const distMi = metersToMiles(a.distance_m);
     const duration = secondsToHHMM(a.moving_time_s);
     const elevFt = metersToFeet(a.total_elevation_gain_m);
@@ -271,7 +287,7 @@ export function buildUserMessage(opts: {
     recentCheckinsMd,
     "",
     `Last 14 days of training (from Strava)`,
-    formatStravaTable(activities),
+    formatStravaTable(activities, dateStr),
     "",
     `Today's planned workout (week ${weekN}, ${dayOfWeek})`,
     formatDayForPrompt(plannedDay),
