@@ -9,6 +9,7 @@ import {
 } from './onboarding/index';
 import { handleCheckinCommand, handleWellnessMessage } from './checkin/dispatcher';
 import { fetchRecentActivities, hasStravaConnection } from '@/server/strava/activities';
+import { getOrCreateCalendarToken } from '@/lib/calendar-token';
 
 let _bot: Bot | null = null;
 
@@ -225,6 +226,51 @@ export async function handleConnectStravaCommand(ctx: CommandContext<Context>): 
   );
 }
 
+async function handleCalendarCommand(ctx: CommandContext<Context>): Promise<void> {
+  const db = supabaseAdmin();
+  const chatId = String(ctx.chat.id);
+
+  const { data: athlete } = await db
+    .from('athletes')
+    .select('id, onboarding_state')
+    .eq('telegram_chat_id', chatId)
+    .maybeSingle();
+
+  if (!athlete) {
+    await ctx.reply('Use your invite link to get started.');
+    return;
+  }
+
+  const obState = athlete.onboarding_state as { step?: number } | null;
+  if ((typeof obState?.step === 'number' ? obState.step : 0) < onboardingSteps.length) {
+    await ctx.reply('Finish onboarding first.');
+    return;
+  }
+
+  await db.from('messages').insert({
+    athlete_id: athlete.id,
+    channel: 'tg',
+    direction: 'in',
+    body: '/calendar',
+  });
+
+  const { url } = await getOrCreateCalendarToken(athlete.id);
+
+  const reply = [
+    'Your training calendar:',
+    url,
+    '',
+    'Subscribe in:',
+    '• Apple Calendar — File → New Calendar Subscription → paste URL',
+    '• Google Calendar — Other calendars → + → From URL → paste URL',
+    '• Outlook — Add calendar → Subscribe from web → paste URL',
+    '',
+    'Workouts will appear on their day. Updates automatically when your plan changes.',
+  ].join('\n');
+
+  await sendAndLog(athlete.id, ctx.chat.id, reply);
+}
+
 async function handleStravaStatusCommand(ctx: CommandContext<Context>): Promise<void> {
   const db = supabaseAdmin();
   const chatId = String(ctx.chat.id);
@@ -300,6 +346,7 @@ function getBot(): Bot {
     });
     _bot.command('connect_strava', handleConnectStravaCommand);
     _bot.command('strava_status', handleStravaStatusCommand);
+    _bot.command('calendar', handleCalendarCommand);
     _bot.command('cancel', async (ctx) => {
       const db = supabaseAdmin();
       const { data: athlete } = await db
