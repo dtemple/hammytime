@@ -3,17 +3,17 @@
 import { useEffect, useState } from 'react';
 
 const MESSAGE =
-  "You've done 2,300 ft of vertical in 3 runs this week, that's a lot\n" +
-  'of eccentric load on the quads and soleus.\n' +
-  '\n' +
-  'Given your recent calf soreness, I suggest we swap\n' +
-  "today's 9-mile run for one of these:\n" +
-  '\n' +
-  '• Flat 6-mile easy run on the Corte Madera path, no faster\n' +
-  '  than 9:30/mi\n' +
-  '• 45-min bike ride if your legs are feeling sore\n' +
-  '\n' +
-  'what do you think? hit accept and I’ll update the calendar';
+  "Good morning\n" +
+  "You've done 2,300 ft of vertical in 3 runs this week\n" +
+  "that's a lot of eccentric load on the quads and soleus.\n" +
+  "\n" +
+  "Given your recent calf soreness, I suggest we swap today's run for one of these:\n" +
+  "\n" +
+  "• Flat 6-mile easy run on the Corte Madera path, no faster\n" +
+  "  than 9:30/mi\n" +
+  "• 45-min bike ride if your legs are feeling sore\n" +
+  "\n" +
+  "what do you think? hit accept and I'll update the calendar";
 
 function charDelay(ch: string): number {
   if (ch === '.' || ch === ',' || ch === ':') return 110;

@@ -157,7 +157,7 @@ body {
 .ht-lede {
   font-size: 17px;
   color: var(--ink-2);
-  max-width: 36ch;
+  max-width: 52ch;
   margin: 0 0 32px;
   text-wrap: pretty;
 }
