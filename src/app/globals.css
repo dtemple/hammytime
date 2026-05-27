@@ -269,25 +269,51 @@ body {
   animation: ht-blink 1s steps(2) infinite;
 }
 
-.ht-quick-reply {
-  margin-top: 14px;
+.ht-tg-buttons {
+  margin-top: 16px;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   opacity: 0;
   transition: opacity 0.4s ease;
 }
-.ht-quick-reply.shown {
+.ht-tg-buttons.shown {
   opacity: 1;
 }
 
-.ht-chip {
-  font-size: 12px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: #f4f1ec;
-  color: var(--ink-2);
-  border: 1px solid var(--hair);
+.ht-tg-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 9px 14px;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #2481cc;
+  border: 1px solid #2481cc;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    transform 0.05s ease;
+  font-family: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ht-tg-btn:hover {
+  background: #eaf4fb;
+}
+.ht-tg-btn:active {
+  transform: translateY(1px);
+}
+
+.ht-tg-btn-primary {
+  background: #2481cc;
+  color: #ffffff;
+}
+.ht-tg-btn-primary:hover {
+  background: #1e6fb0;
 }
 
 .ht-steps {

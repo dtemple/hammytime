@@ -3,16 +3,17 @@
 import { useEffect, useState } from 'react';
 
 const MESSAGE =
-  'morning. fri, week 8 of 22.\n' +
+  "You've done 2,300 ft of vertical in 3 runs this week, that's a lot\n" +
+  'of eccentric load on the quads and soleus.\n' +
   '\n' +
-  '3 hard days in a row and your hr is up ~6 on easy pace.\n' +
-  "that's a yellow flag — backing today off to 5mi recovery\n" +
-  'instead of the threshold.\n' +
+  'Given your recent calf soreness, I suggest we swap\n' +
+  "today's 9-mile run for one of these:\n" +
   '\n' +
-  'boston trip mon→thu — pre-loading the long run to sunday\n' +
-  '(15mi), tue + wed are 4mi shakeouts from the hotel.\n' +
+  '• Flat 6-mile easy run on the Corte Madera path, no faster\n' +
+  '  than 9:30/mi\n' +
+  '• 45-min bike ride if your legs are feeling sore\n' +
   '\n' +
-  'readiness + soreness?';
+  'what do you think? hit accept and I’ll update the calendar';
 
 function charDelay(ch: string): number {
   if (ch === '.' || ch === ',' || ch === ':') return 110;
@@ -23,17 +24,16 @@ function charDelay(ch: string): number {
 
 export default function CheckinBubble() {
   const [typed, setTyped] = useState('');
-  const [chipsVisible, setChipsVisible] = useState(false);
+  const [buttonsVisible, setButtonsVisible] = useState(false);
   const [done, setDone] = useState(false);
 
   useEffect(() => {
     const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (prefersReduced) {
-      // Reduced-motion branch runs once on mount; the synchronous cascade is harmless.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setTyped(MESSAGE);
       setDone(true);
-      setChipsVisible(true);
+      setButtonsVisible(true);
       return;
     }
 
@@ -45,7 +45,7 @@ export default function CheckinBubble() {
       setTyped(MESSAGE.slice(0, i));
       if (i >= MESSAGE.length) {
         setDone(true);
-        setTimeout(() => setChipsVisible(true), 200);
+        setTimeout(() => setButtonsVisible(true), 200);
         return;
       }
       timer = setTimeout(tick, charDelay(MESSAGE[i - 1] ?? ''));
@@ -63,7 +63,7 @@ export default function CheckinBubble() {
       <div className="ht-checkin-meta">
         <span className="ht-checkin-from">
           <span className="ht-checkin-avatar">D</span>
-          Daybreak bot
+          Daybreak
         </span>
         <span>·</span>
         <span>Fri 6:47 AM</span>
@@ -72,10 +72,13 @@ export default function CheckinBubble() {
         {typed}
         {!done && <span className="ht-caret" />}
       </div>
-      <div className={`ht-quick-reply${chipsVisible ? ' shown' : ''}`}>
-        <span className="ht-chip">readiness 6</span>
-        <span className="ht-chip">soreness 4 — L hamstring</span>
-        <span className="ht-chip">felt flat</span>
+      <div className={`ht-tg-buttons${buttonsVisible ? ' shown' : ''}`}>
+        <button type="button" className="ht-tg-btn ht-tg-btn-primary">
+          Accept
+        </button>
+        <button type="button" className="ht-tg-btn">
+          Stick with the plan
+        </button>
       </div>
     </article>
   );
