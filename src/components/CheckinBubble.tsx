@@ -13,7 +13,7 @@ const MESSAGE =
   "  than 9:30/mi\n" +
   "• 45-min bike ride if your legs are feeling sore\n" +
   "\n" +
-  "what do you think? hit accept and I'll update the calendar";
+  "what do you think?";
 
 function charDelay(ch: string): number {
   if (ch === '.' || ch === ',' || ch === ':') return 110;
@@ -74,7 +74,7 @@ export default function CheckinBubble() {
       </div>
       <div className={`ht-tg-buttons${buttonsVisible ? ' shown' : ''}`}>
         <button type="button" className="ht-tg-btn ht-tg-btn-primary">
-          Accept
+          Update calendar
         </button>
         <button type="button" className="ht-tg-btn">
           Stick with the plan
