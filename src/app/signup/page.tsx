@@ -24,7 +24,7 @@ export default async function SignupPage({
       <main className="min-h-screen flex items-center justify-center bg-white px-4">
         <div className="w-full max-w-sm">
           <p className="text-sm text-zinc-500 mb-1">
-            Daily Telegram coaching for marathon runners.
+            Daily training advice for runners.
           </p>
           <p className="text-sm text-zinc-500 mb-1">Powered by your Strava data.</p>
           <p className="text-sm text-zinc-500 mb-6">Friends only, by invite.</p>

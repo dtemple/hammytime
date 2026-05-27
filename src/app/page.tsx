@@ -30,7 +30,7 @@ export default function Home() {
 
       <main className="ht-main">
         <section className="ht-hero">
-          <div className="ht-eyebrow">INVITE ONLY RUNNING COACH</div>
+          <div className="ht-eyebrow"></div>
           <h1 className="ht-h1">
             <span className="ht-h1-accent">Daily training advice</span>, to make sure you
             don&apos;t get injured.
