@@ -100,13 +100,10 @@ body {
   text-decoration: none;
 }
 
-.ht-brand-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent);
+.ht-brand-icon {
+  width: 22px;
+  height: 22px;
   flex-shrink: 0;
-  animation: ht-pulse 2.4s ease-out infinite;
 }
 
 .ht-nav {

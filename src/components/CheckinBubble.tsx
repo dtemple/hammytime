@@ -62,8 +62,8 @@ export default function CheckinBubble() {
     <article className="ht-checkin" aria-label="Sample morning check-in">
       <div className="ht-checkin-meta">
         <span className="ht-checkin-from">
-          <span className="ht-checkin-avatar">H</span>
-          HammyTime bot
+          <span className="ht-checkin-avatar">D</span>
+          Daybreak bot
         </span>
         <span>·</span>
         <span>Fri 6:47 AM</span>

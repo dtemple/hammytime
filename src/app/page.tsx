@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
+import Image from 'next/image';
 import Link from 'next/link';
 import CheckinBubble from '@/components/CheckinBubble';
 
 export const metadata: Metadata = {
-  title: 'HammyTime',
+  title: 'Daybreak',
   description: "A dynamic training calendar, to make sure you don't get injured.",
 };
 
@@ -12,8 +13,15 @@ export default function Home() {
     <div className="ht-page">
       <header className="ht-header">
         <Link href="/" className="ht-brand">
-          <span className="ht-brand-dot" aria-hidden="true" />
-          HammyTime
+          <Image
+            src="/daybreak-icon.png"
+            alt=""
+            width={22}
+            height={22}
+            className="ht-brand-icon"
+            aria-hidden="true"
+          />
+          Daybreak
         </Link>
         <nav className="ht-nav">
           <Link href="/login">Log in</Link>
@@ -29,7 +37,7 @@ export default function Home() {
           </h1>
           <p className="ht-lede">
             Training plans are helpful, but always out of date.{''}
-            Hammytime takes into account your injury history, recent runs, and race dates. And then
+            Daybreak takes into account your injury history, recent runs, and race dates. And then
             keeps your Google/Apple calendars updated with the latest.
           </p>
           <div className="ht-cta-row">
@@ -50,7 +58,7 @@ export default function Home() {
             <div>
               <h3>Prevent injuries</h3>
               <p>
-                HammyTime adjusts your plan as you go to account for flare&#8209;ups, tweaks, and
+                Daybreak adjusts your plan as you go to account for flare&#8209;ups, tweaks, and
                 past injuries.
               </p>
             </div>
@@ -61,7 +69,7 @@ export default function Home() {
               <h3>Adjusts to real life</h3>
               <p>
                 Training plans assume perfectly-spaced rest days, intervals and long runs. But life
-                doesn&apos;t always line up that way. HammyTime helps you work through adjustments so
+                doesn&apos;t always line up that way. Daybreak helps you work through adjustments so
                 that you can stick to the plan while minimizing injury risks.
               </p>
             </div>
@@ -80,7 +88,7 @@ export default function Home() {
       </main>
 
       <footer className="ht-footer">
-        <span>© 2026 HammyTime</span>
+        <span>© 2026 Daybreak</span>
         <span className="ht-footer-links">
           <Link href="/about">About</Link>
           <Link href="/privacy">Privacy</Link>
