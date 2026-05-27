@@ -32,7 +32,9 @@ export async function POST(req: NextRequest) {
   const update = await req.json();
 
   try {
-    await telegramBot().handleUpdate(update);
+    const bot = telegramBot();
+    await bot.init();
+    await bot.handleUpdate(update);
   } catch (err) {
     Sentry.captureException(err);
   }
