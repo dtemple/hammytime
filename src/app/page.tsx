@@ -32,13 +32,11 @@ export default function Home() {
         <section className="ht-hero">
           <div className="ht-eyebrow">INVITE ONLY RUNNING COACH</div>
           <h1 className="ht-h1">
-            <span className="ht-h1-accent">A dynamic training calendar</span>, to make sure you
+            <span className="ht-h1-accent">Daily training advice</span>, to make sure you
             don&apos;t get injured.
           </h1>
           <p className="ht-lede">
-            Training plans are helpful, but always out of date.{''}
-            Daybreak takes into account your injury history, recent runs, and race dates. And then
-            keeps your Google/Apple calendars updated with the latest.
+            Daybreak uses your Strava data, your injury history and your training goals to give you personalized daily training advice.
           </p>
           <div className="ht-cta-row">
             <Link href="/signup" className="ht-btn ht-btn-primary">
@@ -66,11 +64,9 @@ export default function Home() {
           <div className="ht-step">
             <div className="ht-step-num">02</div>
             <div>
-              <h3>Adjusts to real life</h3>
+              <h3>Connected to your calendar</h3>
               <p>
-                Training plans assume perfectly-spaced rest days, intervals and long runs. But life
-                doesn&apos;t always line up that way. Daybreak helps you work through adjustments so
-                that you can stick to the plan while minimizing injury risks.
+                Adds training sessions directly to your Google/Apple calendars.
               </p>
             </div>
           </div>
@@ -79,8 +75,7 @@ export default function Home() {
             <div>
               <h3>Daily check&#8209;ins</h3>
               <p>
-                Research shows that a self-reported check-in beats data like HRV for injury
-                prevention&emdash;and it takes just two minutes a day.
+                Ask questions, make updates, and personalize it to your needs. Daybreak is grounded in real-life training principles, injury patterns and strength plans.
               </p>
             </div>
           </div>
