@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-05-26 (session 15 — Prompt 18: Strava hard requirement; fail loudly when missing or broken)_
+_Updated: 2026-05-26 (session 16 — Prompt 18.5: deploy audit + grammy webhook init fix; laptop-shut operation live)_
 
 ---
 
@@ -11,6 +11,10 @@ A multi-tenant Telegram-based marathon coaching bot for ~5–25 friends. Daily c
 ---
 
 ## Current status
+
+**Prompt 18.5 complete — production deploy audit + grammy webhook init fix. Bot is live in webhook mode on Vercel; `/ping` and `/checkin` verified end-to-end with local dev stack off.**
+
+Bug fixed: `src/app/api/tg/webhook/route.ts` was calling `bot.handleUpdate()` without first calling `bot.init()`. Polling path inits implicitly via `bot.start()`, so the bug only surfaced in production. Fix is two lines — `bot.init()` is idempotent.
 
 **Prompt 18 complete — Strava is a hard requirement; fail loudly when missing or broken.**
 
