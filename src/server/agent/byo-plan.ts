@@ -1,10 +1,10 @@
-import * as fs from "fs";
-import * as path from "path";
-import { supabaseAdmin } from "@/lib/db";
-import { sendAndLog } from "@/server/telegram/bot";
-import { advanceQuestion } from "@/server/telegram/onboarding/state";
-import { onboardingSteps } from "@/server/telegram/onboarding/index";
-import { sendDavidAlert } from "@/server/admin/alerts";
+import * as fs from 'fs';
+import * as path from 'path';
+import { supabaseAdmin } from '@/lib/db';
+import { sendAndLog } from '@/server/telegram/bot';
+import { advanceQuestion } from '@/server/telegram/onboarding/state';
+import { onboardingSteps } from '@/server/telegram/onboarding/index';
+import { sendDavidAlert } from '@/server/admin/alerts';
 
 // ---------------------------------------------------------------------------
 // Template renderer
@@ -12,21 +12,19 @@ import { sendDavidAlert } from "@/server/admin/alerts";
 
 let _template: string | null = null;
 
-export async function renderBYOPlanTemplate(
-  values: Record<string, string>
-): Promise<string> {
+export async function renderBYOPlanTemplate(values: Record<string, string>): Promise<string> {
   if (!_template) {
     _template = fs.readFileSync(
-      path.join(process.cwd(), "prompts", "byo_plan_template.md"),
-      "utf-8"
+      path.join(process.cwd(), 'prompts', 'byo_plan_template.md'),
+      'utf-8',
     );
   }
 
   let rendered = _template;
 
   // Strip the asthma line entirely if value is empty string
-  if (values["asthma_note_if_present"] === "") {
-    rendered = rendered.replace(/^.*\{\{asthma_note_if_present\}\}.*\n?/m, "");
+  if (values['asthma_note_if_present'] === '') {
+    rendered = rendered.replace(/^.*\{\{asthma_note_if_present\}\}.*\n?/m, '');
   }
 
   // Replace all {{varname}} placeholders; throw on missing vars
@@ -89,24 +87,23 @@ export async function loadAthleteData(athleteId: string): Promise<LoadedData> {
 
   const [athleteRes, racesRes, injuriesRes, profileRes] = await Promise.all([
     db
-      .from("athletes")
-      .select("id, name, dob, sex, timezone, notes, asthma, telegram_chat_id")
-      .eq("id", athleteId)
+      .from('athletes')
+      .select('id, name, dob, sex, timezone, notes, asthma, telegram_chat_id')
+      .eq('id', athleteId)
       .single(),
     db
-      .from("races")
-      .select("id, name, date, distance_mi, elevation_ft, terrain, target_type, target_time_sec, status, created_at")
-      .eq("athlete_id", athleteId)
-      .order("created_at", { ascending: true }),
+      .from('races')
+      .select(
+        'id, name, date, distance_mi, elevation_ft, terrain, target_type, target_time_sec, status, created_at',
+      )
+      .eq('athlete_id', athleteId)
+      .order('created_at', { ascending: true }),
+    db.from('injuries').select('body_part, severity, status, notes').eq('athlete_id', athleteId),
     db
-      .from("injuries")
-      .select("body_part, severity, status, notes")
-      .eq("athlete_id", athleteId),
-    db
-      .from("memory_files")
-      .select("content_md")
-      .eq("athlete_id", athleteId)
-      .eq("file_name", "athlete_profile.md")
+      .from('memory_files')
+      .select('content_md')
+      .eq('athlete_id', athleteId)
+      .eq('file_name', 'athlete_profile.md')
       .maybeSingle(),
   ]);
 
@@ -115,8 +112,8 @@ export async function loadAthleteData(athleteId: string): Promise<LoadedData> {
   }
 
   const allRaces = racesRes.data ?? [];
-  const upcomingRaces = allRaces.filter((r) => r.status === "upcoming");
-  const completedRaces = allRaces.filter((r) => r.status === "completed");
+  const upcomingRaces = allRaces.filter((r) => r.status === 'upcoming');
+  const completedRaces = allRaces.filter((r) => r.status === 'completed');
 
   // goal race = first upcoming by created_at (step 2 inserts goal before tune-ups)
   const goalRace = upcomingRaces[0] ?? null;
@@ -129,7 +126,7 @@ export async function loadAthleteData(athleteId: string): Promise<LoadedData> {
     tuneupRaces,
     pastRace,
     injuries: (injuriesRes.data ?? []) as InjuryRow[],
-    profileMd: profileRes.data?.content_md ?? "",
+    profileMd: profileRes.data?.content_md ?? '',
   };
 }
 
@@ -138,128 +135,114 @@ export async function loadAthleteData(athleteId: string): Promise<LoadedData> {
 // ---------------------------------------------------------------------------
 
 function computeAge(dob: string | null): string {
-  if (!dob) return "unknown";
+  if (!dob) return 'unknown';
   return String(new Date().getFullYear() - new Date(dob).getFullYear());
 }
 
 export function extractSection(md: string, sectionName: string): string {
-  const escaped = sectionName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = new RegExp(
-    `## ${escaped}\\s*\\n([\\s\\S]*?)(?=\\n## |$)`
-  ).exec(md);
-  return match ? match[1]!.trim() : "";
+  const escaped = sectionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(`## ${escaped}\\s*\\n([\\s\\S]*?)(?=\\n## |$)`).exec(md);
+  return match ? match[1]!.trim() : '';
 }
 
 export function extractLineValue(md: string, label: string): string {
-  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = new RegExp(`${escaped}:\\s*(.+)`).exec(md);
-  return match ? match[1]!.trim() : "";
+  return match ? match[1]!.trim() : '';
 }
 
 export function extractNotesValue(notes: string | null, label: string): string {
-  if (!notes) return "";
-  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (!notes) return '';
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = new RegExp(`${escaped}:\\s*(\\d+)`).exec(notes);
-  return match ? match[1]! : "";
+  return match ? match[1]! : '';
 }
 
 function formatRaceGoalDescription(
   targetType: string | null,
-  targetTimeSec: number | null
+  targetTimeSec: number | null,
 ): string {
-  if (targetType === "time" && targetTimeSec) {
+  if (targetType === 'time' && targetTimeSec) {
     const h = Math.floor(targetTimeSec / 3600);
     const m = Math.floor((targetTimeSec % 3600) / 60);
     const s = targetTimeSec % 60;
-    const timeStr = `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    const timeStr = `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     return `Time — sub-${timeStr}`;
   }
-  return "Finish — no time goal";
+  return 'Finish — no time goal';
 }
 
 function formatFinishTimeSec(sec: number | null): string {
-  if (!sec) return "—";
+  if (!sec) return '—';
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
-  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
 export function buildTemplateValues(data: LoadedData): Record<string, string> {
   const { athlete, goalRace, tuneupRaces, pastRace, injuries, profileMd } = data;
-  const scheduleSection = extractSection(profileMd, "Schedule");
-  const goalsSection = extractSection(profileMd, "Goals");
-  const anythingElseSection = extractSection(profileMd, "Anything else");
+  const scheduleSection = extractSection(profileMd, 'Schedule');
+  const goalsSection = extractSection(profileMd, 'Goals');
+  const anythingElseSection = extractSection(profileMd, 'Anything else');
 
-  const daysPerWeek =
-    extractLineValue(scheduleSection, "Training days per week") || "unknown";
-  const hoursPerWeek =
-    extractLineValue(scheduleSection, "Hours per week") || "unknown";
-  const freeformMeaning =
-    extractLineValue(goalsSection, "Meaning") || "Not provided.";
+  const daysPerWeek = extractLineValue(scheduleSection, 'Training days per week') || 'unknown';
+  const hoursPerWeek = extractLineValue(scheduleSection, 'Hours per week') || 'unknown';
+  const freeformMeaning = extractLineValue(goalsSection, 'Meaning') || 'Not provided.';
 
-  const recentMileageMi = extractNotesValue(
-    athlete.notes,
-    "Recent avg miles/week"
-  );
-  const longestRecentMi = extractNotesValue(
-    athlete.notes,
-    "Longest recent run"
-  );
+  const recentMileageMi = extractNotesValue(athlete.notes, 'Recent avg miles/week');
+  const longestRecentMi = extractNotesValue(athlete.notes, 'Longest recent run');
   const longestRecentX15 = longestRecentMi
     ? String(Math.round(parseInt(longestRecentMi) * 1.5))
-    : "0";
+    : '0';
 
   const tuneUpRacesOrNone =
     tuneupRaces.length > 0
-      ? tuneupRaces
-          .map((r) => `${r.name} (${r.date ?? "TBD"})`)
-          .join(", ")
-      : "None planned.";
+      ? tuneupRaces.map((r) => `${r.name} (${r.date ?? 'TBD'})`).join(', ')
+      : 'None planned.';
 
   const pastNotableOrNone = pastRace
-    ? `${pastRace.name} — ${formatFinishTimeSec(pastRace.target_time_sec)} — ${pastRace.date ?? "—"}`
-    : "None reported.";
+    ? `${pastRace.name} — ${formatFinishTimeSec(pastRace.target_time_sec)} — ${pastRace.date ?? '—'}`
+    : 'None reported.';
 
   const injuryHistoryFormatted =
     injuries.length === 0
-      ? "_No injuries flagged during onboarding._"
+      ? '_No injuries flagged during onboarding._'
       : injuries
           .map((inj) => {
-            const status = inj.status === "active" ? "currently active" : "monitoring";
-            const notes = inj.notes ? ` ${inj.notes}` : "";
-            return `- **${capitalize(inj.body_part)}** — severity ${inj.severity ?? "?"}/10, ${status}.${notes}`;
+            const status = inj.status === 'active' ? 'currently active' : 'monitoring';
+            const notes = inj.notes ? ` ${inj.notes}` : '';
+            return `- **${capitalize(inj.body_part)}** — severity ${inj.severity ?? '?'}/10, ${status}.${notes}`;
           })
-          .join("\n");
+          .join('\n');
 
   const asthmaNote = athlete.asthma
-    ? "Athlete has asthma or uses an inhaler. Avoid sustained high-intensity efforts in cold/dry conditions."
-    : "";
+    ? 'Athlete has asthma or uses an inhaler. Avoid sustained high-intensity efforts in cold/dry conditions.'
+    : '';
 
   return {
     name: athlete.name,
     age: computeAge(athlete.dob),
-    sex: athlete.sex ?? "unknown",
+    sex: athlete.sex ?? 'unknown',
     timezone: athlete.timezone,
     days_per_week: daysPerWeek,
     hours_per_week: hoursPerWeek,
-    goal_race_name: goalRace?.name ?? "Unknown",
-    goal_race_date: goalRace?.date ?? "TBD",
-    distance_mi: goalRace?.distance_mi != null ? String(goalRace.distance_mi) : "unknown",
-    elevation_ft: goalRace?.elevation_ft != null ? String(goalRace.elevation_ft) : "0",
-    terrain: goalRace?.terrain ?? "unknown",
+    goal_race_name: goalRace?.name ?? 'Unknown',
+    goal_race_date: goalRace?.date ?? 'TBD',
+    distance_mi: goalRace?.distance_mi != null ? String(goalRace.distance_mi) : 'unknown',
+    elevation_ft: goalRace?.elevation_ft != null ? String(goalRace.elevation_ft) : '0',
+    terrain: goalRace?.terrain ?? 'unknown',
     race_goal_description: formatRaceGoalDescription(
       goalRace?.target_type ?? null,
-      goalRace?.target_time_sec ?? null
+      goalRace?.target_time_sec ?? null,
     ),
     tune_up_races_or_none: tuneUpRacesOrNone,
     past_notable_or_none: pastNotableOrNone,
     freeform_meaning: freeformMeaning,
     injury_history_formatted: injuryHistoryFormatted,
-    freeform_anything_else:
-      anythingElseSection || "_None reported._",
-    recent_mileage_mi: recentMileageMi || "0",
-    longest_recent_mi: longestRecentMi || "0",
+    freeform_anything_else: anythingElseSection || '_None reported._',
+    recent_mileage_mi: recentMileageMi || '0',
+    longest_recent_mi: longestRecentMi || '0',
     longest_recent_x_1_5: longestRecentX15,
     asthma_note_if_present: asthmaNote,
   };
@@ -270,10 +253,8 @@ function capitalize(s: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// handleBuildPath
-// ---------------------------------------------------------------------------
-// DORMANT IN v0.6: only reached for athletes with no existing plan_versions row.
-// Server-generate path will replace this pre-launch.
+// handleBuildPath — wired via onboarding step 06-plan-fork.
+// Reached when an athlete chooses "build" and has no existing plan_versions row.
 // ---------------------------------------------------------------------------
 
 export async function handleBuildPath(athleteId: string): Promise<void> {
@@ -293,7 +274,7 @@ export async function handleBuildPath(athleteId: string): Promise<void> {
   // Create the plan row
   const today = new Date().toISOString().slice(0, 10);
   const { data: planRow, error: planErr } = await db
-    .from("plans")
+    .from('plans')
     .insert({
       athlete_id: athleteId,
       goal_race_id: goalRace?.id ?? null,
@@ -301,23 +282,23 @@ export async function handleBuildPath(athleteId: string): Promise<void> {
       weeks: null,
       current_version_id: null,
     })
-    .select("id")
+    .select('id')
     .single();
   if (planErr || !planRow) {
     throw new Error(`handleBuildPath: plans insert failed: ${planErr?.message}`);
   }
 
   const { data: versionRow, error: versionErr } = await db
-    .from("plan_versions")
+    .from('plan_versions')
     .insert({
       plan_id: planRow.id,
       version: 1,
       plan_json: null,
       schema_version: 1,
-      generated_by: "athlete_llm",
-      status: "awaiting_paste",
+      generated_by: 'athlete_llm',
+      status: 'awaiting_paste',
     })
-    .select("id")
+    .select('id')
     .single();
   if (versionErr || !versionRow) {
     throw new Error(`handleBuildPath: plan_versions insert failed: ${versionErr?.message}`);
@@ -327,7 +308,7 @@ export async function handleBuildPath(athleteId: string): Promise<void> {
   await sendAndLog(
     athleteId,
     chatId,
-    `Here's your prompt — paste it into Claude or ChatGPT, work with it until the plan feels right, then paste the resulting JSON back here.`
+    `Here's your prompt — paste it into Claude or ChatGPT, work with it until the plan feels right, then paste the resulting JSON back here.`,
   );
 
   const CHUNK_SIZE = 4096;
@@ -343,7 +324,7 @@ export async function handleBuildPath(athleteId: string): Promise<void> {
   });
 
   await sendDavidAlert(
-    `Athlete ${athlete.name} finished onboarding (build path). BYO template sent. Awaiting paste.`
+    `Athlete ${athlete.name} finished onboarding (build path). BYO template sent. Awaiting paste.`,
   );
 }
 
@@ -363,7 +344,7 @@ export async function handleHelpPath(athleteId: string): Promise<void> {
   await sendAndLog(
     athleteId,
     chatId,
-    "All set — David will reach out within 24 hours to help you build a plan. Sit tight."
+    'All set — David will reach out within 24 hours to help you build a plan. Sit tight.',
   );
 
   // Mark onboarding complete
@@ -375,27 +356,26 @@ export async function handleHelpPath(athleteId: string): Promise<void> {
 
   // Build richer alert for David
   const age = computeAge(athlete.dob);
-  const recentAvgMi = extractNotesValue(athlete.notes, "Recent avg miles/week") || "unknown";
-  const longestMi = extractNotesValue(athlete.notes, "Longest recent run") || "unknown";
+  const recentAvgMi = extractNotesValue(athlete.notes, 'Recent avg miles/week') || 'unknown';
+  const longestMi = extractNotesValue(athlete.notes, 'Longest recent run') || 'unknown';
   const activeInjuries = injuries
-    .filter((i) => i.status === "active")
+    .filter((i) => i.status === 'active')
     .map((i) => capitalize(i.body_part));
-  const injuryText = activeInjuries.length > 0 ? activeInjuries.join(", ") : "none";
+  const injuryText = activeInjuries.length > 0 ? activeInjuries.join(', ') : 'none';
   const profileMd = data.profileMd;
-  const anythingElseText =
-    extractSection(profileMd, "Anything else") || "none";
+  const anythingElseText = extractSection(profileMd, 'Anything else') || 'none';
 
   const alertLines = [
     `New athlete needs a plan (help path):`,
     ``,
     `Name: ${athlete.name}, Age: ${age}`,
     goalRace
-      ? `Goal race: ${goalRace.name} on ${goalRace.date ?? "TBD"} (${goalRace.distance_mi ?? "?"} mi, ${goalRace.elevation_ft ?? "?"}ft)`
+      ? `Goal race: ${goalRace.name} on ${goalRace.date ?? 'TBD'} (${goalRace.distance_mi ?? '?'} mi, ${goalRace.elevation_ft ?? '?'}ft)`
       : `Goal race: unknown`,
     `Current fitness: ${recentAvgMi} mi/week avg, ${longestMi} mi longest run`,
     `Active injuries: ${injuryText}`,
     `Anything else: ${anythingElseText}`,
   ];
 
-  await sendDavidAlert(alertLines.join("\n"));
+  await sendDavidAlert(alertLines.join('\n'));
 }

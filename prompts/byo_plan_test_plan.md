@@ -213,19 +213,19 @@ For the template to be ready for Week 2 of the build:
 
 A markdown table is fine. One row per run.
 
-| Profile | Model | Run | Auto checks (X/9) | Manual rubric (X/7) | Notes |
-|---|---|---|---|---|---|
-| Annie | Opus 4.6 | v1 |  |  |  |
-| Annie | Opus 4.6 | v_final |  |  |  |
-| Annie | Sonnet 4.6 | v1 |  |  |  |
-| Annie | Sonnet 4.6 | v_final |  |  |  |
-| Annie | GPT-4o | v1 |  |  |  |
-| Annie | GPT-4o | v_final |  |  |  |
-| Rob | Opus 4.6 | v1 |  |  |  |
-| ...etc | | | | | |
-| Tom | Opus 4.6 | v1 (run 2) |  |  |  |
-| Tom | Sonnet 4.6 | v1 (run 2) |  |  |  |
-| Tom | GPT-4o | v1 (run 2) |  |  |  |
+| Profile | Model      | Run        | Auto checks (X/9) | Manual rubric (X/7) | Notes |
+| ------- | ---------- | ---------- | ----------------- | ------------------- | ----- |
+| Annie   | Opus 4.6   | v1         |                   |                     |       |
+| Annie   | Opus 4.6   | v_final    |                   |                     |       |
+| Annie   | Sonnet 4.6 | v1         |                   |                     |       |
+| Annie   | Sonnet 4.6 | v_final    |                   |                     |       |
+| Annie   | GPT-4o     | v1         |                   |                     |       |
+| Annie   | GPT-4o     | v_final    |                   |                     |       |
+| Rob     | Opus 4.6   | v1         |                   |                     |       |
+| ...etc  |            |            |                   |                     |       |
+| Tom     | Opus 4.6   | v1 (run 2) |                   |                     |       |
+| Tom     | Sonnet 4.6 | v1 (run 2) |                   |                     |       |
+| Tom     | GPT-4o     | v1 (run 2) |                   |                     |       |
 
 ## Iteration loop on the prompt itself
 
@@ -257,5 +257,5 @@ When the spike is done:
 
 - You arrive at Prompt 3 (schema migration) with a real, validated schema rather than a guess.
 - You arrive at Prompt 11 (server-side plan-paste validator) with the validator already 80% written and known to work on real LLM outputs.
-- You catch the worst prompt-engineering issues *before* any friend sees them.
+- You catch the worst prompt-engineering issues _before_ any friend sees them.
 - You generate ~18 real example plans you can show alpha friends as social proof during onboarding ("here's what other people's plans look like").

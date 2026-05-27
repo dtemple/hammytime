@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from 'zod';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -7,15 +7,15 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 // ---------------------------------------------------------------------------
 
 export const DayTypeEnum = z.enum([
-  "long_run",
-  "easy",
-  "easy_with_strides",
-  "hill_repeats",
-  "trail_tempo",
-  "upper_body_strength",
-  "lower_body_strength",
-  "race",
-  "rest",
+  'long_run',
+  'easy',
+  'easy_with_strides',
+  'hill_repeats',
+  'trail_tempo',
+  'upper_body_strength',
+  'lower_body_strength',
+  'race',
+  'rest',
 ]);
 
 export type DayType = z.infer<typeof DayTypeEnum>;
@@ -27,15 +27,15 @@ export type DayType = z.infer<typeof DayTypeEnum>;
 // ---------------------------------------------------------------------------
 
 export const DaySchema = z.object({
-  day: z.string().min(1),                          // "Monday" … "Sunday"
+  day: z.string().min(1), // "Monday" … "Sunday"
   date: z.string().regex(ISO_DATE).optional(),
   type: DayTypeEnum,
-  category: z.enum(["run", "strength", "rest", "race"]).optional(),
+  category: z.enum(['run', 'strength', 'rest', 'race']).optional(),
   description: z.string().min(1),
 
   // Run fields
   planned_distance_miles: z.number().nonnegative().optional(),
-  intensity: z.string().optional(),                // "easy" | "hard" | "moderate_hard" etc.
+  intensity: z.string().optional(), // "easy" | "hard" | "moderate_hard" etc.
   target_hr_zone: z.tuple([z.number(), z.number()]).optional(),
   target_rpe: z.tuple([z.number(), z.number()]).optional(),
   prefer_trail: z.boolean().optional(),
@@ -43,7 +43,7 @@ export const DaySchema = z.object({
 
   // Strength fields
   planned_duration_min: z.number().nonnegative().optional(),
-  intensity_level: z.string().optional(),          // "standard" | "taper" | "race_week"
+  intensity_level: z.string().optional(), // "standard" | "taper" | "race_week"
   use_taper_sets: z.boolean().optional(),
 
   // easy_with_strides fields
@@ -86,14 +86,7 @@ export type Day = z.infer<typeof DaySchema>;
 // Uses a week-number list, not start/end ranges.
 // ---------------------------------------------------------------------------
 
-export const PhaseNameSchema = z.enum([
-  "base",
-  "build",
-  "cutback",
-  "peak",
-  "taper",
-  "race",
-]);
+export const PhaseNameSchema = z.enum(['base', 'build', 'cutback', 'peak', 'taper', 'race']);
 
 export type PhaseName = z.infer<typeof PhaseNameSchema>;
 
@@ -137,25 +130,22 @@ const AthleteSchema = z.object({
 const RaceSchema = z
   .object({
     name: z.string().min(1),
-    date: z.string().regex(ISO_DATE, "Must be ISO 8601 date"),
+    date: z.string().regex(ISO_DATE, 'Must be ISO 8601 date'),
     day_of_week: z.string().optional(),
     distance_miles: z.number().positive(),
-    type: z.enum(["road", "trail", "mixed"]).optional(),
+    type: z.enum(['road', 'trail', 'mixed']).optional(),
     elevation_gain_ft: z.number().nonnegative().optional(),
-    goal: z.string().optional(),               // "finish" | "time" | freeform
+    goal: z.string().optional(), // "finish" | "time" | freeform
     target_time_sec: z.number().int().positive().optional(),
   })
-  .refine(
-    (r) => r.goal !== "time" || r.target_time_sec !== undefined,
-    {
-      message: 'target_time_sec is required when goal is "time"',
-      path: ["target_time_sec"],
-    }
-  );
+  .refine((r) => r.goal !== 'time' || r.target_time_sec !== undefined, {
+    message: 'target_time_sec is required when goal is "time"',
+    path: ['target_time_sec'],
+  });
 
 const PlanStructureSchema = z.object({
   total_weeks: z.number().int().positive(),
-  start_date: z.string().regex(ISO_DATE, "Must be ISO 8601 date"),
+  start_date: z.string().regex(ISO_DATE, 'Must be ISO 8601 date'),
   end_date: z.string().regex(ISO_DATE).optional(),
   days_per_week: z.number().int().min(1).max(7).optional(),
   rest_day: z.string().optional(),
@@ -227,14 +217,14 @@ const ExerciseSchema = z.object({
   name: z.string(),
   sets: z.number().int().positive().optional(),
   reps: z.number().optional(),
-  reps_unit: z.string().optional(),        // "per_side" | "per_leg" | "seconds" | …
+  reps_unit: z.string().optional(), // "per_side" | "per_leg" | "seconds" | …
   taper_sets: z.number().int().optional(),
   taper_reps: z.number().optional(),
   muscle_group: z.string().optional(),
   trail_note: z.string().optional(),
-  duration_min: z.number().nonnegative().optional(),     // Foam Rolling
+  duration_min: z.number().nonnegative().optional(), // Foam Rolling
   taper_duration_min: z.number().nonnegative().optional(),
-  areas: z.array(z.string()).optional(),                  // Foam Rolling areas
+  areas: z.array(z.string()).optional(), // Foam Rolling areas
 });
 
 const StrengthSessionSchema = z.object({
@@ -268,14 +258,10 @@ export const PlanSchema = z
     strength_workouts: StrengthWorkoutsSchema.optional(),
     weeks: z.array(WeekSchema).min(1),
   })
-  .refine(
-    (p) => p.weeks.length === p.metadata.plan_structure.total_weeks,
-    {
-      message:
-        "weeks array length must equal metadata.plan_structure.total_weeks",
-      path: ["weeks"],
-    }
-  )
+  .refine((p) => p.weeks.length === p.metadata.plan_structure.total_weeks, {
+    message: 'weeks array length must equal metadata.plan_structure.total_weeks',
+    path: ['weeks'],
+  })
   .refine(
     (p) => {
       const phases = p.metadata.plan_structure.phases;
@@ -291,9 +277,9 @@ export const PlanSchema = z
     },
     {
       message:
-        "metadata.plan_structure.phases must cover every week from 1 to total_weeks exactly once (no gaps, no overlaps)",
-      path: ["metadata", "plan_structure", "phases"],
-    }
+        'metadata.plan_structure.phases must cover every week from 1 to total_weeks exactly once (no gaps, no overlaps)',
+      path: ['metadata', 'plan_structure', 'phases'],
+    },
   );
 
 export type Plan = z.infer<typeof PlanSchema>;

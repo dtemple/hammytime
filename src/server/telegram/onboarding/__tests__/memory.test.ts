@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { upsertProfileSection } from "../memory";
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { upsertProfileSection } from '../memory';
 
-vi.mock("@/lib/db", () => ({
+vi.mock('@/lib/db', () => ({
   supabaseAdmin: vi.fn(),
 }));
 
-import { supabaseAdmin } from "@/lib/db";
+import { supabaseAdmin } from '@/lib/db';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyDB = any;
@@ -29,59 +29,59 @@ function makeDb(existingContent: string | null) {
 
 beforeEach(() => vi.clearAllMocks());
 
-describe("upsertProfileSection", () => {
-  it("replaces an existing section", async () => {
-    const { from, _upsertMock } = makeDb("## Identity\nName: Old\n\n## Schedule\nDays: 4");
+describe('upsertProfileSection', () => {
+  it('replaces an existing section', async () => {
+    const { from, _upsertMock } = makeDb('## Identity\nName: Old\n\n## Schedule\nDays: 4');
     vi.mocked(supabaseAdmin).mockReturnValue({ from } as AnyDB);
 
-    await upsertProfileSection("a1", "Identity", "Name: New\nAge: 30");
+    await upsertProfileSection('a1', 'Identity', 'Name: New\nAge: 30');
 
     const saved = (_upsertMock.mock.calls[0]![0] as { content_md: string }).content_md;
-    expect(saved).toContain("## Identity\nName: New\nAge: 30");
-    expect(saved).toContain("## Schedule\nDays: 4");
-    expect(saved).not.toContain("Name: Old");
+    expect(saved).toContain('## Identity\nName: New\nAge: 30');
+    expect(saved).toContain('## Schedule\nDays: 4');
+    expect(saved).not.toContain('Name: Old');
   });
 
-  it("appends a new section when the file has existing content", async () => {
-    const { from, _upsertMock } = makeDb("## Identity\nName: Alice");
+  it('appends a new section when the file has existing content', async () => {
+    const { from, _upsertMock } = makeDb('## Identity\nName: Alice');
     vi.mocked(supabaseAdmin).mockReturnValue({ from } as AnyDB);
 
-    await upsertProfileSection("a1", "Goals", "Distance: Marathon");
+    await upsertProfileSection('a1', 'Goals', 'Distance: Marathon');
 
     const saved = (_upsertMock.mock.calls[0]![0] as { content_md: string }).content_md;
-    expect(saved).toContain("## Goals\nDistance: Marathon");
-    expect(saved).toContain("## Identity\nName: Alice");
+    expect(saved).toContain('## Goals\nDistance: Marathon');
+    expect(saved).toContain('## Identity\nName: Alice');
   });
 
-  it("writes without leading newline when file is empty", async () => {
-    const { from, _upsertMock } = makeDb("");
+  it('writes without leading newline when file is empty', async () => {
+    const { from, _upsertMock } = makeDb('');
     vi.mocked(supabaseAdmin).mockReturnValue({ from } as AnyDB);
 
-    await upsertProfileSection("a1", "Identity", "Name: Bob");
+    await upsertProfileSection('a1', 'Identity', 'Name: Bob');
 
     const saved = (_upsertMock.mock.calls[0]![0] as { content_md: string }).content_md;
-    expect(saved).toBe("## Identity\nName: Bob");
-    expect(saved.startsWith("\n")).toBe(false);
+    expect(saved).toBe('## Identity\nName: Bob');
+    expect(saved.startsWith('\n')).toBe(false);
   });
 
   it("creates a new file when the row doesn't exist", async () => {
     const { from, _upsertMock } = makeDb(null);
     vi.mocked(supabaseAdmin).mockReturnValue({ from } as AnyDB);
 
-    await upsertProfileSection("a1", "Schedule", "Days: 5");
+    await upsertProfileSection('a1', 'Schedule', 'Days: 5');
 
     const saved = (_upsertMock.mock.calls[0]![0] as { content_md: string }).content_md;
-    expect(saved).toBe("## Schedule\nDays: 5");
+    expect(saved).toBe('## Schedule\nDays: 5');
   });
 
-  it("replaces a section at the end of the file with no trailing ##", async () => {
-    const { from, _upsertMock } = makeDb("## Identity\nName: Alice\n\n## Goals\nDistance: 5K");
+  it('replaces a section at the end of the file with no trailing ##', async () => {
+    const { from, _upsertMock } = makeDb('## Identity\nName: Alice\n\n## Goals\nDistance: 5K');
     vi.mocked(supabaseAdmin).mockReturnValue({ from } as AnyDB);
 
-    await upsertProfileSection("a1", "Goals", "Distance: Marathon");
+    await upsertProfileSection('a1', 'Goals', 'Distance: Marathon');
 
     const saved = (_upsertMock.mock.calls[0]![0] as { content_md: string }).content_md;
-    expect(saved).toContain("## Goals\nDistance: Marathon");
-    expect(saved).not.toContain("Distance: 5K");
+    expect(saved).toContain('## Goals\nDistance: Marathon');
+    expect(saved).not.toContain('Distance: 5K');
   });
 });

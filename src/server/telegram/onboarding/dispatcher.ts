@@ -1,12 +1,12 @@
-import type { Context } from "grammy";
-import { supabaseAdmin } from "@/lib/db";
-import type { Database } from "@/lib/db-types";
-import { sendAndLog, telegramBot } from "../bot";
-import { advanceQuestion, loadOnboardingState } from "./state";
-import type { OnboardingState, Question } from "./types";
-import { onboardingSteps } from "./index";
+import type { Context } from 'grammy';
+import { supabaseAdmin } from '@/lib/db';
+import type { Database } from '@/lib/db-types';
+import { sendAndLog, telegramBot } from '../bot';
+import { advanceQuestion, loadOnboardingState } from './state';
+import type { OnboardingState, Question } from './types';
+import { onboardingSteps } from './index';
 
-type AthleteRow = Database["public"]["Tables"]["athletes"]["Row"];
+type AthleteRow = Database['public']['Tables']['athletes']['Row'];
 
 // Returns the index of the first non-skipped question at or after `start`
 // within the given questions array, given the current partial answers.
@@ -14,7 +14,7 @@ type AthleteRow = Database["public"]["Tables"]["athletes"]["Row"];
 function firstActiveQuestion(
   questions: Question[],
   start: number,
-  partial: Record<string, unknown>
+  partial: Record<string, unknown>,
 ): number {
   for (let i = start; i < questions.length; i++) {
     const q = questions[i];
@@ -24,10 +24,10 @@ function firstActiveQuestion(
 }
 
 async function logInbound(athleteId: string, body: string): Promise<void> {
-  await supabaseAdmin().from("messages").insert({
+  await supabaseAdmin().from('messages').insert({
     athlete_id: athleteId,
-    channel: "tg",
-    direction: "in",
+    channel: 'tg',
+    direction: 'in',
     body,
   });
 }
@@ -35,7 +35,7 @@ async function logInbound(athleteId: string, body: string): Promise<void> {
 async function askQuestion(
   chatId: number | string,
   athleteId: string,
-  question: Question
+  question: Question,
 ): Promise<void> {
   await sendAndLog(athleteId, chatId, question.prompt);
 }
@@ -46,13 +46,10 @@ async function askQuestion(
  * Returns true  — message was handled (onboarding in progress or just finished this turn).
  * Returns false — onboarding is already complete; caller should route elsewhere.
  */
-export async function handleOnboardingMessage(
-  ctx: Context,
-  athlete: AthleteRow
-): Promise<boolean> {
+export async function handleOnboardingMessage(ctx: Context, athlete: AthleteRow): Promise<boolean> {
   const athleteId = athlete.id;
   const chatId = ctx.chat!.id;
-  const text = ctx.message?.text ?? "";
+  const text = ctx.message?.text ?? '';
 
   await logInbound(athleteId, text);
 
@@ -96,11 +93,7 @@ export async function handleOnboardingMessage(
   const result = question.parseReply(text, state.partial);
 
   if (!result.ok) {
-    await sendAndLog(
-      athleteId,
-      chatId,
-      `${result.error}\n\n${question.prompt}`
-    );
+    await sendAndLog(athleteId, chatId, `${result.error}\n\n${question.prompt}`);
     return true;
   }
 
@@ -130,7 +123,7 @@ export async function handleOnboardingMessage(
 async function completeStep(
   athleteId: string,
   chatId: number | string,
-  state: OnboardingState
+  state: OnboardingState,
 ): Promise<boolean> {
   const nextStepIdx = state.step + 1;
 
@@ -151,10 +144,10 @@ async function completeStep(
         await telegramBot().api.sendMessage(chatId, nextStep.initialPrompt, {
           reply_markup: nextStep.initialKeyboard,
         });
-        await supabaseAdmin().from("messages").insert({
+        await supabaseAdmin().from('messages').insert({
           athlete_id: athleteId,
-          channel: "tg",
-          direction: "out",
+          channel: 'tg',
+          direction: 'out',
           body: nextStep.initialPrompt,
         });
       } else if (nextStep.initialPrompt) {
@@ -200,7 +193,7 @@ async function completeStep(
 export async function handleOnboardingCallback(
   ctx: Context,
   athlete: AthleteRow,
-  data: string
+  data: string,
 ): Promise<void> {
   const athleteId = athlete.id;
   const chatId = ctx.chat!.id;

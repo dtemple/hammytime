@@ -22,19 +22,19 @@
  *   replace       — weekly_survey_log.md (v1 doesn't use it; source has longitudinal value)
  */
 
-import { config } from "dotenv";
-config({ path: ".env.local" });
+import { config } from 'dotenv';
+config({ path: '.env.local' });
 
-import { existsSync, readFileSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
-import { supabaseAdmin } from "../src/lib/db";
+import { existsSync, readFileSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
+import { supabaseAdmin } from '../src/lib/db';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type Strategy = "prepend" | "append-section" | "replace";
+type Strategy = 'prepend' | 'append-section' | 'replace';
 
 interface FileConfig {
   fileName: string;
@@ -46,14 +46,14 @@ interface FileConfig {
 // ---------------------------------------------------------------------------
 
 const FILE_CONFIGS: FileConfig[] = [
-  { fileName: "checkin_log.md",       strategy: "prepend" },
-  { fileName: "wellness_log.md",      strategy: "prepend" },
-  { fileName: "athlete_profile.md",   strategy: "append-section" },
-  { fileName: "injury_log.md",        strategy: "append-section" },
-  { fileName: "race_calendar.md",     strategy: "append-section" },
-  { fileName: "personal_records.md",  strategy: "append-section" },
-  { fileName: "open_questions.md",    strategy: "append-section" },
-  { fileName: "weekly_survey_log.md", strategy: "replace" },
+  { fileName: 'checkin_log.md', strategy: 'prepend' },
+  { fileName: 'wellness_log.md', strategy: 'prepend' },
+  { fileName: 'athlete_profile.md', strategy: 'append-section' },
+  { fileName: 'injury_log.md', strategy: 'append-section' },
+  { fileName: 'race_calendar.md', strategy: 'append-section' },
+  { fileName: 'personal_records.md', strategy: 'append-section' },
+  { fileName: 'open_questions.md', strategy: 'append-section' },
+  { fileName: 'weekly_survey_log.md', strategy: 'replace' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -65,17 +65,13 @@ const FILE_CONFIGS: FileConfig[] = [
  * Empty/null existing → source as-is (no orphan divider).
  * Existing content → source + divider comment + existing.
  */
-export function applyPrepend(
-  source: string,
-  existing: string | null,
-  date: string
-): string {
+export function applyPrepend(source: string, existing: string | null, date: string): string {
   if (!existing) return source;
   return (
     source +
-    "\n\n" +
+    '\n\n' +
     `<!-- ↑ historical entries imported ${date} | new entries appended below ↓ -->` +
-    "\n\n" +
+    '\n\n' +
     existing
   );
 }
@@ -85,19 +81,9 @@ export function applyPrepend(
  * Empty/null existing → source as-is (clean write; no dangling section header).
  * Existing content → existing + import section header + source.
  */
-export function applyAppendSection(
-  existing: string | null,
-  source: string,
-  date: string
-): string {
+export function applyAppendSection(existing: string | null, source: string, date: string): string {
   if (!existing) return source;
-  return (
-    existing +
-    "\n\n" +
-    `## Imported from personal coach (${date})` +
-    "\n\n" +
-    source
-  );
+  return existing + '\n\n' + `## Imported from personal coach (${date})` + '\n\n' + source;
 }
 
 /**
@@ -117,27 +103,25 @@ export function parseArgs(): {
   dryRun: boolean;
 } {
   const args = process.argv.slice(2);
-  let athleteEmail = "";
-  let sourceDir = join(homedir(), "projects", "health-agent");
+  let athleteEmail = '';
+  let sourceDir = join(homedir(), 'projects', 'health-agent');
   let dryRun = false;
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--athlete-email" && args[i + 1]) {
+    if (args[i] === '--athlete-email' && args[i + 1]) {
       athleteEmail = args[++i]!;
-    } else if (args[i] === "--source-dir" && args[i + 1]) {
+    } else if (args[i] === '--source-dir' && args[i + 1]) {
       const raw = args[++i]!;
       // Expand leading ~ to home directory
-      sourceDir = raw.startsWith("~/")
-        ? join(homedir(), raw.slice(2))
-        : raw;
-    } else if (args[i] === "--dry-run") {
+      sourceDir = raw.startsWith('~/') ? join(homedir(), raw.slice(2)) : raw;
+    } else if (args[i] === '--dry-run') {
       dryRun = true;
     }
   }
 
   if (!athleteEmail) {
     console.error(
-      "Usage: tsx scripts/import-memory-files.ts --athlete-email <email> [--source-dir <path>] [--dry-run]"
+      'Usage: tsx scripts/import-memory-files.ts --athlete-email <email> [--source-dir <path>] [--dry-run]',
     );
     process.exit(1);
   }
@@ -153,20 +137,20 @@ async function main() {
   const { athleteEmail, sourceDir, dryRun } = parseArgs();
 
   if (dryRun) {
-    console.log("[dry-run] No writes will happen.\n");
+    console.log('[dry-run] No writes will happen.\n');
   }
 
   const db = supabaseAdmin();
 
   // --- Athlete lookup (users → athletes, same two-step as import-plan.ts) ---
   const { data: user, error: userErr } = await db
-    .from("users")
-    .select("id")
-    .eq("email", athleteEmail)
+    .from('users')
+    .select('id')
+    .eq('email', athleteEmail)
     .maybeSingle();
 
   if (userErr) {
-    console.error("Error looking up user:", userErr.message);
+    console.error('Error looking up user:', userErr.message);
     process.exit(1);
   }
   if (!user) {
@@ -175,18 +159,18 @@ async function main() {
   }
 
   const { data: athlete, error: athleteErr } = await db
-    .from("athletes")
-    .select("id, name")
-    .eq("user_id", user.id)
+    .from('athletes')
+    .select('id, name')
+    .eq('user_id', user.id)
     .maybeSingle();
 
   if (athleteErr) {
-    console.error("Error looking up athlete:", athleteErr.message);
+    console.error('Error looking up athlete:', athleteErr.message);
     process.exit(1);
   }
   if (!athlete) {
     console.error(
-      `No athlete found for user ${athleteEmail}. Has the athlete completed Telegram linking?`
+      `No athlete found for user ${athleteEmail}. Has the athlete completed Telegram linking?`,
     );
     process.exit(1);
   }
@@ -209,14 +193,14 @@ async function main() {
       continue;
     }
 
-    const sourceContent = readFileSync(sourcePath, "utf8");
+    const sourceContent = readFileSync(sourcePath, 'utf8');
 
     // Read existing DB content
     const { data, error: readErr } = await db
-      .from("memory_files")
-      .select("content_md")
-      .eq("athlete_id", athlete.id)
-      .eq("file_name", fileName)
+      .from('memory_files')
+      .select('content_md')
+      .eq('athlete_id', athlete.id)
+      .eq('file_name', fileName)
       .maybeSingle();
 
     if (readErr) {
@@ -230,9 +214,9 @@ async function main() {
 
     // Apply strategy
     let newContent: string;
-    if (strategy === "prepend") {
+    if (strategy === 'prepend') {
       newContent = applyPrepend(sourceContent, existing, date);
-    } else if (strategy === "append-section") {
+    } else if (strategy === 'append-section') {
       newContent = applyAppendSection(existing, sourceContent, date);
     } else {
       newContent = applyReplace(sourceContent);
@@ -242,21 +226,21 @@ async function main() {
 
     console.log(
       `  ${fileName}: ${strategy} | before=${sizeBefore}B | after=${sizeAfter}B` +
-      (dryRun ? " | [would write]" : " | written")
+        (dryRun ? ' | [would write]' : ' | written'),
     );
 
     if (dryRun) {
       const preview = newContent.slice(0, 300);
-      console.log(`    Preview (first 300 chars):\n    ${preview.replace(/\n/g, "\n    ")}\n`);
+      console.log(`    Preview (first 300 chars):\n    ${preview.replace(/\n/g, '\n    ')}\n`);
     } else {
-      const { error: upsertErr } = await db.from("memory_files").upsert(
+      const { error: upsertErr } = await db.from('memory_files').upsert(
         {
           athlete_id: athlete.id,
           file_name: fileName,
           content_md: newContent,
           updated_at: new Date().toISOString(),
         },
-        { onConflict: "athlete_id,file_name" }
+        { onConflict: 'athlete_id,file_name' },
       );
 
       if (upsertErr) {
@@ -270,9 +254,9 @@ async function main() {
   }
 
   console.log(
-    `\n${dryRun ? "[dry-run] Would import" : "Imported"} ${imported} files; ` +
-    `${skipped} files skipped; ` +
-    `total bytes ${dryRun ? "to write" : "written"}: ${totalBytesWritten}.`
+    `\n${dryRun ? '[dry-run] Would import' : 'Imported'} ${imported} files; ` +
+      `${skipped} files skipped; ` +
+      `total bytes ${dryRun ? 'to write' : 'written'}: ${totalBytesWritten}.`,
   );
 }
 

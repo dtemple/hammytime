@@ -1,5 +1,5 @@
-import { Suspense } from "react";
-import { StravaConnectedContent } from "./content";
+import { Suspense } from 'react';
+import { StravaConnectedContent } from './content';
 
 export default function StravaConnectedPage() {
   return (

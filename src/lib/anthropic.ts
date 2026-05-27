@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import Anthropic from '@anthropic-ai/sdk';
 
 let _client: Anthropic | null = null;
 
@@ -16,9 +16,9 @@ export function anthropicClient(): Anthropic {
 export async function pingAnthropic(): Promise<{ latency_ms: number }> {
   const start = Date.now();
   await getClient().messages.create({
-    model: "claude-haiku-4-5-20251001",
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 1,
-    messages: [{ role: "user", content: "ping" }],
+    messages: [{ role: 'user', content: 'ping' }],
   });
   return { latency_ms: Date.now() - start };
 }

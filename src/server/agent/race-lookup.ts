@@ -1,6 +1,6 @@
-import { z } from "zod";
-import { anthropicClient } from "@/lib/anthropic";
-import { supabaseAdmin } from "@/lib/db";
+import { z } from 'zod';
+import { anthropicClient } from '@/lib/anthropic';
+import { supabaseAdmin } from '@/lib/db';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -9,12 +9,27 @@ import { supabaseAdmin } from "@/lib/db";
 const FoundRaceSchema = z.object({
   canonical_name: z.string(),
   // nullish() accepts null or undefined — Claude may omit unknown optional fields
-  date: z.string().nullish().transform((v) => v ?? null),
-  distance_mi: z.number().nullish().transform((v) => v ?? null),
-  elevation_ft: z.number().nullish().transform((v) => v ?? null),
-  terrain: z.enum(["road", "trail", "track", "mixed"]).nullish().transform((v) => v ?? null),
-  source_url: z.string().nullish().transform((v) => v ?? null),
-  confidence: z.enum(["high", "medium", "low"]),
+  date: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? null),
+  distance_mi: z
+    .number()
+    .nullish()
+    .transform((v) => v ?? null),
+  elevation_ft: z
+    .number()
+    .nullish()
+    .transform((v) => v ?? null),
+  terrain: z
+    .enum(['road', 'trail', 'track', 'mixed'])
+    .nullish()
+    .transform((v) => v ?? null),
+  source_url: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? null),
+  confidence: z.enum(['high', 'medium', 'low']),
 });
 
 export type FoundRace = z.infer<typeof FoundRaceSchema>;
@@ -24,7 +39,7 @@ export type FoundRace = z.infer<typeof FoundRaceSchema>;
 export const RaceLookupResultSchema = z.union([
   z.object({ ok: z.literal(true), found: FoundRaceSchema }),
   z.object({ ok: z.literal(true), ambiguous: z.array(FoundRaceSchema) }),
-  z.object({ ok: z.literal(false), reason: z.enum(["not_found", "error"]) }),
+  z.object({ ok: z.literal(false), reason: z.enum(['not_found', 'error']) }),
 ]);
 
 export type RaceLookupResult = z.infer<typeof RaceLookupResultSchema>;
@@ -33,7 +48,7 @@ export type RaceLookupResult = z.infer<typeof RaceLookupResultSchema>;
 // Constants
 // ---------------------------------------------------------------------------
 
-const SONNET_MODEL = "claude-sonnet-4-6";
+const SONNET_MODEL = 'claude-sonnet-4-6';
 const CACHE_TTL_DAYS = 30;
 const MAX_LOOP_ITERS = 6;
 
@@ -48,9 +63,9 @@ const COST_PER_M_OUTPUT = 15.0;
 export function normalizeName(name: string): string {
   return name
     .toLowerCase()
-    .replace(/\b(19|20)\d{2}\b/g, "")  // strip years ("2026")
-    .replace(/[^a-z0-9 ]/g, " ")        // collapse punctuation to space
-    .replace(/\s+/g, " ")
+    .replace(/\b(19|20)\d{2}\b/g, '') // strip years ("2026")
+    .replace(/[^a-z0-9 ]/g, ' ') // collapse punctuation to space
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
@@ -83,51 +98,53 @@ Always call report_race_details with your findings. Never return a text answer.`
 // ---------------------------------------------------------------------------
 
 const REPORT_TOOL = {
-  name: "report_race_details",
+  name: 'report_race_details',
   description:
-    "Report the structured race details after research. Always call this tool — never return plain text.",
+    'Report the structured race details after research. Always call this tool — never return plain text.',
   input_schema: {
-    type: "object" as const,
-    required: ["result_type"],
+    type: 'object' as const,
+    required: ['result_type'],
     properties: {
       result_type: {
-        type: "string",
-        enum: ["found", "ambiguous", "not_found"],
-        description: "'found' for a single match, 'ambiguous' for multiple candidates, 'not_found' if the race can't be identified",
+        type: 'string',
+        enum: ['found', 'ambiguous', 'not_found'],
+        description:
+          "'found' for a single match, 'ambiguous' for multiple candidates, 'not_found' if the race can't be identified",
       },
       found: {
-        type: "object",
+        type: 'object',
         description: "Populated when result_type is 'found'",
         properties: {
-          canonical_name: { type: "string" },
-          date: { type: "string", description: "ISO YYYY-MM-DD, or null" },
-          distance_mi: { type: "number", description: "Distance in miles, or null" },
-          elevation_ft: { type: "number", description: "Total elevation gain in feet, or null" },
+          canonical_name: { type: 'string' },
+          date: { type: 'string', description: 'ISO YYYY-MM-DD, or null' },
+          distance_mi: { type: 'number', description: 'Distance in miles, or null' },
+          elevation_ft: { type: 'number', description: 'Total elevation gain in feet, or null' },
           terrain: {
-            type: "string",
-            enum: ["road", "trail", "track", "mixed"],
-            description: "Terrain type, or null",
+            type: 'string',
+            enum: ['road', 'trail', 'track', 'mixed'],
+            description: 'Terrain type, or null',
           },
-          source_url: { type: "string", description: "URL of the source, or null" },
-          confidence: { type: "string", enum: ["high", "medium", "low"] },
+          source_url: { type: 'string', description: 'URL of the source, or null' },
+          confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
         },
-        required: ["canonical_name", "confidence"],
+        required: ['canonical_name', 'confidence'],
       },
       candidates: {
-        type: "array",
-        description: "Populated when result_type is 'ambiguous'. Each item has same shape as 'found'.",
+        type: 'array',
+        description:
+          "Populated when result_type is 'ambiguous'. Each item has same shape as 'found'.",
         items: {
-          type: "object",
+          type: 'object',
           properties: {
-            canonical_name: { type: "string" },
-            date: { type: "string" },
-            distance_mi: { type: "number" },
-            elevation_ft: { type: "number" },
-            terrain: { type: "string", enum: ["road", "trail", "track", "mixed"] },
-            source_url: { type: "string" },
-            confidence: { type: "string", enum: ["high", "medium", "low"] },
+            canonical_name: { type: 'string' },
+            date: { type: 'string' },
+            distance_mi: { type: 'number' },
+            elevation_ft: { type: 'number' },
+            terrain: { type: 'string', enum: ['road', 'trail', 'track', 'mixed'] },
+            source_url: { type: 'string' },
+            confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
           },
-          required: ["canonical_name", "confidence"],
+          required: ['canonical_name', 'confidence'],
         },
       },
     },
@@ -145,13 +162,13 @@ function parseToolInput(input: unknown): RaceLookupResult | null {
     candidates?: unknown[];
   };
 
-  if (!raw || typeof raw !== "object") return null;
+  if (!raw || typeof raw !== 'object') return null;
 
-  if (raw.result_type === "not_found") {
-    return { ok: false, reason: "not_found" };
+  if (raw.result_type === 'not_found') {
+    return { ok: false, reason: 'not_found' };
   }
 
-  if (raw.result_type === "ambiguous" && Array.isArray(raw.candidates)) {
+  if (raw.result_type === 'ambiguous' && Array.isArray(raw.candidates)) {
     const parsed = RaceLookupResultSchema.safeParse({
       ok: true,
       ambiguous: raw.candidates,
@@ -159,7 +176,7 @@ function parseToolInput(input: unknown): RaceLookupResult | null {
     return parsed.success ? parsed.data : null;
   }
 
-  if (raw.result_type === "found" && raw.found) {
+  if (raw.result_type === 'found' && raw.found) {
     const parsed = RaceLookupResultSchema.safeParse({
       ok: true,
       found: raw.found,
@@ -175,18 +192,18 @@ function parseToolInput(input: unknown): RaceLookupResult | null {
 // ---------------------------------------------------------------------------
 
 type BetaMessageParam = {
-  role: "user" | "assistant";
+  role: 'user' | 'assistant';
   content: unknown[];
 };
 
 async function callAnthropicWithWebSearch(
-  query: string
+  query: string,
 ): Promise<{ result: RaceLookupResult; inputTokens: number; outputTokens: number }> {
   const client = anthropicClient();
   const messages: BetaMessageParam[] = [
     {
-      role: "user",
-      content: [{ type: "text", text: `Find details for this race: "${query}"` }],
+      role: 'user',
+      content: [{ type: 'text', text: `Find details for this race: "${query}"` }],
     },
   ];
 
@@ -202,13 +219,10 @@ async function callAnthropicWithWebSearch(
     const response = await (client.beta.messages as any).create({
       model: SONNET_MODEL,
       max_tokens: 1024,
-      betas: ["web-search-2025-03-05"],
+      betas: ['web-search-2025-03-05'],
       system: SYSTEM_PROMPT,
-      tools: [
-        { type: "web_search_20250305", name: "web_search" },
-        REPORT_TOOL,
-      ],
-      tool_choice: { type: "auto" },
+      tools: [{ type: 'web_search_20250305', name: 'web_search' }, REPORT_TOOL],
+      tool_choice: { type: 'auto' },
       messages,
     });
 
@@ -216,17 +230,17 @@ async function callAnthropicWithWebSearch(
     outputTokens += response.usage?.output_tokens ?? 0;
 
     // Pause turn: server-side tools are executing. Append response and continue.
-    if (response.stop_reason === "pause_turn") {
-      messages.push({ role: "assistant", content: response.content });
+    if (response.stop_reason === 'pause_turn') {
+      messages.push({ role: 'assistant', content: response.content });
       continue;
     }
 
     // Model used a client-side tool — look for report_race_details.
-    if (response.stop_reason === "tool_use") {
+    if (response.stop_reason === 'tool_use') {
       const toolUse = (response.content as unknown[]).find(
         (b: unknown) =>
-          (b as { type?: string; name?: string }).type === "tool_use" &&
-          (b as { type?: string; name?: string }).name === "report_race_details"
+          (b as { type?: string; name?: string }).type === 'tool_use' &&
+          (b as { type?: string; name?: string }).name === 'report_race_details',
       ) as { input?: unknown } | undefined;
 
       if (toolUse?.input !== undefined) {
@@ -236,12 +250,12 @@ async function callAnthropicWithWebSearch(
 
         // Zod validation failed — retry once with corrected output prompt.
         if (iters === 1) {
-          messages.push({ role: "assistant", content: response.content });
+          messages.push({ role: 'assistant', content: response.content });
           messages.push({
-            role: "user",
+            role: 'user',
             content: [
               {
-                type: "text",
+                type: 'text',
                 text: `Your report_race_details output was malformed. Raw input received: ${JSON.stringify(lastRawInput)}. Please call report_race_details again with valid data matching the schema.`,
               },
             ],
@@ -249,17 +263,17 @@ async function callAnthropicWithWebSearch(
           continue;
         }
         // Second failure — give up rather than looping further.
-        return { result: { ok: false, reason: "error" }, inputTokens, outputTokens };
+        return { result: { ok: false, reason: 'error' }, inputTokens, outputTokens };
       }
 
       // No valid report_race_details found — retry with forced tool choice.
-      messages.push({ role: "assistant", content: response.content });
+      messages.push({ role: 'assistant', content: response.content });
       messages.push({
-        role: "user",
+        role: 'user',
         content: [
           {
-            type: "text",
-            text: "Please call report_race_details with your findings now.",
+            type: 'text',
+            text: 'Please call report_race_details with your findings now.',
           },
         ],
       });
@@ -267,14 +281,14 @@ async function callAnthropicWithWebSearch(
     }
 
     // End turn without tool use — force the output tool.
-    if (response.stop_reason === "end_turn") {
-      messages.push({ role: "assistant", content: response.content });
+    if (response.stop_reason === 'end_turn') {
+      messages.push({ role: 'assistant', content: response.content });
       messages.push({
-        role: "user",
+        role: 'user',
         content: [
           {
-            type: "text",
-            text: "Please now call report_race_details with your findings.",
+            type: 'text',
+            text: 'Please now call report_race_details with your findings.',
           },
         ],
       });
@@ -286,7 +300,7 @@ async function callAnthropicWithWebSearch(
   }
 
   return {
-    result: { ok: false, reason: "error" },
+    result: { ok: false, reason: 'error' },
     inputTokens,
     outputTokens,
   };
@@ -299,9 +313,9 @@ async function callAnthropicWithWebSearch(
 async function getCached(nameKey: string): Promise<RaceLookupResult | null> {
   const db = supabaseAdmin();
   const { data } = await db
-    .from("race_lookups")
-    .select("result, expires_at")
-    .eq("name_lower", nameKey)
+    .from('race_lookups')
+    .select('result, expires_at')
+    .eq('name_lower', nameKey)
     .maybeSingle();
 
   if (!data) return null;
@@ -316,13 +330,13 @@ async function writeCache(nameKey: string, result: RaceLookupResult): Promise<vo
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + CACHE_TTL_DAYS);
 
-  await db.from("race_lookups").upsert(
+  await db.from('race_lookups').upsert(
     {
       name_lower: nameKey,
       result: result as unknown as Record<string, unknown>,
       expires_at: expiresAt.toISOString(),
     },
-    { onConflict: "name_lower" }
+    { onConflict: 'name_lower' },
   );
 }
 
@@ -334,15 +348,14 @@ async function persistRun(
   athleteId: string,
   startedAt: string,
   inputTokens: number,
-  outputTokens: number
+  outputTokens: number,
 ): Promise<void> {
   const costUsd =
-    (inputTokens / 1_000_000) * COST_PER_M_INPUT +
-    (outputTokens / 1_000_000) * COST_PER_M_OUTPUT;
+    (inputTokens / 1_000_000) * COST_PER_M_INPUT + (outputTokens / 1_000_000) * COST_PER_M_OUTPUT;
 
-  await supabaseAdmin().from("agent_runs").insert({
+  await supabaseAdmin().from('agent_runs').insert({
     athlete_id: athleteId,
-    kind: "race_lookup",
+    kind: 'race_lookup',
     started_at: startedAt,
     finished_at: new Date().toISOString(),
     model: SONNET_MODEL,
@@ -356,10 +369,7 @@ async function persistRun(
 // Public API
 // ---------------------------------------------------------------------------
 
-export async function lookupRace(
-  name: string,
-  athleteId?: string
-): Promise<RaceLookupResult> {
+export async function lookupRace(name: string, athleteId?: string): Promise<RaceLookupResult> {
   const nameKey = normalizeName(name);
 
   // Cache hit
@@ -378,15 +388,19 @@ export async function lookupRace(
     inputTokens = out.inputTokens;
     outputTokens = out.outputTokens;
   } catch {
-    result = { ok: false, reason: "error" };
+    result = { ok: false, reason: 'error' };
   }
 
   // Persist to cache (even not_found, to avoid hammering the API for unknown races)
-  await writeCache(nameKey, result).catch(() => {/* non-fatal */});
+  await writeCache(nameKey, result).catch(() => {
+    /* non-fatal */
+  });
 
   // Persist agent_run if we have an athlete context
   if (athleteId) {
-    await persistRun(athleteId, startedAt, inputTokens, outputTokens).catch(() => {/* non-fatal */});
+    await persistRun(athleteId, startedAt, inputTokens, outputTokens).catch(() => {
+      /* non-fatal */
+    });
   }
 
   return result;

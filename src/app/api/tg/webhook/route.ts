@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
-import * as Sentry from "@sentry/nextjs";
-import { timingSafeEqual } from "crypto";
-import { telegramBot } from "@/server/telegram/bot";
+import { NextRequest, NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
+import { timingSafeEqual } from 'crypto';
+import { telegramBot } from '@/server/telegram/bot';
 
 function verifySecret(header: string | null, expected: string): boolean {
   if (!header) return false;
@@ -16,14 +16,14 @@ function verifySecret(header: string | null, expected: string): boolean {
 }
 
 export async function POST(req: NextRequest) {
-  if ((process.env.TELEGRAM_BOT_MODE ?? "webhook") === "polling") {
-    return new NextResponse("polling mode active — webhook endpoint disabled", {
+  if ((process.env.TELEGRAM_BOT_MODE ?? 'webhook') === 'polling') {
+    return new NextResponse('polling mode active — webhook endpoint disabled', {
       status: 503,
     });
   }
 
-  const secret = process.env.TELEGRAM_WEBHOOK_SECRET ?? "";
-  const header = req.headers.get("X-Telegram-Bot-Api-Secret-Token");
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET ?? '';
+  const header = req.headers.get('X-Telegram-Bot-Api-Secret-Token');
 
   if (!verifySecret(header, secret)) {
     return new NextResponse(null, { status: 401 });

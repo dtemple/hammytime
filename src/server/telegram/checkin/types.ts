@@ -1,7 +1,4 @@
-export type WellnessSubStep =
-  | "awaiting_readiness"
-  | "awaiting_soreness"
-  | "awaiting_note";
+export type WellnessSubStep = 'awaiting_readiness' | 'awaiting_soreness' | 'awaiting_note';
 
 export type WellnessPartial = {
   readiness?: number;

@@ -75,71 +75,71 @@ The plan JSON must match this TypeScript-flavored schema. Field names, types, an
 
 ```ts
 type Plan = {
-  schema_version: 1,
+  schema_version: 1;
   meta: {
-    athlete_name: string,
+    athlete_name: string;
     goal_race: {
-      name: string,
-      date: string,                    // ISO 8601 date, e.g. "2026-08-30"
-      distance_mi: number,
-      elevation_ft: number,
-      terrain: 'road' | 'trail' | 'mixed',
-      target: 'finish' | 'time',
-      target_time_sec?: number,        // present only if target === 'time'
-    },
-    start_date: string,                // ISO 8601 date of week 1 Monday
-    total_weeks: number,               // typically 16–24
+      name: string;
+      date: string; // ISO 8601 date, e.g. "2026-08-30"
+      distance_mi: number;
+      elevation_ft: number;
+      terrain: 'road' | 'trail' | 'mixed';
+      target: 'finish' | 'time';
+      target_time_sec?: number; // present only if target === 'time'
+    };
+    start_date: string; // ISO 8601 date of week 1 Monday
+    total_weeks: number; // typically 16–24
     weekly_availability: {
-      days_per_week: number,
-      hours_per_week: number,
-    },
-  },
+      days_per_week: number;
+      hours_per_week: number;
+    };
+  };
   phases: Array<{
-    name: 'base' | 'build' | 'cutback' | 'peak' | 'taper' | 'race',
-    start_week: number,                // inclusive
-    end_week: number,                  // inclusive
-    focus: string,                     // 1-sentence intent
-  }>,
+    name: 'base' | 'build' | 'cutback' | 'peak' | 'taper' | 'race';
+    start_week: number; // inclusive
+    end_week: number; // inclusive
+    focus: string; // 1-sentence intent
+  }>;
   weeks: Array<{
-    week_number: number,
-    phase: 'base' | 'build' | 'cutback' | 'peak' | 'taper' | 'race',
-    focus: string,                     // 1-sentence what-this-week-is-for
-    planned_volume_mi: number,
-    planned_elevation_ft: number,
-    key_notes: string,
+    week_number: number;
+    phase: 'base' | 'build' | 'cutback' | 'peak' | 'taper' | 'race';
+    focus: string; // 1-sentence what-this-week-is-for
+    planned_volume_mi: number;
+    planned_elevation_ft: number;
+    key_notes: string;
     days: {
-      mon: DayPlan,
-      tue: DayPlan,
-      wed: DayPlan,
-      thu: DayPlan,
-      fri: DayPlan,
-      sat: DayPlan,
-      sun: DayPlan,
-    },
-  }>,
+      mon: DayPlan;
+      tue: DayPlan;
+      wed: DayPlan;
+      thu: DayPlan;
+      fri: DayPlan;
+      sat: DayPlan;
+      sun: DayPlan;
+    };
+  }>;
   compliance_rules: {
-    hard_day_min_spacing_days: number,
-    max_week_volume_ramp_pct: number,
-    min_rest_days_per_week: number,
-    long_run_cap_pct_of_week: number,
-    cutback_week_frequency: number,
-    cutback_volume_reduction_pct_min: number,
-    cutback_volume_reduction_pct_max: number,
-  },
+    hard_day_min_spacing_days: number;
+    max_week_volume_ramp_pct: number;
+    min_rest_days_per_week: number;
+    long_run_cap_pct_of_week: number;
+    cutback_week_frequency: number;
+    cutback_volume_reduction_pct_min: number;
+    cutback_volume_reduction_pct_max: number;
+  };
   race_strategy: {
-    pacing_approach: string,           // 1–2 sentences
-    fueling_approach: string,          // 1–2 sentences
-    key_landmarks_to_brief: string[],  // e.g. ["mile 18 climb", "miles 22-24 descent"]
-  },
+    pacing_approach: string; // 1–2 sentences
+    fueling_approach: string; // 1–2 sentences
+    key_landmarks_to_brief: string[]; // e.g. ["mile 18 climb", "miles 22-24 descent"]
+  };
 };
 
 type DayPlan = {
-  type: 'long_run' | 'easy' | 'tempo' | 'hills' | 'track' | 'race' | 'strength' | 'cross' | 'rest',
-  distance_mi?: number,                // present unless type === 'rest' or 'strength'
-  duration_min?: number,                // for strength / cross / rest as appropriate
-  intensity_rpe?: number,               // 1–10, present for any running day
-  description: string,                  // 1–2 sentences, e.g. "Long run, mostly easy with last 20 min steady"
-  notes?: string,                       // optional, terrain or technique cues
+  type: 'long_run' | 'easy' | 'tempo' | 'hills' | 'track' | 'race' | 'strength' | 'cross' | 'rest';
+  distance_mi?: number; // present unless type === 'rest' or 'strength'
+  duration_min?: number; // for strength / cross / rest as appropriate
+  intensity_rpe?: number; // 1–10, present for any running day
+  description: string; // 1–2 sentences, e.g. "Long run, mostly easy with last 20 min steady"
+  notes?: string; // optional, terrain or technique cues
 };
 ```
 
@@ -156,12 +156,40 @@ This is one week from a similar plan. Use it to calibrate detail level and tone 
   "planned_elevation_ft": 4200,
   "key_notes": "Hill day Thursday is the key effort. Long run Monday on trail with steady cumulative climb.",
   "days": {
-    "mon": { "type": "long_run", "distance_mi": 14, "intensity_rpe": 5, "description": "Long run on trail, steady cumulative climb (~1500ft), easy effort." },
-    "tue": { "type": "easy", "distance_mi": 5, "intensity_rpe": 3, "description": "Recovery jog on road, flat." },
-    "wed": { "type": "strength", "duration_min": 40, "description": "Upper body + core, prehab routine." },
-    "thu": { "type": "hills", "distance_mi": 7, "intensity_rpe": 7, "description": "6 × 90s hill repeats on a 6–8% grade, jog down recovery. Last one strong." },
-    "fri": { "type": "strength", "duration_min": 40, "description": "Lower body + prehab — hamstring eccentrics, calf raises, single-leg work." },
-    "sat": { "type": "easy", "distance_mi": 6, "intensity_rpe": 3, "description": "Easy run on trail, gentle terrain." },
+    "mon": {
+      "type": "long_run",
+      "distance_mi": 14,
+      "intensity_rpe": 5,
+      "description": "Long run on trail, steady cumulative climb (~1500ft), easy effort."
+    },
+    "tue": {
+      "type": "easy",
+      "distance_mi": 5,
+      "intensity_rpe": 3,
+      "description": "Recovery jog on road, flat."
+    },
+    "wed": {
+      "type": "strength",
+      "duration_min": 40,
+      "description": "Upper body + core, prehab routine."
+    },
+    "thu": {
+      "type": "hills",
+      "distance_mi": 7,
+      "intensity_rpe": 7,
+      "description": "6 × 90s hill repeats on a 6–8% grade, jog down recovery. Last one strong."
+    },
+    "fri": {
+      "type": "strength",
+      "duration_min": 40,
+      "description": "Lower body + prehab — hamstring eccentrics, calf raises, single-leg work."
+    },
+    "sat": {
+      "type": "easy",
+      "distance_mi": 6,
+      "intensity_rpe": 3,
+      "description": "Easy run on trail, gentle terrain."
+    },
     "sun": { "type": "rest", "duration_min": 0, "description": "Full rest." }
   }
 }

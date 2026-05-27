@@ -129,19 +129,19 @@ Specs/                  SPEC.md and any future spec documents
 
 ```bash
 # Build
-# TODO: fill in after scaffold (Day 0.3)
 npm run build
 
 # Lint
-# TODO: fill in after scaffold
 npm run lint
 
 # Type check
-# TODO: fill in after scaffold
 npm run typecheck
 
+# Format (write + check)
+npm run format
+npm run format:check
+
 # Test
-# TODO: fill in after test harness is wired
 npm run test
 
 # Reset local database (requires supabase start)
@@ -154,7 +154,7 @@ npm run db:types
 npm run db:smoke
 
 # Health check (/api/health green check)
-# TODO: fill in after /api/health endpoint (Day 0.3)
+curl -sS https://hammytime.vercel.app/api/health | jq
 
 # Start the bot in polling mode (local dev, no ngrok — requires TELEGRAM_BOT_MODE=polling in .env.local)
 npm run bot:dev

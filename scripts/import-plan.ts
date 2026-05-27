@@ -15,14 +15,14 @@
  * row. Run `npm run clear:plans <email>` first to reset.
  */
 
-import { config } from "dotenv";
-config({ path: ".env.local" });
+import { config } from 'dotenv';
+config({ path: '.env.local' });
 
-import { readFileSync } from "fs";
-import { join } from "path";
-import { supabaseAdmin } from "../src/lib/db";
-import { PlanSchema } from "../src/lib/plan-schema";
-import { sendAndLog } from "../src/server/telegram/bot";
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { supabaseAdmin } from '../src/lib/db';
+import { PlanSchema } from '../src/lib/plan-schema';
+import { sendAndLog } from '../src/server/telegram/bot';
 
 // ---------------------------------------------------------------------------
 // CLI arg parsing
@@ -30,19 +30,19 @@ import { sendAndLog } from "../src/server/telegram/bot";
 
 function parseArgs(): { athleteEmail: string; planPath: string } {
   const args = process.argv.slice(2);
-  let athleteEmail = "";
-  let planPath = join(process.cwd(), "seeds/marathon_training_plan.json");
+  let athleteEmail = '';
+  let planPath = join(process.cwd(), 'seeds/marathon_training_plan.json');
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--athlete-email" && args[i + 1]) {
+    if (args[i] === '--athlete-email' && args[i + 1]) {
       athleteEmail = args[++i]!;
-    } else if (args[i] === "--plan-path" && args[i + 1]) {
+    } else if (args[i] === '--plan-path' && args[i + 1]) {
       planPath = args[++i]!;
     }
   }
 
   if (!athleteEmail) {
-    console.error("Usage: tsx scripts/import-plan.ts --athlete-email <email> [--plan-path <path>]");
+    console.error('Usage: tsx scripts/import-plan.ts --athlete-email <email> [--plan-path <path>]');
     process.exit(1);
   }
 
@@ -60,7 +60,7 @@ async function main() {
   // 1. Read plan JSON
   let rawJson: unknown;
   try {
-    rawJson = JSON.parse(readFileSync(planPath, "utf8"));
+    rawJson = JSON.parse(readFileSync(planPath, 'utf8'));
   } catch (err) {
     console.error(`Failed to read plan at ${planPath}:`, err);
     process.exit(1);
@@ -68,13 +68,13 @@ async function main() {
 
   // 2. Athlete lookup: users.email → athletes.user_id
   const { data: user, error: userErr } = await db
-    .from("users")
-    .select("id")
-    .eq("email", athleteEmail)
+    .from('users')
+    .select('id')
+    .eq('email', athleteEmail)
     .maybeSingle();
 
   if (userErr) {
-    console.error("Error looking up user:", userErr.message);
+    console.error('Error looking up user:', userErr.message);
     process.exit(1);
   }
   if (!user) {
@@ -83,17 +83,19 @@ async function main() {
   }
 
   const { data: athlete, error: athleteErr } = await db
-    .from("athletes")
-    .select("id, name, telegram_chat_id")
-    .eq("user_id", user.id)
+    .from('athletes')
+    .select('id, name, telegram_chat_id')
+    .eq('user_id', user.id)
     .maybeSingle();
 
   if (athleteErr) {
-    console.error("Error looking up athlete:", athleteErr.message);
+    console.error('Error looking up athlete:', athleteErr.message);
     process.exit(1);
   }
   if (!athlete) {
-    console.error(`No athlete found for user ${athleteEmail}. Has the athlete completed Telegram linking?`);
+    console.error(
+      `No athlete found for user ${athleteEmail}. Has the athlete completed Telegram linking?`,
+    );
     process.exit(1);
   }
 
@@ -104,31 +106,31 @@ async function main() {
   try {
     plan = PlanSchema.parse(rawJson);
   } catch (err) {
-    console.error("Plan validation failed:", err);
+    console.error('Plan validation failed:', err);
     process.exit(1);
   }
 
   const { metadata } = plan;
   console.log(
     `Plan: ${metadata.plan_structure.total_weeks} weeks, ` +
-    `goal: ${metadata.race.name} on ${metadata.race.date}`
+      `goal: ${metadata.race.name} on ${metadata.race.date}`,
   );
 
   // 4. Idempotency check
   const { data: existingPlan, error: existingErr } = await db
-    .from("plans")
-    .select("id")
-    .eq("athlete_id", athlete.id)
+    .from('plans')
+    .select('id')
+    .eq('athlete_id', athlete.id)
     .maybeSingle();
 
   if (existingErr) {
-    console.error("Error checking existing plans:", existingErr.message);
+    console.error('Error checking existing plans:', existingErr.message);
     process.exit(1);
   }
   if (existingPlan) {
     console.error(
       `Athlete already has a plan (id: ${existingPlan.id}). ` +
-      `Run \`npm run clear:plans ${athleteEmail}\` first.`
+        `Run \`npm run clear:plans ${athleteEmail}\` first.`,
     );
     process.exit(1);
   }
@@ -139,14 +141,14 @@ async function main() {
   let raceId: string;
 
   const { data: existingRace, error: raceSelectErr } = await db
-    .from("races")
-    .select("id")
-    .eq("athlete_id", athlete.id)
-    .eq("name", goalRace.name)
+    .from('races')
+    .select('id')
+    .eq('athlete_id', athlete.id)
+    .eq('name', goalRace.name)
     .maybeSingle();
 
   if (raceSelectErr) {
-    console.error("Error looking up race:", raceSelectErr.message);
+    console.error('Error looking up race:', raceSelectErr.message);
     process.exit(1);
   }
 
@@ -155,25 +157,25 @@ async function main() {
     console.log(`Found existing race row: ${raceId}`);
   } else {
     const { data: newRace, error: raceInsertErr } = await db
-      .from("races")
+      .from('races')
       .insert({
         athlete_id: athlete.id,
         name: goalRace.name,
         date: goalRace.date,
         distance_mi: goalRace.distance_miles,
         elevation_ft: goalRace.elevation_gain_ft ?? 0,
-        terrain: goalRace.type ?? "road",
-        target_type: goalRace.goal ?? "finish",
+        terrain: goalRace.type ?? 'road',
+        target_type: goalRace.goal ?? 'finish',
         ...(goalRace.target_time_sec !== undefined
           ? { target_time_sec: goalRace.target_time_sec }
           : {}),
-        status: "upcoming",
+        status: 'upcoming',
       })
-      .select("id")
+      .select('id')
       .single();
 
     if (raceInsertErr || !newRace) {
-      console.error("Error inserting race:", raceInsertErr?.message);
+      console.error('Error inserting race:', raceInsertErr?.message);
       process.exit(1);
     }
     raceId = newRace.id;
@@ -182,50 +184,50 @@ async function main() {
 
   // b. Create plans row (without current_version_id — set after plan_versions insert)
   const { data: newPlan, error: planInsertErr } = await db
-    .from("plans")
+    .from('plans')
     .insert({
       athlete_id: athlete.id,
       goal_race_id: raceId,
       start_date: metadata.plan_structure.start_date,
       weeks: metadata.plan_structure.total_weeks,
     })
-    .select("id")
+    .select('id')
     .single();
 
   if (planInsertErr || !newPlan) {
-    console.error("Error inserting plan:", planInsertErr?.message);
+    console.error('Error inserting plan:', planInsertErr?.message);
     process.exit(1);
   }
   console.log(`Created plan row: ${newPlan.id}`);
 
   // c. Create plan_versions row
   const { data: newVersion, error: versionInsertErr } = await db
-    .from("plan_versions")
+    .from('plan_versions')
     .insert({
       plan_id: newPlan.id,
       version: 1,
       plan_json: plan as unknown as Record<string, unknown>,
       schema_version: 1,
-      generated_by: "manual",
-      status: "active",
+      generated_by: 'manual',
+      status: 'active',
     })
-    .select("id")
+    .select('id')
     .single();
 
   if (versionInsertErr || !newVersion) {
-    console.error("Error inserting plan_version:", versionInsertErr?.message);
+    console.error('Error inserting plan_version:', versionInsertErr?.message);
     process.exit(1);
   }
   console.log(`Created plan_versions row: ${newVersion.id} (status=active)`);
 
   // d. Update plans.current_version_id
   const { error: planUpdateErr } = await db
-    .from("plans")
+    .from('plans')
     .update({ current_version_id: newVersion.id })
-    .eq("id", newPlan.id);
+    .eq('id', newPlan.id);
 
   if (planUpdateErr) {
-    console.error("Error updating plans.current_version_id:", planUpdateErr.message);
+    console.error('Error updating plans.current_version_id:', planUpdateErr.message);
     process.exit(1);
   }
 
@@ -238,16 +240,16 @@ async function main() {
 
     try {
       await sendAndLog(athlete.id, athlete.telegram_chat_id, confirmText);
-      console.log("Sent Telegram confirmation.");
+      console.log('Sent Telegram confirmation.');
     } catch (err) {
       // Non-fatal: plan is imported; Telegram send is best-effort.
-      console.warn("Telegram confirmation failed (plan still imported):", err);
+      console.warn('Telegram confirmation failed (plan still imported):', err);
     }
   } else {
-    console.warn("Athlete has no telegram_chat_id — skipping Telegram confirmation.");
+    console.warn('Athlete has no telegram_chat_id — skipping Telegram confirmation.');
   }
 
-  console.log("\n✓ Import complete.");
+  console.log('\n✓ Import complete.');
   console.log(`  plans.id            = ${newPlan.id}`);
   console.log(`  plans.current_version_id = ${newVersion.id}`);
   console.log(`  plan_versions.id    = ${newVersion.id}`);

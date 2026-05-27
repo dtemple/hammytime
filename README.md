@@ -47,11 +47,11 @@ npm run dev:all
 
 This runs three processes in parallel:
 
-| Stripe | What it does |
-|--------|-------------|
-| `db` (cyan) | `supabase start` — spins up local Postgres, then tails to keep the pane alive |
-| `web` (magenta) | `next dev` — Next.js dev server on port 3000 |
-| `bot` (yellow) | `tsx scripts/start-bot-polling.ts` — long-polling bot; logs each inbound update |
+| Stripe          | What it does                                                                    |
+| --------------- | ------------------------------------------------------------------------------- |
+| `db` (cyan)     | `supabase start` — spins up local Postgres, then tails to keep the pane alive   |
+| `web` (magenta) | `next dev` — Next.js dev server on port 3000                                    |
+| `bot` (yellow)  | `tsx scripts/start-bot-polling.ts` — long-polling bot; logs each inbound update |
 
 Or run them separately in three terminals:
 

@@ -1,4 +1,4 @@
-import { PlanSchema, Plan, Day, PhaseName } from "@/lib/plan-schema";
+import { PlanSchema, Plan, Day, PhaseName } from '@/lib/plan-schema';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -14,29 +14,22 @@ export type ValidationError = {
   location?: string;
 };
 
-export type ValidationResult =
-  | { ok: true }
-  | { ok: false; errors: ValidationError[] };
+export type ValidationResult = { ok: true } | { ok: false; errors: ValidationError[] };
 
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
-export function validatePlan(
-  plan: unknown,
-  ctx: AthleteValidationContext
-): ValidationResult {
+export function validatePlan(plan: unknown, ctx: AthleteValidationContext): ValidationResult {
   const parsed = PlanSchema.safeParse(plan);
 
   if (!parsed.success) {
     const errors: ValidationError[] = parsed.error.issues.map((issue) => {
-      const readablePath = issue.path.filter(
-        (p): p is string | number => typeof p !== "symbol"
-      );
+      const readablePath = issue.path.filter((p): p is string | number => typeof p !== 'symbol');
       return {
-        code: "schema_error",
+        code: 'schema_error',
         message: humanizeZodMessage(issue),
-        location: readablePath.length > 0 ? readablePath.join(".") : undefined,
+        location: readablePath.length > 0 ? readablePath.join('.') : undefined,
       };
     });
     return { ok: false, errors };
@@ -64,8 +57,8 @@ export function validatePlan(
 // ---------------------------------------------------------------------------
 
 function humanizeZodMessage(issue: { message: string; path: PropertyKey[] }): string {
-  const readablePath = issue.path.filter((p): p is string | number => typeof p !== "symbol");
-  const loc = readablePath.length > 0 ? ` (at ${readablePath.join(".")})` : "";
+  const readablePath = issue.path.filter((p): p is string | number => typeof p !== 'symbol');
+  const loc = readablePath.length > 0 ? ` (at ${readablePath.join('.')})` : '';
   return `${issue.message}${loc}`;
 }
 
@@ -77,19 +70,20 @@ function dayDistance(day: Day): number {
   return day.planned_distance_miles ?? 0;
 }
 
-function weekVolume(week: Plan["weeks"][0]): number {
+function weekVolume(week: Plan['weeks'][0]): number {
   return week.planned_total_run_miles ?? 0;
 }
 
 function isHardDay(day: Day): boolean {
   // Type-based: these are always high-intensity
-  if (["hill_repeats", "trail_tempo", "race"].includes(day.type)) return true;
+  if (['hill_repeats', 'trail_tempo', 'race'].includes(day.type)) return true;
   // Intensity string: explicitly flagged hard
-  if (day.intensity === "hard") return true;
+  if (day.intensity === 'hard') return true;
   // RPE upper bound ≥ 7
   if (Array.isArray(day.target_rpe) && day.target_rpe[1] >= 7) return true;
   // Long run with high RPE
-  if (day.type === "long_run" && Array.isArray(day.target_rpe) && day.target_rpe[0] >= 7) return true;
+  if (day.type === 'long_run' && Array.isArray(day.target_rpe) && day.target_rpe[0] >= 7)
+    return true;
   return false;
 }
 
@@ -100,14 +94,14 @@ function isHardDay(day: Day): boolean {
 function checkLongRunCap(p: Plan): ValidationError[] {
   const errors: ValidationError[] = [];
   for (const week of p.weeks) {
-    const longRunDays = week.days.filter((d) => d.type === "long_run");
+    const longRunDays = week.days.filter((d) => d.type === 'long_run');
     const maxLongRun = Math.max(0, ...longRunDays.map(dayDistance));
     const vol = weekVolume(week);
     if (vol === 0) continue;
     const cap = vol * 0.35;
     if (maxLongRun > cap + 0.01) {
       errors.push({
-        code: "long_run_cap",
+        code: 'long_run_cap',
         message: `Week ${week.week_number}: long run is ${maxLongRun} mi but the cap is 35% of ${vol} mi/week = ${cap.toFixed(1)} mi. Pull back the long run or increase weekly volume.`,
         location: `week ${week.week_number}`,
       });
@@ -128,9 +122,9 @@ function checkColdStartCap(p: Plan, ctx: AthleteValidationContext): ValidationEr
   if (maxDay > cap + 0.01) {
     return [
       {
-        code: "cold_start_cap",
+        code: 'cold_start_cap',
         message: `Week 1: longest day is ${maxDay} mi but your cold-start cap is 1.5× ${ctx.longest_recent_mi} mi = ${cap.toFixed(1)} mi. Week 1 is jumping ahead of your current fitness.`,
-        location: "week 1",
+        location: 'week 1',
       },
     ];
   }
@@ -144,7 +138,7 @@ function checkColdStartCap(p: Plan, ctx: AthleteValidationContext): ValidationEr
 function checkVolumeRamp(p: Plan): ValidationError[] {
   const errors: ValidationError[] = [];
   const phaseJumps: Partial<Record<PhaseName, number>> = {};
-  const buildPhases: PhaseName[] = ["base", "build", "peak"];
+  const buildPhases: PhaseName[] = ['base', 'build', 'peak'];
 
   for (let i = 1; i < p.weeks.length; i++) {
     const prev = p.weeks[i - 1]!;
@@ -159,16 +153,16 @@ function checkVolumeRamp(p: Plan): ValidationError[] {
 
     if (ramp > 0.15 + 0.001) {
       errors.push({
-        code: "volume_ramp",
+        code: 'volume_ramp',
         message: `Week ${curr.week_number}: volume jumps ${Math.round(ramp * 100)}% over week ${prev.week_number}. Max is 10% (one 15% jump per phase is tolerated as a warning).`,
         location: `week ${curr.week_number}`,
       });
-    } else if (ramp > 0.10 + 0.001) {
+    } else if (ramp > 0.1 + 0.001) {
       const phase = curr.phase;
       phaseJumps[phase] = (phaseJumps[phase] ?? 0) + 1;
       if ((phaseJumps[phase] ?? 0) > 1) {
         errors.push({
-          code: "volume_ramp",
+          code: 'volume_ramp',
           message: `Week ${curr.week_number}: second 15% volume jump in the ${phase} phase. Only one per phase is allowed.`,
           location: `week ${curr.week_number}`,
         });
@@ -185,10 +179,10 @@ function checkVolumeRamp(p: Plan): ValidationError[] {
 function checkRestDays(p: Plan): ValidationError[] {
   const errors: ValidationError[] = [];
   for (const week of p.weeks) {
-    const hasRest = week.days.some((d) => d.type === "rest");
+    const hasRest = week.days.some((d) => d.type === 'rest');
     if (!hasRest) {
       errors.push({
-        code: "rest_days",
+        code: 'rest_days',
         message: `Week ${week.week_number} has no rest day. Every week needs at least one full rest day.`,
         location: `week ${week.week_number}`,
       });
@@ -223,7 +217,7 @@ function checkHardDaySpacing(p: Plan): ValidationError[] {
       if (!reported.has(key)) {
         reported.add(key);
         errors.push({
-          code: "hard_day_spacing",
+          code: 'hard_day_spacing',
           message: `${hardCount} hard days in the 7-day window starting week ${start.week} (${start.day}). Maximum is 2.`,
           location: `week ${start.week}, ${start.day}`,
         });
@@ -244,11 +238,11 @@ function checkCutbackCadence(p: Plan): ValidationError[] {
     const cutback = p.weeks[i]!;
     const prev = p.weeks[i - 1]!;
 
-    if (cutback.phase === "taper" || cutback.phase === "race") continue;
+    if (cutback.phase === 'taper' || cutback.phase === 'race') continue;
 
-    if (cutback.phase !== "cutback") {
+    if (cutback.phase !== 'cutback') {
       errors.push({
-        code: "cutback_cadence",
+        code: 'cutback_cadence',
         message: `Week ${cutback.week_number} should be a cutback week (every 4th week) but is phase "${cutback.phase}".`,
         location: `week ${cutback.week_number}`,
       });
@@ -260,15 +254,15 @@ function checkCutbackCadence(p: Plan): ValidationError[] {
     const cutbackVol = weekVolume(cutback);
     const drop = (prevVol - cutbackVol) / prevVol;
 
-    if (drop < 0.20 - 0.001) {
+    if (drop < 0.2 - 0.001) {
       errors.push({
-        code: "cutback_cadence",
+        code: 'cutback_cadence',
         message: `Week ${cutback.week_number} (cutback): volume drops only ${Math.round(drop * 100)}% from week ${prev.week_number}. Cutbacks need a 20–30% drop.`,
         location: `week ${cutback.week_number}`,
       });
-    } else if (drop > 0.30 + 0.001) {
+    } else if (drop > 0.3 + 0.001) {
       errors.push({
-        code: "cutback_cadence",
+        code: 'cutback_cadence',
         message: `Week ${cutback.week_number} (cutback): volume drops ${Math.round(drop * 100)}% from week ${prev.week_number}. That's more than the 30% max — recovery risk.`,
         location: `week ${cutback.week_number}`,
       });
@@ -282,7 +276,7 @@ function checkCutbackCadence(p: Plan): ValidationError[] {
 // ---------------------------------------------------------------------------
 
 function checkTaperStructure(p: Plan): ValidationError[] {
-  const raceWeek = p.weeks.find((w) => w.phase === "race");
+  const raceWeek = p.weeks.find((w) => w.phase === 'race');
   if (!raceWeek) return [];
 
   const raceIdx = p.weeks.indexOf(raceWeek);
@@ -292,22 +286,20 @@ function checkTaperStructure(p: Plan): ValidationError[] {
   if (taperWeeks.length < 3) return [];
 
   const peakVolume = Math.max(
-    ...p.weeks
-      .filter((w) => w.phase !== "taper" && w.phase !== "race")
-      .map(weekVolume)
+    ...p.weeks.filter((w) => w.phase !== 'taper' && w.phase !== 'race').map(weekVolume),
   );
   if (peakVolume === 0) return [];
 
-  const targets = [0.80, 0.60, 0.40];
-  const tolerance = 0.10;
+  const targets = [0.8, 0.6, 0.4];
+  const tolerance = 0.1;
   const errors: ValidationError[] = [];
 
   taperWeeks.forEach((week, i) => {
     const target = targets[i]!;
 
-    if (week.phase !== "taper") {
+    if (week.phase !== 'taper') {
       errors.push({
-        code: "taper_structure",
+        code: 'taper_structure',
         message: `Week ${week.week_number} should be phase "taper" (${Math.round(target * 100)}% of peak) but is "${week.phase}".`,
         location: `week ${week.week_number}`,
       });
@@ -317,7 +309,7 @@ function checkTaperStructure(p: Plan): ValidationError[] {
     const actual = weekVolume(week) / peakVolume;
     if (Math.abs(actual - target) > tolerance + 0.001) {
       errors.push({
-        code: "taper_structure",
+        code: 'taper_structure',
         message: `Week ${week.week_number} (taper): volume is ${Math.round(actual * 100)}% of peak (${weekVolume(week)} mi), expected ~${Math.round(target * 100)}% ±10pp (${Math.round((target - tolerance) * peakVolume)}–${Math.round((target + tolerance) * peakVolume)} mi).`,
         location: `week ${week.week_number}`,
       });
@@ -341,12 +333,12 @@ function checkTimelineMath(p: Plan): ValidationError[] {
   const diffDays = Math.abs(expectedRaceMs - raceMs) / (24 * 60 * 60 * 1000);
 
   if (diffDays > 3) {
-    const direction = expectedRaceMs > raceMs ? "after" : "before";
+    const direction = expectedRaceMs > raceMs ? 'after' : 'before';
     return [
       {
-        code: "timeline_math",
+        code: 'timeline_math',
         message: `start_date (${p.metadata.plan_structure.start_date}) + ${totalWeeks} weeks lands ${Math.round(diffDays)} days ${direction} goal race date (${p.metadata.race.date}). Adjust start_date or total_weeks so they align within 3 days.`,
-        location: "metadata.plan_structure",
+        location: 'metadata.plan_structure',
       },
     ];
   }
@@ -364,14 +356,14 @@ const TIME_SANITY: Array<{
   maxSec: number;
   label: string;
 }> = [
-  { minMi: 13.0, maxMi: 13.5, minSec: 3000, maxSec: 9000, label: "half marathon" },
-  { minMi: 26.0, maxMi: 26.5, minSec: 7200, maxSec: 18000, label: "marathon" },
-  { minMi: 31.0, maxMi: 31.5, minSec: 10800, maxSec: 25200, label: "50k" },
+  { minMi: 13.0, maxMi: 13.5, minSec: 3000, maxSec: 9000, label: 'half marathon' },
+  { minMi: 26.0, maxMi: 26.5, minSec: 7200, maxSec: 18000, label: 'marathon' },
+  { minMi: 31.0, maxMi: 31.5, minSec: 10800, maxSec: 25200, label: '50k' },
 ];
 
 function checkTargetTimeConsistency(p: Plan): ValidationError[] {
   const { goal, target_time_sec, distance_miles } = p.metadata.race;
-  if (goal !== "time" || !target_time_sec) return [];
+  if (goal !== 'time' || !target_time_sec) return [];
 
   for (const range of TIME_SANITY) {
     if (distance_miles >= range.minMi && distance_miles <= range.maxMi) {
@@ -379,13 +371,13 @@ function checkTargetTimeConsistency(p: Plan): ValidationError[] {
         const fmtSec = (s: number) => {
           const h = Math.floor(s / 3600);
           const m = Math.floor((s % 3600) / 60);
-          return `${h}:${String(m).padStart(2, "0")}`;
+          return `${h}:${String(m).padStart(2, '0')}`;
         };
         return [
           {
-            code: "target_time_consistency",
+            code: 'target_time_consistency',
             message: `target_time_sec ${target_time_sec}s (${fmtSec(target_time_sec)}) is outside the sanity range for a ${range.label} (${fmtSec(range.minSec)}–${fmtSec(range.maxSec)}). Please double-check the goal time.`,
-            location: "metadata.race.target_time_sec",
+            location: 'metadata.race.target_time_sec',
           },
         ];
       }

@@ -59,19 +59,20 @@ Or import the GitHub repo from the Vercel dashboard for automatic preview + prod
 
 Minimum set required for landing page + `/signup` to work:
 
-| Variable | Where to get it |
-|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase → Project Settings → API |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Project Settings → API |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Project Settings → API |
-| `TELEGRAM_BOT_USERNAME` | BotFather → bot username without `@` |
-| `NEXT_PUBLIC_SENTRY_DSN` | Sentry → hammytime project → Client Keys |
-| `SENTRY_DSN` | Same as above |
-| `SENTRY_AUTH_TOKEN` | Sentry → Settings → Auth Tokens |
+| Variable                        | Where to get it                          |
+| ------------------------------- | ---------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`      | Supabase → Project Settings → API        |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Project Settings → API        |
+| `SUPABASE_SERVICE_ROLE_KEY`     | Supabase → Project Settings → API        |
+| `TELEGRAM_BOT_USERNAME`         | BotFather → bot username without `@`     |
+| `NEXT_PUBLIC_SENTRY_DSN`        | Sentry → hammytime project → Client Keys |
+| `SENTRY_DSN`                    | Same as above                            |
+| `SENTRY_AUTH_TOKEN`             | Sentry → Settings → Auth Tokens          |
 
 > `SENTRY_ORG` (`david-temple`) and `SENTRY_PROJECT` (`hammytime`) are already hardcoded in `next.config.ts` — don't need to be env vars.
 
 Set via CLI:
+
 ```bash
 vercel env add NEXT_PUBLIC_SUPABASE_URL
 # repeat for each variable above

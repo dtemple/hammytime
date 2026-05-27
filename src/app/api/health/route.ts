@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/db";
-import { pingAnthropic } from "@/lib/anthropic";
-import { pingTelegram } from "@/server/telegram/bot";
-import { pingStrava } from "@/server/strava/client";
+import { NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/db';
+import { pingAnthropic } from '@/lib/anthropic';
+import { pingTelegram } from '@/server/telegram/bot';
+import { pingStrava } from '@/server/strava/client';
 
 type PostgresCheck = { ok: boolean; latency_ms: number; error?: string };
 type ExternalCheck = {
@@ -15,10 +15,7 @@ type ExternalCheck = {
 async function checkPostgres(): Promise<PostgresCheck> {
   const start = Date.now();
   try {
-    const { error } = await supabaseAdmin()
-      .from("athletes")
-      .select("id")
-      .limit(1);
+    const { error } = await supabaseAdmin().from('athletes').select('id').limit(1);
     const latency_ms = Date.now() - start;
     if (error) return { ok: false, latency_ms, error: error.message };
     return { ok: true, latency_ms };
@@ -68,15 +65,13 @@ export async function GET() {
     checkStrava(),
   ]);
 
-  const configuredFailing = [anthropic, telegram, strava].some(
-    (c) => c.configured && !c.ok
-  );
+  const configuredFailing = [anthropic, telegram, strava].some((c) => c.configured && !c.ok);
 
-  let status: "ok" | "degraded" | "error";
+  let status: 'ok' | 'degraded' | 'error';
   if (!postgres.ok) {
-    status = "error";
+    status = 'error';
   } else {
-    status = configuredFailing ? "degraded" : "ok";
+    status = configuredFailing ? 'degraded' : 'ok';
   }
 
   return NextResponse.json(
@@ -85,6 +80,6 @@ export async function GET() {
       timestamp: new Date().toISOString(),
       checks: { postgres, anthropic, telegram, strava },
     },
-    { headers: { "Cache-Control": "no-store" } }
+    { headers: { 'Cache-Control': 'no-store' } },
   );
 }

@@ -7,8 +7,7 @@ export const SORENESS_PROMPT =
 
 export const NOTE_PROMPT = "One-line note (optional)? Reply 'skip' to skip.";
 
-export const CONCERNING_LINE =
-  "Worth a closer look — want to talk it through?";
+export const CONCERNING_LINE = 'Worth a closer look — want to talk it through?';
 
 // ---------------------------------------------------------------------------
 // Parse helpers
@@ -32,7 +31,7 @@ function parseIntInRange(text: string, min: number, max: number): number | null 
 export function parseReadiness(text: string): ParseResult<number> {
   const n = parseIntInRange(text, 1, 10);
   if (n === null) {
-    return { ok: false, error: "Reply with a number from 1 to 10." };
+    return { ok: false, error: 'Reply with a number from 1 to 10.' };
   }
   return { ok: true, value: n };
 }
@@ -43,7 +42,7 @@ export function parseReadiness(text: string): ParseResult<number> {
  * Body part is stored as trimmed raw text; no canonical-list normalization.
  */
 export function parseSoreness(
-  text: string
+  text: string,
 ): ParseResult<{ score: number; body_part: string | null }> {
   const trimmed = text.trim();
   // Match a leading integer, then optional whitespace + rest-of-string.
@@ -51,22 +50,20 @@ export function parseSoreness(
   if (!match) {
     return {
       ok: false,
-      error: "Reply with a number from 1 to 10, optionally followed by a body part.",
+      error: 'Reply with a number from 1 to 10, optionally followed by a body part.',
     };
   }
   const score = parseInt(match[1]!, 10);
   if (score < 1 || score > 10) {
     return {
       ok: false,
-      error: "Reply with a number from 1 to 10, optionally followed by a body part.",
+      error: 'Reply with a number from 1 to 10, optionally followed by a body part.',
     };
   }
   const rawBodyPart = match[2]?.trim() ?? null;
   // Strip leading dashes, em-dashes, and punctuation that sometimes appear
   // when athletes copy–paste or type "7 — left hamstring".
-  const body_part = rawBodyPart
-    ? rawBodyPart.replace(/^[-–—,\s]+/, "").trim() || null
-    : null;
+  const body_part = rawBodyPart ? rawBodyPart.replace(/^[-–—,\s]+/, '').trim() || null : null;
   return { ok: true, value: { score, body_part } };
 }
 
@@ -76,7 +73,7 @@ export function parseSoreness(
  */
 export function parseNote(text: string): ParseResult<string | null> {
   const trimmed = text.trim().toLowerCase();
-  if (!trimmed || trimmed === "skip" || trimmed === "none" || trimmed === "—") {
+  if (!trimmed || trimmed === 'skip' || trimmed === 'none' || trimmed === '—') {
     return { ok: true, value: null };
   }
   const raw = text.trim();
@@ -90,7 +87,7 @@ export function parseNote(text: string): ParseResult<string | null> {
 export function isConcerning(
   readiness: number,
   soreness: number,
-  body_part: string | null
+  body_part: string | null,
 ): boolean {
   if (readiness <= 4) return true;
   if (soreness >= 6 && body_part !== null) return true;

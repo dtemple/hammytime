@@ -1,18 +1,30 @@
-import type { ParseResult } from "../types";
+import type { ParseResult } from '../types';
 
 const MONTH_NAMES: Record<string, number> = {
-  jan: 1, january: 1,
-  feb: 2, february: 2,
-  mar: 3, march: 3,
-  apr: 4, april: 4,
+  jan: 1,
+  january: 1,
+  feb: 2,
+  february: 2,
+  mar: 3,
+  march: 3,
+  apr: 4,
+  april: 4,
   may: 5,
-  jun: 6, june: 6,
-  jul: 7, july: 7,
-  aug: 8, august: 8,
-  sep: 9, sept: 9, september: 9,
-  oct: 10, october: 10,
-  nov: 11, november: 11,
-  dec: 12, december: 12,
+  jun: 6,
+  june: 6,
+  jul: 7,
+  july: 7,
+  aug: 8,
+  august: 8,
+  sep: 9,
+  sept: 9,
+  september: 9,
+  oct: 10,
+  october: 10,
+  nov: 11,
+  november: 11,
+  dec: 12,
+  december: 12,
 };
 
 function inferYear(month: number, day: number): number {
@@ -24,7 +36,7 @@ function inferYear(month: number, day: number): number {
 }
 
 function padded(n: number): string {
-  return String(n).padStart(2, "0");
+  return String(n).padStart(2, '0');
 }
 
 export function parseDateFlexible(text: string): ParseResult<string> {
@@ -53,8 +65,8 @@ export function parseDateFlexible(text: string): ParseResult<string> {
 
   // "Aug 30 2026", "August 30, 2026", "30 Aug 2026"
   const named =
-    /^([a-z]+)\s+(\d{1,2}),?\s+(\d{4})$/i.exec(v) ||    // "Aug 30 2026"
-    /^(\d{1,2})\s+([a-z]+),?\s+(\d{4})$/i.exec(v);      // "30 Aug 2026"
+    /^([a-z]+)\s+(\d{1,2}),?\s+(\d{4})$/i.exec(v) || // "Aug 30 2026"
+    /^(\d{1,2})\s+([a-z]+),?\s+(\d{4})$/i.exec(v); // "30 Aug 2026"
 
   if (named) {
     let monthStr: string, dayStr: string, yearStr: string;
@@ -79,9 +91,7 @@ export function parseDateFlexible(text: string): ParseResult<string> {
   }
 
   // "Aug 30" or "August 30" — no year, infer year
-  const namedNoYear =
-    /^([a-z]+)\s+(\d{1,2})$/i.exec(v) ||
-    /^(\d{1,2})\s+([a-z]+)$/i.exec(v);
+  const namedNoYear = /^([a-z]+)\s+(\d{1,2})$/i.exec(v) || /^(\d{1,2})\s+([a-z]+)$/i.exec(v);
 
   if (namedNoYear) {
     let monthStr: string, dayStr: string;
@@ -102,6 +112,6 @@ export function parseDateFlexible(text: string): ParseResult<string> {
 
   return {
     ok: false,
-    error: "Send the date as Aug 30 2026, 8/30/2026, or 2026-08-30.",
+    error: 'Send the date as Aug 30 2026, 8/30/2026, or 2026-08-30.',
   };
 }

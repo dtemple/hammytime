@@ -4,7 +4,7 @@ import CheckinBubble from '@/components/CheckinBubble';
 
 export const metadata: Metadata = {
   title: 'HammyTime',
-  description: 'A dynamic training calendar, to make sure you don\'t get injured.',
+  description: "A dynamic training calendar, to make sure you don't get injured.",
 };
 
 export default function Home() {
@@ -24,12 +24,13 @@ export default function Home() {
         <section className="ht-hero">
           <div className="ht-eyebrow">INVITE ONLY RUNNING COACH</div>
           <h1 className="ht-h1">
-            <span className="ht-h1-accent">A dynamic training calendar</span>, to make sure you don't get injured.
+            <span className="ht-h1-accent">A dynamic training calendar</span>, to make sure you
+            don&apos;t get injured.
           </h1>
           <p className="ht-lede">
             Training plans are helpful, but always out of date.{''}
-            
-            Hammytime takes into account your injury history, recent runs, and race dates. And then keeps your Google/Apple calendars updated with the latest.
+            Hammytime takes into account your injury history, recent runs, and race dates. And then
+            keeps your Google/Apple calendars updated with the latest.
           </p>
           <div className="ht-cta-row">
             <Link href="/signup" className="ht-btn ht-btn-primary">
@@ -49,7 +50,8 @@ export default function Home() {
             <div>
               <h3>Prevent injuries</h3>
               <p>
-                HammyTime adjusts your plan as you go to account for flare&#8209;ups, tweaks, and past injuries.
+                HammyTime adjusts your plan as you go to account for flare&#8209;ups, tweaks, and
+                past injuries.
               </p>
             </div>
           </div>
@@ -58,7 +60,9 @@ export default function Home() {
             <div>
               <h3>Adjusts to real life</h3>
               <p>
-                Training plans assume perfectly-spaced rest days, intervals and long runs. But life doesn't always line up that way. HammyTime helps you work through adjustments so that you can stick to the plan while minimizing injury risks.
+                Training plans assume perfectly-spaced rest days, intervals and long runs. But life
+                doesn&apos;t always line up that way. HammyTime helps you work through adjustments so
+                that you can stick to the plan while minimizing injury risks.
               </p>
             </div>
           </div>
@@ -67,7 +71,8 @@ export default function Home() {
             <div>
               <h3>Daily check&#8209;ins</h3>
               <p>
-                Research shows that a self-reported check-in beats data like HRV for injury prevention&emdash;and it takes just two minutes a day.
+                Research shows that a self-reported check-in beats data like HRV for injury
+                prevention&emdash;and it takes just two minutes a day.
               </p>
             </div>
           </div>

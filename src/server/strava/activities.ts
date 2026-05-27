@@ -1,6 +1,6 @@
-import { supabaseAdmin } from "@/lib/db";
-import { decryptToken, encryptToken } from "@/lib/crypto";
-import { refreshAccessToken } from "./client";
+import { supabaseAdmin } from '@/lib/db';
+import { decryptToken, encryptToken } from '@/lib/crypto';
+import { refreshAccessToken } from './client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -13,8 +13,8 @@ import { refreshAccessToken } from "./client";
  */
 export class StravaTokenBrokenError extends Error {
   constructor(cause?: unknown) {
-    super("Strava token refresh failed or was revoked");
-    this.name = "StravaTokenBrokenError";
+    super('Strava token refresh failed or was revoked');
+    this.name = 'StravaTokenBrokenError';
     if (cause instanceof Error) this.cause = cause;
   }
 }
@@ -22,8 +22,8 @@ export class StravaTokenBrokenError extends Error {
 export type StravaActivitySummary = {
   id: number;
   name: string;
-  type: string;                    // "Run", "TrailRun", "VirtualRun", etc.
-  start_date_local: string;        // ISO datetime in athlete's local time
+  type: string; // "Run", "TrailRun", "VirtualRun", etc.
+  start_date_local: string; // ISO datetime in athlete's local time
   distance_m: number;
   moving_time_s: number;
   elapsed_time_s: number;
@@ -45,10 +45,10 @@ export type StravaActivitySummary = {
 async function getAccessToken(athleteId: string): Promise<string | null> {
   const db = supabaseAdmin();
   const { data } = await db
-    .from("oauth_tokens")
-    .select("access_token_enc, refresh_token_enc, expires_at")
-    .eq("athlete_id", athleteId)
-    .eq("provider", "strava")
+    .from('oauth_tokens')
+    .select('access_token_enc, refresh_token_enc, expires_at')
+    .eq('athlete_id', athleteId)
+    .eq('provider', 'strava')
     .maybeSingle();
 
   if (!data) return null;
@@ -72,14 +72,14 @@ async function getAccessToken(athleteId: string): Promise<string | null> {
   ]);
 
   await db
-    .from("oauth_tokens")
+    .from('oauth_tokens')
     .update({
       access_token_enc: newAccessEnc,
       refresh_token_enc: newRefreshEnc,
       expires_at: new Date(refreshed.expires_at * 1000).toISOString(),
     })
-    .eq("athlete_id", athleteId)
-    .eq("provider", "strava");
+    .eq('athlete_id', athleteId)
+    .eq('provider', 'strava');
 
   return refreshed.access_token;
 }
@@ -88,15 +88,15 @@ async function getAccessToken(athleteId: string): Promise<string | null> {
 // Strava API call
 // ---------------------------------------------------------------------------
 
-const STRAVA_API_BASE = "https://www.strava.com/api/v3";
+const STRAVA_API_BASE = 'https://www.strava.com/api/v3';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapActivity(raw: any): StravaActivitySummary {
   return {
     id: raw.id,
-    name: raw.name ?? "",
-    type: raw.sport_type ?? raw.type ?? "Unknown",
-    start_date_local: raw.start_date_local ?? raw.start_date ?? "",
+    name: raw.name ?? '',
+    type: raw.sport_type ?? raw.type ?? 'Unknown',
+    start_date_local: raw.start_date_local ?? raw.start_date ?? '',
     distance_m: raw.distance ?? 0,
     moving_time_s: raw.moving_time ?? 0,
     elapsed_time_s: raw.elapsed_time ?? 0,
@@ -109,7 +109,7 @@ function mapActivity(raw: any): StravaActivitySummary {
 
 async function callStravaActivities(
   accessToken: string,
-  afterUnix: number
+  afterUnix: number,
 ): Promise<StravaActivitySummary[]> {
   const url = `${STRAVA_API_BASE}/athlete/activities?after=${afterUnix}&per_page=50`;
   const res = await fetch(url, {
@@ -118,7 +118,7 @@ async function callStravaActivities(
 
   if (res.status === 401) {
     // Caller will handle the 401 case by retrying after refresh.
-    throw Object.assign(new Error("Strava 401 Unauthorized"), { status: 401 });
+    throw Object.assign(new Error('Strava 401 Unauthorized'), { status: 401 });
   }
 
   if (!res.ok) {
@@ -144,10 +144,10 @@ async function callStravaActivities(
  */
 export async function hasStravaConnection(athleteId: string): Promise<boolean> {
   const { data } = await supabaseAdmin()
-    .from("oauth_tokens")
-    .select("id")
-    .eq("athlete_id", athleteId)
-    .eq("provider", "strava")
+    .from('oauth_tokens')
+    .select('id')
+    .eq('athlete_id', athleteId)
+    .eq('provider', 'strava')
     .maybeSingle();
   return !!data;
 }
@@ -163,7 +163,7 @@ export async function hasStravaConnection(athleteId: string): Promise<boolean> {
  */
 export async function fetchRecentActivities(
   athleteId: string,
-  days = 14
+  days = 14,
 ): Promise<StravaActivitySummary[]> {
   const afterUnix = Math.floor((Date.now() - days * 24 * 60 * 60 * 1000) / 1000);
 
@@ -180,10 +180,10 @@ export async function fetchRecentActivities(
       // setting a past expires_at so getAccessToken will refresh.
       const db = supabaseAdmin();
       await db
-        .from("oauth_tokens")
+        .from('oauth_tokens')
         .update({ expires_at: new Date(0).toISOString() })
-        .eq("athlete_id", athleteId)
-        .eq("provider", "strava");
+        .eq('athlete_id', athleteId)
+        .eq('provider', 'strava');
 
       accessToken = await getAccessToken(athleteId);
       if (!accessToken) return [];

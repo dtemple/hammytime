@@ -29,6 +29,8 @@ export default function CheckinBubble() {
   useEffect(() => {
     const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (prefersReduced) {
+      // Reduced-motion branch runs once on mount; the synchronous cascade is harmless.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTyped(MESSAGE);
       setDone(true);
       setChipsVisible(true);

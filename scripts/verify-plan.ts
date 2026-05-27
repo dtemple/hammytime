@@ -11,24 +11,24 @@
  *   MANUAL_PLAN_PATH=/path/to/plan.json npm run plan:verify
  */
 
-import { config } from "dotenv";
-config({ path: ".env.local" });
+import { config } from 'dotenv';
+config({ path: '.env.local' });
 
-import { readFileSync } from "fs";
-import { join } from "path";
-import { ZodIssue } from "zod";
-import { PlanSchema } from "../src/lib/plan-schema";
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { ZodIssue } from 'zod';
+import { PlanSchema } from '../src/lib/plan-schema';
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
 // ---------------------------------------------------------------------------
 
 function formatIssue(issue: ZodIssue): string {
-  const path = issue.path.length > 0 ? issue.path.join(".") : "(root)";
+  const path = issue.path.length > 0 ? issue.path.join('.') : '(root)';
   const code = issue.code;
-  let detail = "";
+  let detail = '';
 
-  if ("expected" in issue && "received" in issue) {
+  if ('expected' in issue && 'received' in issue) {
     detail = ` (expected ${String(issue.expected)}, got ${String(issue.received)})`;
   } else if (issue.message) {
     detail = ` — ${issue.message}`;
@@ -43,12 +43,11 @@ function formatIssue(issue: ZodIssue): string {
 
 async function main() {
   const planPath =
-    process.env.MANUAL_PLAN_PATH ??
-    join(process.cwd(), "seeds/marathon_training_plan.json");
+    process.env.MANUAL_PLAN_PATH ?? join(process.cwd(), 'seeds/marathon_training_plan.json');
 
   let planJson: unknown;
   try {
-    const raw = readFileSync(planPath, "utf8");
+    const raw = readFileSync(planPath, 'utf8');
     planJson = JSON.parse(raw);
   } catch (err) {
     console.error(`Failed to read plan at ${planPath}:`, err);
@@ -60,7 +59,7 @@ async function main() {
   const result = PlanSchema.safeParse(planJson);
 
   if (result.success) {
-    console.log("✓ Plan parses cleanly against current schema. No adapter needed.");
+    console.log('✓ Plan parses cleanly against current schema. No adapter needed.');
     process.exit(0);
   }
 

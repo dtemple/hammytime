@@ -1,12 +1,12 @@
-import { randomBytes } from "crypto";
-import { redirect } from "next/navigation";
-import QRCode from "qrcode";
-import { supabaseAdmin } from "@/lib/db";
+import { randomBytes } from 'crypto';
+import { redirect } from 'next/navigation';
+import QRCode from 'qrcode';
+import { supabaseAdmin } from '@/lib/db';
 
 async function handleEmailSubmit(formData: FormData) {
-  "use server";
-  const raw = formData.get("email");
-  const email = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  'use server';
+  const raw = formData.get('email');
+  const email = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
   if (!email) return;
   redirect(`/signup?email=${encodeURIComponent(email)}`);
 }
@@ -23,7 +23,9 @@ export default async function SignupPage({
     return (
       <main className="min-h-screen flex items-center justify-center bg-white px-4">
         <div className="w-full max-w-sm">
-          <p className="text-sm text-zinc-500 mb-1">Daily Telegram coaching for marathon runners.</p>
+          <p className="text-sm text-zinc-500 mb-1">
+            Daily Telegram coaching for marathon runners.
+          </p>
           <p className="text-sm text-zinc-500 mb-1">Powered by your Strava data.</p>
           <p className="text-sm text-zinc-500 mb-6">Friends only, by invite.</p>
           <form action={handleEmailSubmit}>
@@ -48,38 +50,37 @@ export default async function SignupPage({
 
   const db = supabaseAdmin();
   const { data: row } = await db
-    .from("friend_allowlist")
-    .select("id")
-    .eq("email", email)
+    .from('friend_allowlist')
+    .select('id')
+    .eq('email', email)
     .maybeSingle();
 
   if (!row) {
     return (
       <main className="min-h-screen flex items-center justify-center bg-white px-4">
         <div className="w-full max-w-sm">
-          <p className="text-sm text-zinc-800 mb-2">
-            {email} isn&apos;t on the list yet.
-          </p>
-          <p className="text-sm text-zinc-500">
-            Ping David to get an invite added.
-          </p>
+          <p className="text-sm text-zinc-800 mb-2">{email} isn&apos;t on the list yet.</p>
+          <p className="text-sm text-zinc-500">Ping David to get an invite added.</p>
         </div>
       </main>
     );
   }
 
-  const token = randomBytes(32).toString("base64url");
+  const token = randomBytes(32).toString('base64url');
+  // Server Component runs once per request — Date.now() is fine here, but the
+  // React purity lint rule fires regardless.
+  // eslint-disable-next-line react-hooks/purity
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
   const { error: insertError } = await db
-    .from("link_tokens")
+    .from('link_tokens')
     .insert({ email, token, expires_at: expiresAt });
 
   if (insertError) {
     throw new Error(`Failed to mint link token: ${insertError.message}`);
   }
 
-  const botUsername = process.env.TELEGRAM_BOT_USERNAME ?? "";
+  const botUsername = process.env.TELEGRAM_BOT_USERNAME ?? '';
   const deeplink = `tg://resolve?domain=${botUsername}&start=${token}`;
   const qrDataUrl = await QRCode.toDataURL(deeplink, { width: 200, margin: 2 });
 
@@ -87,7 +88,8 @@ export default async function SignupPage({
     <main className="min-h-screen flex items-center justify-center bg-white px-4">
       <div className="w-full max-w-sm">
         <p className="text-sm text-zinc-500 mb-4">
-          You&apos;re on the list. Tap the link to open Telegram and start setup — it expires in 15 minutes.
+          You&apos;re on the list. Tap the link to open Telegram and start setup — it expires in 15
+          minutes.
         </p>
         <a
           href={deeplink}

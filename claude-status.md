@@ -21,6 +21,7 @@ Bug fixed: `src/app/api/tg/webhook/route.ts` was calling `bot.handleUpdate()` wi
 The graceful-degradation path from Prompt 17 is removed. The agent is never invoked without valid Strava data — both missing-connection and broken-token paths now send a two-sentence refusal to Telegram, record an aborted `agent_runs` row with zero tokens, and stop. Wellness data is always captured first.
 
 Key artifacts:
+
 - `src/server/strava/activities.ts` — added `StravaTokenBrokenError` (typed error for broken-token abort)
 - `src/server/agent/daily-checkin.ts` — removed `stravaFallback`/`stravaError` mechanism; `fetchRecentActivities` is now the first async operation; throws `StravaTokenBrokenError` on failure before any LLM work; `persistRun` exported
 - `src/server/telegram/checkin/dispatcher.ts` — gates `runDailyCheckin` on `hasStravaConnection`; inserts aborted `agent_runs` row on no-connection; catches `StravaTokenBrokenError` for broken-token path
@@ -93,7 +94,7 @@ Key artifacts:
 
 ### Week 3 — Daily agent loop + ad-hoc Telegram replies
 
-- [ ] Daily cron worker: enqueue `daily_checkin` jobs for athletes in 6:30–7:00 AM local window.
+- [x] Daily cron worker: single-athlete `/api/cron/daily-checkin` at `30 13 * * *` UTC (= 6:30 AM PDT / 5:30 AM PST). `job_queue` enqueue-by-local-window is deferred until the second athlete onboards.
 - [ ] Daily agent run per §3.7 (memory load, Strava pull, Claude Agent SDK, structured response, memory write-back, Telegram send, shadow-bcc mirror).
 - [x] Daily wellness battery in morning check-in — `/checkin` state machine (Prompt 15). Agent reads from `wellness_log.md` in Prompt 16.
 - [ ] Ad-hoc reply mode (lighter context, Haiku router, Sonnet response).
@@ -123,14 +124,14 @@ Key artifacts:
 
 ## Important milestones
 
-| Milestone                                   | Target        | Status      |
-| ------------------------------------------- | ------------- | ----------- |
-| `/api/health` returns 200 (all green)       | End of Week 0 | Not started |
-| First friend reaches `awaiting_paste` state | End of Week 1 | ✅ Wired (pending e2e test) |
+| Milestone                                   | Target        | Status                                         |
+| ------------------------------------------- | ------------- | ---------------------------------------------- |
+| `/api/health` returns 200 (all green)       | End of Week 0 | Not started                                    |
+| First friend reaches `awaiting_paste` state | End of Week 1 | ✅ Wired (pending e2e test)                    |
 | First active plan in the system             | End of Week 2 | ✅ Ready to import (pending `plan:import` run) |
-| Daily loop running on David for 5 days      | End of Week 4 | Not started |
-| First alpha friend onboarded                | Week 5        | Not started |
-| All ~25 friends onboarded                   | Week 6        | Not started |
+| Daily loop running on David for 5 days      | End of Week 4 | Not started                                    |
+| First alpha friend onboarded                | Week 5        | Not started                                    |
+| All ~25 friends onboarded                   | Week 6        | Not started                                    |
 
 ---
 
@@ -149,6 +150,7 @@ Key artifacts:
 ## Likely next task
 
 **Manual verification for Prompt 18** (Strava hard requirement):
+
 1. `npm run dev:all` — start Supabase + Next.js + polling bot
 2. Normal flow: `/checkin` → wellness battery → coaching response with Strava data.
 3. DELETE `oauth_tokens` row in Supabase Studio. `/checkin` → wellness battery completes → refusal message arrives mentioning `/connect_strava`. Confirm `wellness_log.md` has entry, `checkin_log.md` does NOT, `agent_runs` has `strava_not_connected` row.
