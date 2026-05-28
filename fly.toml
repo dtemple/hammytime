@@ -1,0 +1,26 @@
+# Fly.io worker (v0.7). One always-on machine drains job_queue; folders live on
+# a persistent volume so an in-flight athlete folder survives a restart mid-run.
+# Secrets (ANTHROPIC_API_KEY, SUPABASE_*, TELEGRAM_BOT_TOKEN, DAVID_TELEGRAM_CHAT_ID,
+# STRAVA_*) are set with `fly secrets set`, never committed.
+app = "hammytime-worker"
+primary_region = "sea"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  ATHLETE_ROOT = "/data/athletes"
+
+# Single worker for M1 — the claim is FOR UPDATE SKIP LOCKED so this is safe to
+# scale later, but one machine keeps per-athlete ordering trivial.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
+
+[mounts]
+  source = "athlete_data"
+  destination = "/data"
+
+# No public services — the worker only polls Postgres outbound. No [http_service].
+[deploy]
+  strategy = "immediate"

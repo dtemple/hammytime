@@ -1,0 +1,11 @@
+node_modules
+.next
+.git
+.env*
+*.log
+.DS_Store
+Specs
+scripts
+supabase
+public
+data

@@ -137,6 +137,8 @@ export type Database = {
       agent_runs: {
         Row: {
           athlete_id: string
+          cache_creation_input_tokens: number | null
+          cache_read_input_tokens: number | null
           cost_usd: number | null
           created_at: string
           error: string | null
@@ -151,6 +153,8 @@ export type Database = {
         }
         Insert: {
           athlete_id: string
+          cache_creation_input_tokens?: number | null
+          cache_read_input_tokens?: number | null
           cost_usd?: number | null
           created_at?: string
           error?: string | null
@@ -165,6 +169,8 @@ export type Database = {
         }
         Update: {
           athlete_id?: string
+          cache_creation_input_tokens?: number | null
+          cache_read_input_tokens?: number | null
           cost_usd?: number | null
           created_at?: string
           error?: string | null
@@ -734,7 +740,53 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      athlete_cost_daily: {
+        Row: {
+          athlete_id: string | null
+          cache_creation_input_tokens: number | null
+          cache_read_input_tokens: number | null
+          cost_usd: number | null
+          input_tokens: number | null
+          local_day: string | null
+          output_tokens: number | null
+          runs: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_runs_athlete_id_fkey"
+            columns: ["athlete_id"]
+            isOneToOne: false
+            referencedRelation: "athletes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      athlete_cost_rollup: {
+        Row: {
+          athlete_id: string | null
+          cache_creation_input_tokens: number | null
+          cache_read_input_tokens: number | null
+          cost_usd: number | null
+          cost_usd_28d: number | null
+          cost_usd_7d: number | null
+          first_run_at: string | null
+          input_tokens: number | null
+          last_run_at: string | null
+          output_tokens: number | null
+          runs_28d: number | null
+          runs_7d: number | null
+          total_runs: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_runs_athlete_id_fkey"
+            columns: ["athlete_id"]
+            isOneToOne: false
+            referencedRelation: "athletes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       accept_plan_paste: {
@@ -747,6 +799,27 @@ export type Database = {
           p_total_weeks: number
         }
         Returns: undefined
+      }
+      claim_next_job: {
+        Args: { p_stale_minutes?: number }
+        Returns: {
+          attempts: number
+          completed_at: string | null
+          created_at: string
+          id: string
+          key_unique: string
+          kind: string
+          last_error: string | null
+          locked_at: string | null
+          payload: Json
+          run_after: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "job_queue"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       link_start_handshake: {
         Args: { p_telegram_chat_id: string; p_token: string }

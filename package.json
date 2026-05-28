@@ -17,6 +17,8 @@
     "test": "vitest run",
     "webhook:register": "tsx scripts/register-webhook.ts",
     "bot:dev": "tsx scripts/start-bot-polling.ts",
+    "worker:dev": "tsx watch worker/index.ts",
+    "worker:start": "tsx worker/index.ts",
     "clear:plans": "tsx scripts/clear-athlete-plans.ts",
     "plan:verify": "tsx scripts/verify-plan.ts",
     "plan:import": "tsx scripts/import-plan.ts",
