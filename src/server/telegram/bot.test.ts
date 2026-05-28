@@ -13,10 +13,12 @@ vi.mock('./checkin/dispatcher', () => ({
 }));
 vi.mock('child_process', () => ({ execSync: vi.fn().mockReturnValue('abc1234 — test commit') }));
 vi.mock('grammy', () => ({ Bot: vi.fn(), Context: vi.fn() }));
+vi.mock('@/server/jobs/enqueue', () => ({ enqueueJob: vi.fn().mockResolvedValue(undefined) }));
 
 import { supabaseAdmin } from '@/lib/db';
 import { Bot } from 'grammy';
 import { handleWellnessMessage } from './checkin/dispatcher';
+import { enqueueJob } from '@/server/jobs/enqueue';
 import { handleInboundText, handleConnectStravaCommand, _resetBotForTest } from './bot';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,6 +60,9 @@ function makeDb(
             }),
           }),
         };
+      }
+      if (table === 'messages') {
+        return { insert: vi.fn().mockResolvedValue({ error: null }) };
       }
       if (table === 'plans') {
         return {
@@ -127,15 +132,19 @@ describe('handleInboundText — post-onboarding routing', () => {
     expect(replyText).not.toContain('http');
   });
 
-  it('replies with active message when plan_versions status is active', async () => {
+  it('enqueues a tg_message job (no inline reply) when plan_versions status is active', async () => {
     (supabaseAdmin as AnyMock).mockReturnValue(makeDb('active'));
-    const ctx = makeCtx();
+    const ctx = makeCtx({ message: { text: 'how did I do?', message_id: 555 } });
 
     await handleInboundText(ctx as AnyMock);
 
-    expect(ctx.reply).toHaveBeenCalledWith(
-      'All set. Daily check-ins start when that side of the bot ships.',
+    expect(enqueueJob).toHaveBeenCalledWith(
+      'tg_message',
+      `tg-${ATHLETE_ID}-555`,
+      { athlete_id: ATHLETE_ID, text: 'how did I do?' },
     );
+    // Worker owns the reply — the bot returns fast without replying inline.
+    expect(ctx.reply).not.toHaveBeenCalled();
   });
 
   it('replies with help-path message when no plan row exists', async () => {

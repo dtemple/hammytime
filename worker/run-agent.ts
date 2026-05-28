@@ -11,7 +11,7 @@ import { cleanup, hydrate, syncBack } from './folder';
 import { ALLOWED_TOOLS, makeIsolationGuard, scrubbedEnv } from './isolation';
 import { persistRun, type CapturedStep, type RunKind } from './persist';
 import { sendReply } from './send';
-import { buildPrompt, renderSystemPrompt } from './system-prompt';
+import { buildPrompt, loadRecentHistory, renderSystemPrompt } from './system-prompt';
 
 export type RunSource = 'daily_checkin' | 'tg_message';
 
@@ -39,7 +39,8 @@ export async function runAgent(
 
   try {
     const systemPrompt = await renderSystemPrompt(athleteId);
-    const prompt = buildPrompt(source, timezone, message);
+    const history = await loadRecentHistory(athleteId);
+    const prompt = buildPrompt(source, timezone, message, history);
 
     const q = query({
       prompt,

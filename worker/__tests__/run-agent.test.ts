@@ -12,6 +12,7 @@ vi.mock('../persist', () => ({ persistRun: vi.fn().mockResolvedValue('run-1') })
 vi.mock('../system-prompt', () => ({
   renderSystemPrompt: vi.fn().mockResolvedValue('SYSTEM PROMPT'),
   buildPrompt: vi.fn().mockReturnValue('PROMPT'),
+  loadRecentHistory: vi.fn().mockResolvedValue([]),
 }));
 vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
 

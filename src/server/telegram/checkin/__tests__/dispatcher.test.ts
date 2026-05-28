@@ -9,7 +9,7 @@ import { supabaseAdmin } from '@/lib/db';
 import { sendAndLog } from '../../bot';
 import { appendWellnessRow } from '../wellness-log';
 import { handleCheckinCommand, handleWellnessMessage } from '../dispatcher';
-import { READINESS_PROMPT, SORENESS_PROMPT, NOTE_PROMPT, CONCERNING_LINE } from '../wellness';
+import { READINESS_PROMPT, SORENESS_PROMPT, CONCERNING_LINE } from '../wellness';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyMock = any;
@@ -170,7 +170,7 @@ describe('handleWellnessMessage — awaiting_soreness', () => {
     );
   });
 
-  it('advances to awaiting_note on valid score-only input', async () => {
+  it('logs wellness and clears state on valid score-only input', async () => {
     const db = makeDb();
     (supabaseAdmin as AnyMock).mockReturnValue(db);
 
@@ -182,18 +182,16 @@ describe('handleWellnessMessage — awaiting_soreness', () => {
 
     await handleWellnessMessage(ctx as AnyMock, athlete as AnyMock);
 
-    expect(db.updateMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        checkin_state: {
-          sub_step: 'awaiting_note',
-          partial: { readiness: 7, soreness_score: 3, soreness_body_part: null },
-        },
-      }),
-    );
-    expect(sendAndLog).toHaveBeenCalledWith(ATHLETE_ID, CHAT_ID, NOTE_PROMPT);
+    expect(appendWellnessRow).toHaveBeenCalledOnce();
+    const [, entry] = (appendWellnessRow as AnyMock).mock.calls[0];
+    expect(entry.readiness).toBe(7);
+    expect(entry.soreness).toBe(3);
+    expect(entry.body_part).toBe('—');
+    expect(entry.note).toBe('—');
+    expect(db.updateMock).toHaveBeenCalledWith(expect.objectContaining({ checkin_state: {} }));
   });
 
-  it('advances to awaiting_note with body part', async () => {
+  it('logs the body part on valid score + body part input', async () => {
     const db = makeDb();
     (supabaseAdmin as AnyMock).mockReturnValue(db);
 
@@ -205,47 +203,32 @@ describe('handleWellnessMessage — awaiting_soreness', () => {
 
     await handleWellnessMessage(ctx as AnyMock, athlete as AnyMock);
 
-    expect(db.updateMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        checkin_state: {
-          sub_step: 'awaiting_note',
-          partial: { readiness: 7, soreness_score: 4, soreness_body_part: 'left hamstring' },
-        },
-      }),
-    );
+    const [, entry] = (appendWellnessRow as AnyMock).mock.calls[0];
+    expect(entry.soreness).toBe(4);
+    expect(entry.body_part).toBe('left hamstring');
   });
 });
 
 // ---------------------------------------------------------------------------
-// handleWellnessMessage — awaiting_note / onWellnessComplete
+// handleWellnessMessage — completion on soreness (onWellnessComplete)
 //
-// Post-v0.7: the battery only logs wellness. The morning coaching read runs as
+// Post-v0.7.1: the battery is two questions (readiness + soreness). Soreness is
+// the last prompt, so completion fires here. The morning coaching read runs as
 // a queued daily job in the worker, not off /checkin (SPEC §3.7).
 // ---------------------------------------------------------------------------
-describe('handleWellnessMessage — awaiting_note', () => {
-  it('logs wellness, clears state, and sends a short confirmation (no coaching run)', async () => {
+describe('handleWellnessMessage — completion', () => {
+  it('sends a short confirmation echoing the logged values (no coaching run)', async () => {
     const db = makeDb();
     (supabaseAdmin as AnyMock).mockReturnValue(db);
 
-    const ctx = makeCtx("felt good on yesterday's run");
+    const ctx = makeCtx('3');
     const athlete = makeAthlete({
-      sub_step: 'awaiting_note',
-      partial: { readiness: 7, soreness_score: 3, soreness_body_part: null },
+      sub_step: 'awaiting_soreness',
+      partial: { readiness: 7 },
     });
 
     await handleWellnessMessage(ctx as AnyMock, athlete as AnyMock);
 
-    expect(appendWellnessRow).toHaveBeenCalledOnce();
-    const [, entry] = (appendWellnessRow as AnyMock).mock.calls[0];
-    expect(entry.readiness).toBe(7);
-    expect(entry.soreness).toBe(3);
-    expect(entry.body_part).toBe('—');
-    expect(entry.note).toBe("felt good on yesterday's run");
-
-    // State cleared
-    expect(db.updateMock).toHaveBeenCalledWith(expect.objectContaining({ checkin_state: {} }));
-
-    // Short confirmation sent, echoing the logged values
     const calls = (sendAndLog as AnyMock).mock.calls as AnyMock[];
     const sentTexts = calls.map(([, , text]: AnyMock) => text as string);
     const confirmation = sentTexts.find((t) => t.startsWith('Logged'));
@@ -254,30 +237,14 @@ describe('handleWellnessMessage — awaiting_note', () => {
     expect(confirmation).toContain('soreness 3');
   });
 
-  it("skips note on 'skip' reply", async () => {
-    const db = makeDb();
-    (supabaseAdmin as AnyMock).mockReturnValue(db);
-
-    const ctx = makeCtx('skip');
-    const athlete = makeAthlete({
-      sub_step: 'awaiting_note',
-      partial: { readiness: 6, soreness_score: 2, soreness_body_part: null },
-    });
-
-    await handleWellnessMessage(ctx as AnyMock, athlete as AnyMock);
-
-    const [, entry] = (appendWellnessRow as AnyMock).mock.calls[0];
-    expect(entry.note).toBe('—');
-  });
-
   it('does NOT send concerning line for normal values', async () => {
     const db = makeDb();
     (supabaseAdmin as AnyMock).mockReturnValue(db);
 
-    const ctx = makeCtx('skip');
+    const ctx = makeCtx('3');
     const athlete = makeAthlete({
-      sub_step: 'awaiting_note',
-      partial: { readiness: 7, soreness_score: 3, soreness_body_part: null },
+      sub_step: 'awaiting_soreness',
+      partial: { readiness: 7 },
     });
 
     await handleWellnessMessage(ctx as AnyMock, athlete as AnyMock);
@@ -291,10 +258,10 @@ describe('handleWellnessMessage — awaiting_note', () => {
     const db = makeDb();
     (supabaseAdmin as AnyMock).mockReturnValue(db);
 
-    const ctx = makeCtx('skip');
+    const ctx = makeCtx('2');
     const athlete = makeAthlete({
-      sub_step: 'awaiting_note',
-      partial: { readiness: 3, soreness_score: 2, soreness_body_part: null },
+      sub_step: 'awaiting_soreness',
+      partial: { readiness: 3 },
     });
 
     await handleWellnessMessage(ctx as AnyMock, athlete as AnyMock);
@@ -306,10 +273,10 @@ describe('handleWellnessMessage — awaiting_note', () => {
     const db = makeDb();
     (supabaseAdmin as AnyMock).mockReturnValue(db);
 
-    const ctx = makeCtx('skip');
+    const ctx = makeCtx('7');
     const athlete = makeAthlete({
-      sub_step: 'awaiting_note',
-      partial: { readiness: 7, soreness_score: 7, soreness_body_part: null },
+      sub_step: 'awaiting_soreness',
+      partial: { readiness: 7 },
     });
 
     await handleWellnessMessage(ctx as AnyMock, athlete as AnyMock);
@@ -321,10 +288,10 @@ describe('handleWellnessMessage — awaiting_note', () => {
     const db = makeDb();
     (supabaseAdmin as AnyMock).mockReturnValue(db);
 
-    const ctx = makeCtx('skip');
+    const ctx = makeCtx('6 left knee');
     const athlete = makeAthlete({
-      sub_step: 'awaiting_note',
-      partial: { readiness: 7, soreness_score: 6, soreness_body_part: 'left knee' },
+      sub_step: 'awaiting_soreness',
+      partial: { readiness: 7 },
     });
 
     await handleWellnessMessage(ctx as AnyMock, athlete as AnyMock);

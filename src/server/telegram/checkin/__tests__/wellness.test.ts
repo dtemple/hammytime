@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseReadiness, parseSoreness, parseNote, isConcerning } from '../wellness';
+import { parseReadiness, parseSoreness, isConcerning } from '../wellness';
 
 // ---------------------------------------------------------------------------
 // parseReadiness
@@ -100,49 +100,6 @@ describe('parseSoreness', () => {
 
   it('rejects empty string', () => {
     expect(parseSoreness('').ok).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// parseNote
-// ---------------------------------------------------------------------------
-describe('parseNote', () => {
-  it("returns null for 'skip'", () => {
-    expect(parseNote('skip')).toEqual({ ok: true, value: null });
-  });
-
-  it("returns null for 'SKIP' (case-insensitive)", () => {
-    expect(parseNote('SKIP')).toEqual({ ok: true, value: null });
-  });
-
-  it("returns null for 'none'", () => {
-    expect(parseNote('none')).toEqual({ ok: true, value: null });
-  });
-
-  it("returns null for em-dash '—'", () => {
-    expect(parseNote('—')).toEqual({ ok: true, value: null });
-  });
-
-  it('returns null for empty string', () => {
-    expect(parseNote('')).toEqual({ ok: true, value: null });
-  });
-
-  it('returns null for whitespace only', () => {
-    expect(parseNote('   ')).toEqual({ ok: true, value: null });
-  });
-
-  it('returns trimmed text for real input', () => {
-    expect(parseNote("  felt good on yesterday's run  ")).toEqual({
-      ok: true,
-      value: "felt good on yesterday's run",
-    });
-  });
-
-  it('caps at 500 characters', () => {
-    const long = 'a'.repeat(600);
-    const r = parseNote(long);
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.value?.length).toBe(500);
   });
 });
 

@@ -2,10 +2,8 @@ import { NextResponse } from 'next/server';
 import { timingSafeEqual } from 'node:crypto';
 import * as Sentry from '@sentry/nextjs';
 import { supabaseAdmin } from '@/lib/db';
-import { sendAndLog } from '@/server/telegram/bot';
-import { writeCheckinState, nowInTimezone } from '@/server/telegram/checkin/dispatcher';
-import { READINESS_PROMPT } from '@/server/telegram/checkin/wellness';
-import { wellnessLogContains } from '@/server/telegram/checkin/wellness-log';
+import { nowInTimezone } from '@/server/telegram/checkin/dispatcher';
+import { enqueueJob } from '@/server/jobs/enqueue';
 import { onboardingSteps } from '@/server/telegram/onboarding';
 
 function authorized(req: Request): boolean {
@@ -47,23 +45,13 @@ export async function GET(req: Request) {
 
     const athlete = onboarded[0];
 
-    const cs = athlete.checkin_state as { sub_step?: string } | null;
-    if (cs?.sub_step) {
-      return NextResponse.json({ ok: true, skipped: 'mid_checkin' });
-    }
-
+    // Enqueue the daily coaching job; the worker runs the agent and then sends
+    // the wellness battery (SPEC §3.7). The per-day unique key makes a cron
+    // overlap a no-op — no inline run, no inline battery here anymore.
     const { date } = nowInTimezone(athlete.timezone);
-    if (await wellnessLogContains(athlete.id, date)) {
-      return NextResponse.json({ ok: true, skipped: 'already_checked_in_today' });
-    }
+    await enqueueJob('daily_checkin', `daily-${athlete.id}-${date}`, { athlete_id: athlete.id });
 
-    await writeCheckinState(athlete.id, {
-      sub_step: 'awaiting_readiness',
-      partial: {},
-    });
-    await sendAndLog(athlete.id, athlete.telegram_chat_id!, READINESS_PROMPT);
-
-    return NextResponse.json({ ok: true, fired: athlete.id });
+    return NextResponse.json({ ok: true, enqueued: athlete.id });
   } catch (err) {
     Sentry.captureException(err);
     console.error('[daily-checkin cron] error', err);

@@ -6,11 +6,9 @@ import { appendWellnessRow } from './wellness-log';
 import {
   READINESS_PROMPT,
   SORENESS_PROMPT,
-  NOTE_PROMPT,
   CONCERNING_LINE,
   parseReadiness,
   parseSoreness,
-  parseNote,
   isConcerning,
 } from './wellness';
 import type { WellnessState, WellnessEntry } from './types';
@@ -164,31 +162,16 @@ export async function handleWellnessMessage(ctx: Context, athlete: AthleteRow): 
         await sendAndLog(athlete.id, chatId, `${result.error}\n\n${SORENESS_PROMPT}`);
         return;
       }
-      await writeCheckinState(athlete.id, {
-        sub_step: 'awaiting_note',
-        partial: {
-          ...partial,
-          soreness_score: result.value.score,
-          soreness_body_part: result.value.body_part,
-        },
-      });
-      await sendAndLog(athlete.id, chatId, NOTE_PROMPT);
-      return;
-    }
-
-    case 'awaiting_note': {
-      const result = parseNote(text);
-      // parseNote always succeeds.
-      const noteValue = result.ok ? result.value : null;
+      // Soreness is the last prompt — the battery is two questions (readiness +
+      // soreness). The free-text note was cut in v0.7.1, so complete here.
       const { date, time } = nowInTimezone(athlete.timezone);
-
       const entry: WellnessEntry = {
         date,
         time,
         readiness: partial.readiness ?? 0,
-        soreness: partial.soreness_score ?? 0,
-        body_part: partial.soreness_body_part ?? '—',
-        note: noteValue ?? '—',
+        soreness: result.value.score,
+        body_part: result.value.body_part ?? '—',
+        note: '—',
       };
 
       await onWellnessComplete(chatId, athlete, entry);

@@ -10,6 +10,7 @@ import {
 import { handleCheckinCommand, handleWellnessMessage } from './checkin/dispatcher';
 import { fetchRecentActivities, hasStravaConnection } from '@/server/strava/activities';
 import { getOrCreateCalendarToken } from '@/lib/calendar-token';
+import { enqueueJob } from '@/server/jobs/enqueue';
 
 let _bot: Bot | null = null;
 
@@ -179,7 +180,21 @@ export async function handleInboundText(ctx: Context): Promise<void> {
   if (version.status === 'awaiting_paste') {
     await ctx.reply('Your plan is being set up. Daily coaching is coming soon.');
   } else if (version.status === 'active') {
-    await ctx.reply('All set. Daily check-ins start when that side of the bot ships.');
+    // Hand the message to the worker: persist it, enqueue a tg_message job, and
+    // return fast (Telegram wants a quick 200). The worker runs the agent and
+    // sends the reply. The unique key dedups Telegram delivery retries.
+    const text = ctx.message?.text ?? '';
+    const messageId = ctx.message?.message_id;
+    await db.from('messages').insert({
+      athlete_id: athlete.id,
+      channel: 'tg',
+      direction: 'in',
+      body: text,
+    });
+    await enqueueJob('tg_message', `tg-${athlete.id}-${messageId}`, {
+      athlete_id: athlete.id,
+      text,
+    });
   } else {
     await ctx.reply('Your onboarding is complete — daily coaching is coming soon.');
   }

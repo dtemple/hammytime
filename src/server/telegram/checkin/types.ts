@@ -1,10 +1,9 @@
-export type WellnessSubStep = 'awaiting_readiness' | 'awaiting_soreness' | 'awaiting_note';
+export type WellnessSubStep = 'awaiting_readiness' | 'awaiting_soreness';
 
 export type WellnessPartial = {
   readiness?: number;
   soreness_score?: number;
   soreness_body_part?: string | null;
-  note?: string | null;
 };
 
 export type WellnessState = {

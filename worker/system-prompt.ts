@@ -5,8 +5,31 @@
 
 import { readFile } from 'fs/promises';
 import path from 'path';
+import { supabaseAdmin } from '@/lib/db';
 import { loadAthleteData } from '@/server/agent/byo-plan';
 import type { RunSource } from './run-agent';
+
+export type HistoryMsg = { direction: string; body: string };
+
+// Last N Telegram messages (both directions), oldest first, so each run can
+// pick up the thread instead of replying cold. The conversation lives in the
+// `messages` table; the inbound message that triggered a tg_message run is
+// already persisted by the webhook before the job runs, so it's usually the
+// last entry here.
+export async function loadRecentHistory(athleteId: string, limit = 12): Promise<HistoryMsg[]> {
+  const { data } = await supabaseAdmin()
+    .from('messages')
+    .select('direction, body')
+    .eq('athlete_id', athleteId)
+    .eq('channel', 'tg')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  return (data ?? []).reverse().map((m) => ({ direction: m.direction, body: m.body }));
+}
+
+function formatHistory(history: HistoryMsg[]): string {
+  return history.map((m) => `${m.direction === 'in' ? 'Athlete' : 'Coach'}: ${m.body}`).join('\n');
+}
 
 let _template: string | null = null;
 
@@ -86,16 +109,31 @@ export async function renderSystemPrompt(athleteId: string): Promise<string> {
 
 /**
  * The per-run user prompt. For a daily check-in it's the morning trigger; for
- * an ad-hoc message it's the athlete's text, wrapped with the local date so the
- * agent anchors "today" correctly.
+ * an ad-hoc message it's the athlete's text. Recent thread history rides along
+ * in both cases so the agent replies in context, not cold.
  */
-export function buildPrompt(source: RunSource, timezone: string, message?: string): string {
+export function buildPrompt(
+  source: RunSource,
+  timezone: string,
+  message?: string,
+  history: HistoryMsg[] = [],
+): string {
   const { date, weekday } = localDateParts(timezone);
+  const transcript = formatHistory(history);
+
   if (source === 'daily_checkin') {
-    return `It's the morning of ${weekday}, ${date}. Run today's coaching check-in. Read the Strava file and the athlete's memory files first, then write today's message.`;
+    const base = `It's the morning of ${weekday}, ${date}. Write today's coaching message: read the Strava file and the athlete's memory files first, then send a training-focused note for today.`;
+    return transcript ? `${base}\n\nRecent conversation, oldest first:\n${transcript}` : base;
   }
+
   const text = (message ?? '').trim();
-  return `Today is ${weekday}, ${date}. The athlete sent this message:\n\n${text}\n\nReply to it.`;
+  if (!transcript) {
+    return `Today is ${weekday}, ${date}. The athlete sent this message:\n\n${text}\n\nReply to it.`;
+  }
+  const last = history[history.length - 1];
+  const alreadyEndsWithLatest = last?.direction === 'in' && last.body.trim() === text;
+  const thread = alreadyEndsWithLatest ? transcript : `${transcript}\nAthlete: ${text}`;
+  return `Today is ${weekday}, ${date}. Recent conversation, oldest first — the athlete's latest message is the last line:\n\n${thread}\n\nReply to it.`;
 }
 
 function localDateParts(timezone: string): { date: string; weekday: string } {

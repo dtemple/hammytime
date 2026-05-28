@@ -5,8 +5,6 @@ export const READINESS_PROMPT =
 export const SORENESS_PROMPT =
   "Soreness 1–10? Optionally name a body part (e.g. 'left hamstring').";
 
-export const NOTE_PROMPT = "One-line note (optional)? Reply 'skip' to skip.";
-
 export const CONCERNING_LINE = 'Worth a closer look — want to talk it through?';
 
 // ---------------------------------------------------------------------------
@@ -65,19 +63,6 @@ export function parseSoreness(
   // when athletes copy–paste or type "7 — left hamstring".
   const body_part = rawBodyPart ? rawBodyPart.replace(/^[-–—,\s]+/, '').trim() || null : null;
   return { ok: true, value: { score, body_part } };
-}
-
-/**
- * Parses the note question reply. Always succeeds.
- * Returns null for skip/none/empty; trimmed text (≤500 chars) otherwise.
- */
-export function parseNote(text: string): ParseResult<string | null> {
-  const trimmed = text.trim().toLowerCase();
-  if (!trimmed || trimmed === 'skip' || trimmed === 'none' || trimmed === '—') {
-    return { ok: true, value: null };
-  }
-  const raw = text.trim();
-  return { ok: true, value: raw.slice(0, 500) };
 }
 
 /**
