@@ -242,34 +242,28 @@ Acceptance: reading `coach.md` cold should feel like a coaching brief, not a con
 
 ---
 
-## 9. Metering + prepaid balance (SPEC §3.11)
+## 9. Cost tracking now; prepaid balance deferred (SPEC §3.11)
 
-### 9.1 Migration — `athlete_credits`
+**Revised 2026-05-28.** Under ~20 users, so the prepaid balance + decrement + $0 gate are **deferred**. Build only the tracking: rich per-run cost capture + queryable rollups, so the prepaid price can be set from real data later.
 
-`athlete_credits` does not exist yet. Add a migration:
+### 9.1 Recording cost (built)
 
-```sql
-create table athlete_credits (
-  athlete_id   uuid primary key references athletes(id) on delete cascade,
-  balance_cents integer not null default 0,
-  free_tier    boolean not null default true,   -- first ~20 friends ride free
-  updated_at   timestamptz not null default now()
-);
-```
+`persistRun` writes `agent_runs` from the SDK `result` message: `model`, `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `cost_usd` (the SDK's `total_cost_usd`, straight through), `result_summary`, `finished_at`. The cache-token split is load-bearing — under prompt caching, cache reads dominate input and the bare `input_tokens` won't reconcile with cost. Write one `agent_run_steps` row per captured step (`kind='tool_use'` / `'tool_result'`, `tool_name`, `input_json`, `output_json`).
 
-Keep it minimal — a running balance plus a `free_tier` flag. A top-up ledger / transaction history is a later concern (manual admin top-up for now). RLS: athlete reads own row, service role writes (mirror the `agent_runs` policy comment block).
+`agent_runs.kind` **must** be an allowed value: the CHECK permits only `'daily' | 'adhoc' | 'weekly' | 'plan_validate'`. Map `daily_checkin → 'daily'`, `tg_message → 'adhoc'` (§13). `agent_run_steps.kind` CHECK was realigned to `('tool_use','tool_result')` to match what the worker writes (migration `20260528000001`).
 
-### 9.2 Recording cost
+### 9.2 Rollup views (built)
 
-`persistRun` writes `agent_runs` from the SDK `result` message: `model`, `input_tokens`, `output_tokens`, `cost_usd` (the SDK returns `total_cost_usd` — write it straight through), `result_summary`, `finished_at`. Write one `agent_run_steps` row per tool_use/tool_result from the captured `steps` (`kind='tool'`, `tool_name`, `input_json`, `output_json`).
+Migration `20260528000001_agent_cost_tracking.sql` adds two `security_invoker` views over `agent_runs`:
 
-`kind` **must** be an allowed value: the `agent_runs` CHECK constraint permits only `'daily' | 'adhoc' | 'weekly' | 'plan_validate'`. Map `daily_checkin → 'daily'`, `tg_message → 'adhoc'`. (See §13 — the old code inserts an illegal `'daily_checkin'` and silently fails.)
+- `athlete_cost_daily` — per athlete per athlete-local day: runs, token split, cost.
+- `athlete_cost_rollup` — cumulative + trailing 7d/28d runs and cost, first/last run.
 
-### 9.3 Decrement + the $0 gate
+Query these (Supabase/psql) for cumulative and weekly/daily cost per user.
 
-- After a successful run, `decrementCredits(athleteId, total_cost_usd)` subtracts (cost × markup, rounded to cents) from `balance_cents`, unless `free_tier` is true (free-tier athletes are metered for visibility but not charged).
-- **At dequeue time**, before starting a run, check: if `free_tier` is false and `balance_cents <= 0`, skip the run, send the athlete a top-up message, mark the job complete. A run already in flight always completes (SPEC §3.11 — don't truncate a reply mid-read).
-- Markup factor is a config constant, not a hardcoded number scattered around — one place, easy to set at launch.
+### 9.3 Prepaid balance + decrement + $0 gate (DEFERRED — future #12)
+
+Not built. When the friend set nears ~20, add `athlete_credits` (per-athlete `balance_cents` + `free_tier` flag), decrement by `cost_usd × markup` after each successful run (skip for `free_tier`), and gate at dequeue (`free_tier` false and `balance_cents <= 0` → skip, send top-up, complete the job; never truncate an in-flight run). A `// TODO(#12)` hook in `worker/run-agent.ts` marks the decrement spot. Markup is a single config constant. Use the §9.2 views to set it.
 
 ---
 

@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-05-28 (session 18 — v0.7 architecture pivot: spec + M1 plan rewritten, old single-shot coaching layer decommissioned, specs archived)_
+_Updated: 2026-05-28 (session 18 — v0.7 architecture pivot + worker container built (#11): job_queue drainer, per-athlete folder lifecycle, isolation launch-gate, agent run/persist/send; 34 worker tests green)_
 
 ---
 
@@ -23,7 +23,23 @@ This session's work (all committed):
 - **`@anthropic-ai/claude-agent-sdk` ^0.3.154** added as a dependency (prerequisite-check install).
 - All tests passing after the decommission.
 
-**Next: #11 — build the worker container** (Agent SDK over per-athlete folders, job_queue drainer, isolation guard).
+**Worker container built (#11, this session).** Code-complete and green (typecheck, lint, 401 tests incl. 34 new worker tests). Layout in `worker/`:
+
+- **`config.ts`** — env-derived runtime knobs (`ATHLETE_ROOT`, `COACH_MODEL`, `MAX_TURNS`, `MAX_BUDGET_USD`, poll interval, attempt cap, stale-lock minutes, Strava lookback).
+- **`isolation.ts`** (launch gate) — `ALLOWED_TOOLS = Read/Write/Edit/Glob/Grep/WebSearch` (**Bash denied entirely** — deviation, see below). `makeIsolationGuard(dir)` denies any file-tool path escaping the athlete folder (traversal, absolute, symlink via realpath of the longest existing prefix) and denies every non-allowlisted tool. `scrubbedEnv()` hands the subprocess only PATH/HOME/ANTHROPIC_API_KEY — no Supabase or athlete secrets.
+- **`folder.ts`** — `hydrate` (rm+mkdir, write each `memory_files` row, plus input-only `marathon_training_plan.json` + `strava_recent.json`, sha256 per file), `syncBack` (upsert only changed/new files, skip input-only + dotfiles), `cleanup`.
+- **`strava.ts`** — `buildStravaContext` pre-fetches 14d of activities + 7d/28d summaries to the folder; degrades (no retry loop) on a broken connection.
+- **`system-prompt.ts`** + **`prompts/coach.md`** — coach brief ported from `~/projects/health-agent`, reframed for single-shot non-interactive runs; `buildPrompt` builds the daily-morning trigger / wraps the ad-hoc message with athlete-local date.
+- **`run-agent.ts`** — the shared run: hydrate → `query()` (cwd=folder, hermetic `settingSources:[]`, isolation guard, `maxTurns`/`maxBudgetUsd`, scrubbed env) → syncBack (only on clean run) → persist → send → cleanup in `finally`. Soft-fallback reply on failure. `// TODO(#12)` credit-decrement hook left in place.
+- **`persist.ts`** — records `agent_runs` (kind `daily`/`adhoc` — the allowed CHECK values) + one `agent_run_steps` row per tool call; never throws (delivery must not block on logging).
+- **`send.ts`** — chunks at 4096, sends via its own grammy Bot, persists each outbound to `messages`, shadow-bccs David inside the 7-day window.
+- **`poll.ts`** — `claimJob` (calls `claim_next_job` RPC), `dispatch` (routes by kind), `completeJob`, `failJob` (exponential backoff under the cap; terminal DEAD sentinel + David alert at the cap).
+- **`index.ts`** — `import './env'` first, then the poll loop with greedy drain + SIGTERM/SIGINT graceful shutdown (finishes the in-flight job, then exits).
+- **`env.ts`** — dotenv side-effect (loads `.env.local` before config reads env).
+- **`Dockerfile`** (Node 24-slim + ripgrep, `tsx worker/index.ts`), **`.dockerignore`**, **`fly.toml`** (one always-on machine, `athlete_data` volume at `/data`, no public service), `worker:dev`/`worker:start` npm scripts.
+- **Migration** `20260528000000_claim_next_job.sql` (`FOR UPDATE SKIP LOCKED` atomic single-row claim) applied locally; types regenerated.
+
+**Not done in #11 (intentional):** the live Fly.io container smoke test (M1 §3.1 — the launch gate equivalent of the Vercel binary check) requires an actual deploy with `fly secrets`; David runs that. The metering decrement is stubbed for #12.
 
 ### Earlier (pre-pivot, still valid)
 
@@ -98,7 +114,7 @@ This session's work (all committed):
 ### Week 3 — Daily agent loop + ad-hoc Telegram replies
 
 - [~] Daily cron worker: existing `/api/cron/daily-checkin` runs the agent inline. **v0.7: cron becomes an enqueuer** — it inserts `job_queue` rows; the Fly.io worker drains and runs the agent. (Rework tracked in M1 plan §7, #13.)
-- [ ] **v0.7 #11** Worker container: Agent SDK + built-in tools over a per-athlete folder hydrated from `memory_files`, `job_queue` drainer (`FOR UPDATE SKIP LOCKED`), multi-tenant isolation guard (per-athlete `cwd`, confined Bash, deny-by-default).
+- [x] **v0.7 #11** Worker container: Agent SDK + built-in tools over a per-athlete folder hydrated from `memory_files`, `job_queue` drainer (`FOR UPDATE SKIP LOCKED`), multi-tenant isolation guard (per-athlete `cwd`, deny-by-default, Bash denied entirely). Code-complete + green; live Fly.io smoke test pending a real deploy.
 - [x] Daily wellness battery in morning check-in — `/checkin` state machine (Prompt 15).
 - [ ] Ad-hoc reply mode — folded into the worker (a `tg-message` job kind), not a separate Haiku/Sonnet router.
 - [ ] Per-athlete advisory lock for concurrent write safety (folder-level in the worker).
@@ -150,16 +166,26 @@ This session's work (all committed):
 
 ---
 
+## Cost tracking (precursor to #12, this session)
+
+**Full prepaid metering (#12) is deferred** — we're under 20 users, so the `athlete_credits` balance + decrement + $0 gate aren't needed yet. Instead we added queryable per-user token/cost tracking so we can size the feature properly before building it. Migration `20260528000001_agent_cost_tracking.sql`:
+
+- Added `cache_creation_input_tokens` + `cache_read_input_tokens` to `agent_runs`; `worker/persist.ts` now populates them. (Previously only `input_tokens` was stored — once prompt caching lands in Week 4, cache reads dominate input volume and stored tokens wouldn't reconcile with `cost_usd`.)
+- Fixed a latent bug: `agent_run_steps.kind` CHECK was `('tool','llm')` but the worker writes `'tool_use'/'tool_result'`, so every step insert was failing silently. Constraint realigned to the values actually written.
+- Views (both `security_invoker`): **`athlete_cost_daily`** (per athlete per athlete-local day: runs, tokens, cache split, cost) and **`athlete_cost_rollup`** (cumulative + trailing 7d/28d runs & cost, first/last run).
+
+The `// TODO(#12)` decrement hook in `worker/run-agent.ts` stays until the full feature is built.
+
+---
+
 ## Likely next task
 
-**#11 — Build the worker container** (`worker/`), per `Specs/M1_IMPLEMENTATION_PLAN.md`:
+**#13 — Wire cron + Telegram to the worker, end-to-end** (M1 plan §7, §10):
 
-1. Scaffold `worker/` (index.ts, poll.ts, jobs/{daily-checkin,tg-message}.ts, run-agent.ts, folder.ts, isolation.ts, strava-fetch.ts, Dockerfile, fly.toml).
-2. Folder lifecycle: hydrate per-athlete `cwd` from `memory_files`, run the agent, diff + sync changed files back.
-3. Isolation guard (launch gate): per-athlete `cwd`, `canUseTool` confining Bash + rejecting path escapes, scrubbed subprocess env.
-4. `query()` with built-in tools + the system prompt ported from `~/projects/health-agent` CLAUDE.md.
-5. `job_queue` drainer with `FOR UPDATE SKIP LOCKED`.
+1. Flip `/api/cron/daily-checkin` and the Telegram webhook to *enqueue* `job_queue` rows instead of running anything inline.
+2. Run the live Fly.io container smoke test (M1 §3.1 launch gate — binary spawns + returns inside the container). **Blocker if it fails the way Vercel did.**
+3. End-to-end test on David as athlete 1: daily job → coaching read that doesn't re-prescribe a completed run; ad-hoc message → reply.
 
-Then **#12** (metering + `athlete_credits` prepaid balance) and **#13** (wire cron-as-enqueuer + Telegram to the worker, end-to-end test).
+**#12 (full prepaid metering) remains deferred** until the friend set approaches ~20; revisit with real numbers from the cost-tracking views.
 
 **Known deferred issue**: `agent_runs.kind` CHECK constraint allows only `('daily', 'adhoc', 'weekly', 'plan_validate')`. The worker must reuse `'daily'`/`'adhoc'` rather than introduce a new kind without a spec-level decision (see M1 plan §13).

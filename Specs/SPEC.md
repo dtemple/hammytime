@@ -22,6 +22,11 @@ This doc covers: sequencing + rough costing, technical implementation plan, open
   - **Revenue model (new):** free for the first ~20 friends, then **prepaid pay-per-usage** — an athlete pre-loads credit (e.g. $10) that draws down by agent usage. This makes per-run token/cost metering a first-class feature. `agent_runs` becomes the billing ledger; a new `athlete_credits` balance is decremented per run. Payments move from "out of scope" (v0.3) to **in scope from ~20 users**.
   - **Vercel keeps:** the web app (signup, Strava OAuth handoff, plan view, admin), the Telegram webhook receiver, and the cron *enqueuer*. Only agent *execution* leaves Vercel.
 
+- **v0.7.1 (2026-05-28) — metering deferred to tracking-only; coaching made conversational.**
+  - **Metering:** the prepaid `athlete_credits` balance, per-run decrement, and $0 gate are **deferred** until the friend set nears ~20. We're far under that, so building them now would be guessing. Instead we record cost richly (incl. cache-token split) and expose `athlete_cost_daily` / `athlete_cost_rollup` views, so the price can be set from real data. A `// TODO(#12)` hook marks the decrement spot. See §3.11.
+  - **Conversational coaching:** the agent should engage, not just broadcast. It may ask clarifying/subjective questions and end a turn on an open question; the athlete's answer arrives as the next message → next run (Telegram is turn-based, so this reads as live back-and-forth). It answers questions succinctly and proactively suggests ways to get more from coaching. Each ad-hoc run loads recent message history so the thread is continuous. (Button-based replies, to spare typing, are a planned follow-on — not v1.) The only hard limit: a single run can't block mid-turn waiting for a reply.
+  - **Daily check-in shape changed:** the morning push is now two messages — (1) a coaching/training message grounded in recent data (Strava, today's plan, lack of progress), free to end on an open-ended question; then (2) the wellness battery, **cut to 2 prompts: overall readiness 1–10 and soreness 1–10** (optional body-part tag kept inline). The optional one-line note is removed. This supersedes the 3-item battery in CLAUDE.md §4 and the 4-item sketch in §8.6.
+
 - **v0.6 (2026-05-22) — paste-page removal + fork conditional.**
   - Removed `/p/[token]` paste-page route and `/api/plans/paste` endpoint (dead surface until server-generate ships).
   - `handleBuildPath` no longer mints `plan_paste` tokens; cover note no longer includes a paste URL. Still creates `plans` + `plan_versions` (status="awaiting_paste") rows and sends the BYO template. Dormant until server-generate replaces it pre-launch.
@@ -65,7 +70,7 @@ A multi-tenant version of the existing coach that any of your runners can sign u
 - Telegram bot for daily updates + ad-hoc check-ins (the actual product surface).
 - Adaptive daily-prescription modifications driven by Strava signal + daily wellness battery. The plan itself stays static between versions; only the daily prescription bends.
 - Injury-aware prehab prescriptions.
-- Daily wellness battery (readiness, soreness + body part, optional note) per §8.6.
+- Daily wellness battery — 2 prompts: readiness 1–10, soreness 1–10 (+ optional body-part tag). Sent after the morning coaching message. (Reduced from the 3–4 item sketch in §8.6 — see v0.7.1 change-log.)
 - "Shadow bcc" — every outbound bot message also delivered to David's personal Telegram for the first 7 days per athlete, so quality issues get caught fast without a blocking approval step.
 
 **v1 explicitly out of scope (defer):**
@@ -193,7 +198,7 @@ Final step output: bot creates a `plan_versions` row with `status = awaiting_pas
 - Daily agent run per §3.7: hydrate the athlete's `memory_files` to a per-athlete working directory, run the Agent SDK with built-in tools (it pulls Strava via a Bash script and writes its own files), sync changed files back to `memory_files`, send to Telegram. The agent emits prose directly — no structured-JSON validation step in v0.7 (§3.7).
 - Memory file storage: row-per-file in Postgres (`memory_files`) is the source of truth; hydrated to disk per run and synced back after (v0.7 §3.3). Files mirror today's eight-file layout from `CLAUDE.md` (checkin_log, athlete_profile, race_calendar, personal_records, open_questions, wellness_log, injury_log, weekly_survey_log) — though weekly_survey_log stays empty in v1 since Sunday survey is deferred.
 - Agent runtime: Claude Agent SDK in the Fly.io worker, using its **built-in tools** (Read, Write, Edit, Glob, Grep, Bash, WebSearch) over the athlete's folder — no custom MCP tool catalog (v0.7 §3.1). Strava data comes from a Bash-invoked fetch script.
-- **Daily wellness battery** wired into the morning Telegram check-in per §8.6: readiness 1–10, soreness 1–10 + body part, optional note.
+- **Daily wellness battery** sent after the morning coaching message: 2 prompts — readiness 1–10, soreness 1–10 (+ optional body-part tag). No free-text note. (See v0.7.1 change-log; supersedes the §8.6 sketch.)
 - Ad-hoc reply mode: inbound TG message → enqueue `tg_message_received` → handler routes to the agent in lighter context (last 3 days of activity + Haiku-routed subset of memory). Per-athlete advisory lock prevents collisions with the daily run.
 
 **Out-of-pocket:** ~$10–30 (you running the loop on yourself + one or two test users).
@@ -410,7 +415,7 @@ Runs in the Fly.io worker, which dequeues a `daily_checkin` job for each due ath
 2. **Run the Agent SDK** (`query()`) with built-in tools, `cwd` set to that directory. The agent reads its files, runs the Strava script via Bash to pull the last 14 days (+ 7d/28d summaries + marathon prediction), web-searches as needed, reasons, and writes back to its files — the same loop the personal coach runs locally. No custom MCP tools; the SDK's built-ins do the work. `maxTurns` and a per-run cost budget cap the loop.
 3. **Sync back:** changed files in the working directory are written back to `memory_files` (atomic per athlete).
 4. The agent's final message is the athlete-facing response. Render into Telegram-friendly markdown; send; mirror to David's Telegram if this athlete is still in their 7-day shadow window.
-5. **Persist** `agent_runs` (model, tokens, cost) + optionally `agent_run_steps` from the SDK message stream. Decrement the athlete's prepaid balance (§3.11).
+5. **Persist** `agent_runs` (model, token split incl. cache, cost) + `agent_run_steps` from the SDK message stream. (Prepaid-balance decrement is deferred — see §3.11; a `// TODO(#12)` hook marks the spot.)
 
 Idempotency and concurrency are unchanged from prior versions: the `daily_checkin` job is keyed `daily-{athlete_id}-{YYYY-MM-DD}` (unique in `job_queue`), and a per-athlete advisory lock prevents a daily run and an ad-hoc reply from colliding on the same folder/memory rows.
 
@@ -444,13 +449,14 @@ Your own coach in this repo becomes "athlete 1" in the new system. Two phases un
 
 ### 3.11 Billing & metering (v0.7)
 
-Free for the first ~20 friends, then **prepaid pay-per-usage**. The mechanism:
+Free for the first ~20 friends, then **prepaid pay-per-usage**.
 
-- **Ledger:** `agent_runs` already records `model`, `input_tokens`, `output_tokens`, `cost_usd` per run. The SDK returns usage and `total_cost_usd` on its result message — write those straight through. This is the per-run cost of record.
-- **Balance:** a new `athlete_credits` balance (cents), topped up when an athlete pre-loads credit, decremented by `agent_runs.cost_usd` after each run.
-- **At $0 mid-conversation:** finish the in-flight run (don't truncate a reply the athlete is reading), then refuse new runs with a top-up message until they reload. Enforced at dequeue time — before starting a run, check balance > 0; the run already in flight completes.
-- **Markup:** the prepaid price can include a margin over raw token cost to cover the worker host and overhead; the exact number is a launch-time decision, not an architecture one.
-- **Out of scope for the mechanism itself:** the payment processor integration (Stripe et al.) is deferred until just before the ~20-user threshold. Until then, `athlete_credits` can be topped up manually via the admin console. Build the metering + balance now (it's nearly free to add to the run loop); wire real payments when there's a 20th user.
+**Posture (v0.7, revised 2026-05-28): tracking now, balance/gate deferred.** We're well under 20 users, so the prepaid balance, per-run decrement, and $0 gate are **not built yet** — building them now would be designing against guesses. Instead we record cost richly and make it queryable, so the prepaid feature can be priced from real data when the friend set approaches ~20.
+
+- **Ledger (built):** `agent_runs` records `model`, `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, and `cost_usd` per run. The SDK returns usage and `total_cost_usd` on its result message; the worker writes those straight through. The cache-token split matters: once the system prompt + memory files are prompt-cached, cache reads (~10× cheaper) dominate input volume, and without the split, summed tokens won't reconcile with `cost_usd`.
+- **Rollup views (built):** `athlete_cost_daily` (per athlete per athlete-local day) and `athlete_cost_rollup` (cumulative + trailing 7d/28d runs and cost). These are the design input for the eventual price.
+- **Balance + decrement + $0 gate (deferred):** a future `athlete_credits` balance (cents) decremented by `cost_usd` per run; at $0, finish the in-flight run, then refuse new runs at dequeue time with a top-up message. A `// TODO(#12)` hook is left in `worker/run-agent.ts` where the decrement will go. Revisit as the friend set nears ~20, using the rollup views to set the markup.
+- **Markup + payments (deferred):** the prepaid price includes a margin over raw token cost; the exact number is a launch-time decision. Payment-processor integration (Stripe et al.) and manual top-ups via the admin console land with the balance work, not before.
 
 Decisions that aren't blocking week 0 but need to be answered by week 2–3. Several from v0.1 have been resolved in v0.2 (§8) or v0.3 — those are marked **[resolved]** with the resolution inline.
 

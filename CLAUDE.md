@@ -89,7 +89,7 @@ These decisions are final for v1. Do not reopen them without a spec update.
 - **Prepaid pay-per-usage from ~20 users (v0.7).** Free for the first ~20 friends; after that an athlete pre-loads credit drawn down by usage. `agent_runs` is the cost ledger; a new `athlete_credits` balance is decremented per run. At $0: finish the in-flight run, then block until top-up.
 - **No Supabase Auth magic-link.** Identity is `telegram_chat_id` ↔ `athlete_id`. The web app reads athlete identity from a session cookie set after Telegram linking. The `/signup` page validates against `friend_allowlist` and mints a one-time `link_token`.
 - **Shadow-bcc to David for first 7 days per athlete.** Every outbound bot message is also delivered to David's personal Telegram for the first 7 days per athlete (`athletes.shadow_bcc_until`). There is no 3-day human-in-the-loop approval flow.
-- **Daily wellness battery on.** Morning Telegram check-in includes: readiness 1–10, soreness 1–10 + optional body-part tag, optional one-line note.
+- **Conversational coaching + daily wellness battery on.** The agent engages — it may ask subjective/clarifying questions and end a turn on an open question (the answer comes back as the next message → next run). The morning check-in is two messages: (1) a coaching/training message grounded in recent data, free to end on a question; then (2) the wellness battery, **2 prompts only: readiness 1–10, soreness 1–10 + optional body-part tag** (no free-text note). See SPEC v0.7.1 change-log.
 - **Sunday weekly survey off in v1.** The `weekly_survey_log.md` memory file exists in the schema but stays empty. The Sunday survey, plan-change-proposal 👍/👎 flow, and `memory_file_revisions` audit table are all deferred to v1.5.
 
 ---
