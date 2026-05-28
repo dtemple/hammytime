@@ -7,9 +7,9 @@ import { refreshAccessToken } from './client';
 // ---------------------------------------------------------------------------
 
 /**
- * Thrown by runDailyCheckin when fetchRecentActivities fails (token expired or
- * revoked). Signals the dispatcher to send a refusal message rather than
- * proceeding with a degraded agent run.
+ * Thrown when fetchRecentActivities fails because the Strava token expired or
+ * was revoked. The worker's Strava-fetch script catches it and surfaces the gap
+ * to the athlete rather than coaching on stale data (SPEC §5.5).
  */
 export class StravaTokenBrokenError extends Error {
   constructor(cause?: unknown) {

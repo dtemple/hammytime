@@ -24,6 +24,7 @@
     "dev:all": "concurrently --names \"db,web,bot\" --prefix-colors \"cyan,magenta,yellow\" \"supabase start && tail -f /dev/null\" \"next dev\" \"npm:bot:dev\""
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.154",
     "@anthropic-ai/sdk": "^0.96.0",
     "@sentry/nextjs": "^10.53.1",
     "@supabase/supabase-js": "^2.106.0",

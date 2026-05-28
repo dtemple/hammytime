@@ -1,31 +1,34 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-05-26 (session 16 — Prompt 18.5: deploy audit + grammy webhook init fix; laptop-shut operation live)_
+_Updated: 2026-05-28 (session 18 — v0.7 architecture pivot: spec + M1 plan rewritten, old single-shot coaching layer decommissioned, specs archived)_
 
 ---
 
 ## End goal
 
-A multi-tenant Telegram-based marathon coaching bot for ~5–25 friends. Daily coaching loop powered by Claude Agent SDK, Strava activity data, and per-athlete memory files. Athlete onboards and communicates entirely in Telegram; a minimalist web app handles allowlist sign-up, Strava OAuth, and a read-only plan view.
+A multi-tenant Telegram-based marathon coaching bot for ~5–25 friends. The coaching agent is the **Claude Agent SDK with its built-in tools (Read/Write/Edit/Glob/Grep/Bash/WebSearch), running in a Fly.io worker container against a per-athlete folder of files** — a near-1:1 port of David's personal coach in `~/projects/health-agent`. A daily Vercel cron *enqueues* jobs into a Postgres `job_queue`; the worker drains them (`FOR UPDATE SKIP LOCKED`), hydrates the athlete's folder from `memory_files`, runs the agent, and syncs changed files back. Athlete onboards and communicates entirely in Telegram; a minimalist web app handles allowlist sign-up, Strava OAuth, and a read-only plan view.
 
 ---
 
 ## Current status
 
-**Prompt 18.5 complete — production deploy audit + grammy webhook init fix. Bot is live in webhook mode on Vercel; `/ping` and `/checkin` verified end-to-end with local dev stack off.**
+**v0.7 architecture pivot (2026-05-28).** The coaching agent moved from "Claude Agent SDK in a Vercel serverless function with a hand-written custom-tool catalog" to "Agent SDK with built-in tools in a Fly.io worker container, one folder per athlete." Forced by a hard constraint: the SDK spawns a ~240 MB native binary that exceeds Vercel's 250 MB function limit. The custom-tool path was also the wrong design — David's personal coach already works as a plain Claude Code session over a folder of files. The lesson is captured in the wiki at `~/projects/wiki/wiki/claude-agent-sdk-deployment.md`.
 
-Bug fixed: `src/app/api/tg/webhook/route.ts` was calling `bot.handleUpdate()` without first calling `bot.init()`. Polling path inits implicitly via `bot.start()`, so the bug only surfaced in production. Fix is two lines — `bot.init()` is idempotent.
+This session's work (all committed):
 
-**Prompt 18 complete — Strava is a hard requirement; fail loudly when missing or broken.**
+- **`Specs/SPEC.md`** reconciled to v0.7 — fixed stale Week-3 sequencing that still described custom tools + JSON validation; now describes enqueue/drain, built-in tools, hydrate/sync-back, prose-not-JSON.
+- **`Specs/M1_IMPLEMENTATION_PLAN.md`** fully rewritten for the container model (15 sections: deliverable, prereq-check gate, architecture, `worker/` layout, folder lifecycle, isolation model, strava-fetch script, cron-as-enqueuer, system-prompt port, metering + `athlete_credits`, Telegram integration, tests, decommissioning, the kind-constraint bug, deferred, done-criteria).
+- **Old single-shot coaching layer deleted (#10):** `src/server/agent/daily-checkin.ts`, its system prompt, its tests, and `/api/dev/agent-smoke`. `src/server/telegram/checkin/dispatcher.ts` is now wellness-only (logs the battery, no agent call). `src/server/strava/activities.ts` exports (`fetchRecentActivities`, `hasStravaConnection`, `StravaTokenBrokenError`, `StravaActivitySummary`) are retained for the worker's strava-fetch script to reuse.
+- **Specs decluttered:** pre-v0.7 prompts moved to `Specs/archive/` (CONVERSATIONAL_COACH.md, M1.md, M1.5.md, M2.md) with a README explaining they're superseded.
+- **`@anthropic-ai/claude-agent-sdk` ^0.3.154** added as a dependency (prerequisite-check install).
+- All tests passing after the decommission.
 
-The graceful-degradation path from Prompt 17 is removed. The agent is never invoked without valid Strava data — both missing-connection and broken-token paths now send a two-sentence refusal to Telegram, record an aborted `agent_runs` row with zero tokens, and stop. Wellness data is always captured first.
+**Next: #11 — build the worker container** (Agent SDK over per-athlete folders, job_queue drainer, isolation guard).
 
-Key artifacts:
+### Earlier (pre-pivot, still valid)
 
-- `src/server/strava/activities.ts` — added `StravaTokenBrokenError` (typed error for broken-token abort)
-- `src/server/agent/daily-checkin.ts` — removed `stravaFallback`/`stravaError` mechanism; `fetchRecentActivities` is now the first async operation; throws `StravaTokenBrokenError` on failure before any LLM work; `persistRun` exported
-- `src/server/telegram/checkin/dispatcher.ts` — gates `runDailyCheckin` on `hasStravaConnection`; inserts aborted `agent_runs` row on no-connection; catches `StravaTokenBrokenError` for broken-token path
-- Tests: 329 passing (removed 3 degradation tests, added 3 abort tests)
+- **Prompt 18.5** — production deploy audit + grammy webhook `bot.init()` fix. Bot is live in webhook mode on Vercel; `/ping` and `/checkin` verified end-to-end.
+- **Prompt 18** — Strava treated as a hard requirement; `StravaTokenBrokenError` added. (The agent-invocation half of this is superseded by v0.7 — the worker now owns the Strava fetch and the no-data refusal.)
 
 ---
 
@@ -80,7 +83,7 @@ Key artifacts:
 - [ ] **Day 1.5** End-to-end self-test: re-onboard from scratch, verify all DB rows, fix conversational tone.
 - [x] **Prompt 14b** v0.6 schema verify + plan adapter + import script.
 - [x] **Prompt 15** `/checkin` command + wellness battery state machine + `wellness_log.md` write.
-- [x] **Prompt 16** Daily coaching response after wellness battery — single-call Claude runtime, `checkin_log.md` append, `agent_runs` persist, Sentry error fallback.
+- [x] **Prompt 16** Daily coaching response after wellness battery — single-call Claude runtime. **Decommissioned in the v0.7 pivot (#10):** the single-shot layer is deleted; the dispatcher is wellness-only and the worker owns the coaching response.
 
 ### Week 2 — Strava OAuth + BYO-plan paste-back
 
@@ -94,11 +97,11 @@ Key artifacts:
 
 ### Week 3 — Daily agent loop + ad-hoc Telegram replies
 
-- [x] Daily cron worker: single-athlete `/api/cron/daily-checkin` at `30 13 * * *` UTC (= 6:30 AM PDT / 5:30 AM PST). `job_queue` enqueue-by-local-window is deferred until the second athlete onboards.
-- [ ] Daily agent run per §3.7 (memory load, Strava pull, Claude Agent SDK, structured response, memory write-back, Telegram send, shadow-bcc mirror).
-- [x] Daily wellness battery in morning check-in — `/checkin` state machine (Prompt 15). Agent reads from `wellness_log.md` in Prompt 16.
-- [ ] Ad-hoc reply mode (lighter context, Haiku router, Sonnet response).
-- [ ] Per-athlete advisory lock for concurrent write safety.
+- [~] Daily cron worker: existing `/api/cron/daily-checkin` runs the agent inline. **v0.7: cron becomes an enqueuer** — it inserts `job_queue` rows; the Fly.io worker drains and runs the agent. (Rework tracked in M1 plan §7, #13.)
+- [ ] **v0.7 #11** Worker container: Agent SDK + built-in tools over a per-athlete folder hydrated from `memory_files`, `job_queue` drainer (`FOR UPDATE SKIP LOCKED`), multi-tenant isolation guard (per-athlete `cwd`, confined Bash, deny-by-default).
+- [x] Daily wellness battery in morning check-in — `/checkin` state machine (Prompt 15).
+- [ ] Ad-hoc reply mode — folded into the worker (a `tg-message` job kind), not a separate Haiku/Sonnet router.
+- [ ] Per-athlete advisory lock for concurrent write safety (folder-level in the worker).
 
 ### Week 4 — Self-test + polish
 
@@ -149,14 +152,14 @@ Key artifacts:
 
 ## Likely next task
 
-**Manual verification for Prompt 18** (Strava hard requirement):
+**#11 — Build the worker container** (`worker/`), per `Specs/M1_IMPLEMENTATION_PLAN.md`:
 
-1. `npm run dev:all` — start Supabase + Next.js + polling bot
-2. Normal flow: `/checkin` → wellness battery → coaching response with Strava data.
-3. DELETE `oauth_tokens` row in Supabase Studio. `/checkin` → wellness battery completes → refusal message arrives mentioning `/connect_strava`. Confirm `wellness_log.md` has entry, `checkin_log.md` does NOT, `agent_runs` has `strava_not_connected` row.
-4. Reconnect via `/connect_strava`. `/checkin` again → normal flow resumes.
-5. Broken-token test: corrupt `refresh_token_enc` in DB. `/checkin` → wellness battery → broken-token refusal. `agent_runs` has `strava_token_broken` row.
+1. Scaffold `worker/` (index.ts, poll.ts, jobs/{daily-checkin,tg-message}.ts, run-agent.ts, folder.ts, isolation.ts, strava-fetch.ts, Dockerfile, fly.toml).
+2. Folder lifecycle: hydrate per-athlete `cwd` from `memory_files`, run the agent, diff + sync changed files back.
+3. Isolation guard (launch gate): per-athlete `cwd`, `canUseTool` confining Bash + rejecting path escapes, scrubbed subprocess env.
+4. `query()` with built-in tools + the system prompt ported from `~/projects/health-agent` CLAUDE.md.
+5. `job_queue` drainer with `FOR UPDATE SKIP LOCKED`.
 
-**Known deferred issue**: `agent_runs.kind` CHECK constraint only allows `('daily', 'adhoc', 'weekly', 'plan_validate')` but code inserts `kind='daily_checkin'`. The insert fails silently (non-fatal catch). Fix requires a migration adding `'daily_checkin'` to the constraint.
+Then **#12** (metering + `athlete_credits` prepaid balance) and **#13** (wire cron-as-enqueuer + Telegram to the worker, end-to-end test).
 
-**Prompt 19 candidate**: Daily cron worker — enqueue `daily_checkin` jobs for athletes in the 6:30–7:00 AM local window. Drain via Vercel cron + `job_queue` table (FOR UPDATE SKIP LOCKED).
+**Known deferred issue**: `agent_runs.kind` CHECK constraint allows only `('daily', 'adhoc', 'weekly', 'plan_validate')`. The worker must reuse `'daily'`/`'adhoc'` rather than introduce a new kind without a spec-level decision (see M1 plan §13).

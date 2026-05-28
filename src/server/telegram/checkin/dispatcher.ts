@@ -1,5 +1,4 @@
 import type { Context } from 'grammy';
-import * as Sentry from '@sentry/nextjs';
 import { supabaseAdmin } from '@/lib/db';
 import type { Database } from '@/lib/db-types';
 import { sendAndLog } from '../bot';
@@ -15,8 +14,6 @@ import {
   isConcerning,
 } from './wellness';
 import type { WellnessState, WellnessEntry } from './types';
-import { runDailyCheckin, appendCheckinEntry, persistRun } from '@/server/agent/daily-checkin';
-import { hasStravaConnection, StravaTokenBrokenError } from '@/server/strava/activities';
 
 type AthleteRow = Database['public']['Tables']['athletes']['Row'];
 
@@ -84,74 +81,17 @@ async function onWellnessComplete(
   athlete: AthleteRow,
   entry: WellnessEntry,
 ): Promise<void> {
-  // Persist wellness first — this data has standalone value regardless of
-  // whether the agent can run.
+  // Log wellness and clear the battery state. The morning coaching read no
+  // longer hangs off /checkin — it runs as a queued daily job in the worker
+  // (SPEC §3.7). This handler only records the wellness signal.
   await appendWellnessRow(athlete.id, entry);
   await writeCheckinState(athlete.id, {});
 
-  // Gate on Strava before spending LLM tokens. If no connection, tell the
-  // athlete and stop — don't invoke the agent.
-  const stravaConnected = await hasStravaConnection(athlete.id);
-  if (!stravaConnected) {
-    await sendAndLog(
-      athlete.id,
-      chatId,
-      `Logged your wellness — readiness ${entry.readiness}, soreness ${entry.soreness}. I can't coach you without your training data, though. Run /connect_strava to wire it up, then send me /checkin again.`,
-    );
-    await persistRun(
-      athlete.id,
-      new Date().toISOString(),
-      0,
-      0,
-      'aborted: no strava connection',
-      'strava_not_connected',
-    ).catch(() => {});
-    return;
-  }
-
-  const wellnessInput = {
-    readiness: entry.readiness,
-    soreness_score: entry.soreness,
-    soreness_body_part: entry.body_part !== '—' ? entry.body_part : null,
-    note: entry.note !== '—' ? entry.note : null,
-  };
-
-  let telegramMessage: string;
-  let checkinLogEntry: string;
-
-  try {
-    ({ telegramMessage, checkinLogEntry } = await runDailyCheckin(athlete.id, wellnessInput));
-  } catch (err) {
-    if (err instanceof StravaTokenBrokenError) {
-      // runDailyCheckin already wrote the agent_runs row before throwing.
-      await sendAndLog(
-        athlete.id,
-        chatId,
-        `Logged your wellness — readiness ${entry.readiness}, soreness ${entry.soreness}. Your Strava connection broke (token expired or revoked) — run /connect_strava again to reconnect, then send /checkin.`,
-      );
-      return;
-    }
-    Sentry.captureException(err);
-    await sendAndLog(
-      athlete.id,
-      chatId,
-      "Logged your check-in. Coaching response delayed — I'll follow up shortly.",
-    );
-    return;
-  }
-
-  // Append to checkin_log.md before sending so the log stays consistent even
-  // if Telegram delivery fails.
-  const { date } = nowInTimezone(athlete.timezone);
-  await appendCheckinEntry(athlete.id, date, checkinLogEntry).catch((err) => {
-    Sentry.captureException(err);
-  });
-
-  // Chunk at 4096 chars (Telegram hard limit).
-  const CHUNK = 4096;
-  for (let i = 0; i < telegramMessage.length; i += CHUNK) {
-    await sendAndLog(athlete.id, chatId, telegramMessage.slice(i, i + CHUNK));
-  }
+  await sendAndLog(
+    athlete.id,
+    chatId,
+    `Logged — readiness ${entry.readiness}, soreness ${entry.soreness}.`,
+  );
 
   if (
     isConcerning(entry.readiness, entry.soreness, entry.body_part !== '—' ? entry.body_part : null)

@@ -2,12 +2,25 @@
 
 **Author:** dtemple
 **Date:** 2026-05-18 (v0.3); 2026-05-07 (v0.1)
-**Status:** draft v0.6
-**Constraints baked in:** friends-only audience (~5–25), solo founder full-time, free for friends, 4–6 week launch, advice quality non-negotiable.
+**Status:** draft v0.7
+**Constraints baked in:** friends-only audience (~5–25 at launch), solo founder full-time, free for the first ~20 friends then prepaid pay-per-usage, 4–6 week launch, advice quality non-negotiable.
 
 This doc covers: sequencing + rough costing, technical implementation plan, open questions, technical risks, business risks. Built off the existing personal coach in this repo (`marathon_training_plan.json` + five memory files + Strava/Garmin/Claude agent loop).
 
 ### Change log
+
+- **v0.7 (2026-05-28) — agent runtime moves to a worker container (the big one).**
+  - **Why:** the Claude Agent SDK can't run inside a Vercel serverless function. The SDK spawns a native `claude` binary as a subprocess; the linux-x64 binary is ~240 MB uncompressed and Vercel's per-function uncompressed limit is 250 MB (not configurable, enforced by AWS). There's no room for the binary plus the Next.js runtime and deps. This is not a packaging bug — both Anthropic's hosting guide and Vercel's own KB document that the Agent SDK is a **long-running process meant to run in a container**, not a function.
+  - **What changes:** the agent runtime moves from "Agent SDK in a Vercel serverless function" to "**Agent SDK with its built-in tools, running in a Fly.io worker container, one working directory per athlete**." This is a near-1:1 port of the personal coach in `~/projects/health-agent`: a folder of markdown/JSON files + Claude Code's built-in Read/Write/Edit/Glob/Grep/Bash/WebSearch tools + a `CLAUDE.md`-style system prompt + a Strava-fetch script. The agent improvises with general-purpose tools instead of relying on a fixed set of hand-written custom tools — which is the capability that makes the local experience good.
+  - **What this deletes vs. the prior plan:** no custom in-process MCP tool catalog, no `memory-io` read/write layer, no hand-rolled agent loop. Built-in tools replace all of it. The single-shot `agent/daily-checkin.ts` LLM call is also retired.
+  - **Decisions locked (2026-05-28):**
+    - **File storage:** `memory_files` table stays the durable source of truth. Each run hydrates the athlete's folder from `memory_files` to the worker's disk, the agent reads/writes files freely, then changed files sync back to `memory_files`. No new storage product; reuses the `import-memory-files` script.
+    - **Scheduling:** the Vercel cron stays but only *enqueues* daily jobs into `job_queue`. The worker drains `job_queue` (with `FOR UPDATE SKIP LOCKED`) for both daily and ad-hoc runs — one execution path.
+    - **Host:** Fly.io. Cheap always-on machines, first-class persistent volumes, and a clean path from one machine to a worker pool behind the queue as athlete count grows.
+    - **Billing at $0:** finish the in-flight run (don't cut off mid-reply), then block new runs with a top-up message until the athlete reloads credit.
+    - **Isolation:** per-athlete `cwd`; Bash restricted to the athlete's folder plus the Strava-fetch script; deny-by-default on anything network/destructive. Multi-tenant isolation (one athlete's agent must never read another's folder) is the real new engineering — it replaces "endless edge-case custom tools."
+  - **Revenue model (new):** free for the first ~20 friends, then **prepaid pay-per-usage** — an athlete pre-loads credit (e.g. $10) that draws down by agent usage. This makes per-run token/cost metering a first-class feature. `agent_runs` becomes the billing ledger; a new `athlete_credits` balance is decremented per run. Payments move from "out of scope" (v0.3) to **in scope from ~20 users**.
+  - **Vercel keeps:** the web app (signup, Strava OAuth handoff, plan view, admin), the Telegram webhook receiver, and the cron *enqueuer*. Only agent *execution* leaves Vercel.
 
 - **v0.6 (2026-05-22) — paste-page removal + fork conditional.**
   - Removed `/p/[token]` paste-page route and `/api/plans/paste` endpoint (dead surface until server-generate ships).
@@ -41,7 +54,7 @@ This doc covers: sequencing + rough costing, technical implementation plan, open
 
 ## 1. Product shape (what we're actually building)
 
-A multi-tenant version of the existing coach that any of your runners can sign up for, onboard, and receive Telegram-based daily updates from. The architecture mirrors the personal version: per-athlete plan-of-record, per-athlete memory, agent loop reading Strava signal + daily wellness battery, structured response. The shipped surface is **Telegram** for the daily-loop and conversational coach; the web app is a thin, minimalist signup page + an admin console (David-only). There is no web onboarding flow — onboarding happens in chat with the bot.
+A multi-tenant version of the existing coach that any of your runners can sign up for, onboard, and receive Telegram-based daily updates from. The architecture mirrors the personal version closely (v0.7): per-athlete plan-of-record, per-athlete memory **as a folder of files**, the **Claude Agent SDK with its built-in tools** reading Strava signal + daily wellness battery, structured response. The agent runtime runs in a **worker container** (Fly.io), not a Vercel function — see the v0.7 change-log entry and §3.1. The shipped surface is **Telegram** for the daily-loop and conversational coach; the web app is a thin, minimalist signup page + an admin console (David-only). There is no web onboarding flow — onboarding happens in chat with the bot.
 
 **v1 scope (locked, v0.3):**
 
@@ -59,7 +72,7 @@ A multi-tenant version of the existing coach that any of your runners can sign u
 
 - Server-side plan generation pipeline (deferred — BYO-plan covers v1, automated pipeline is v1.5+ once we've seen what plans friends actually paste back).
 - Manual log fallback for non-Strava users.
-- Payments / billing.
+- ~~Payments / billing.~~ **Pulled into scope at ~20 users (v0.7):** prepaid pay-per-usage. Free for the first ~20 friends; after that an athlete pre-loads credit that draws down by usage. See §3.11.
 - Garmin biometrics — confirmed dropped per §8.5 (no usable public API).
 - Mobile app (Telegram is the mobile surface).
 - Web onboarding UI (Telegram is the onboarding surface).
@@ -176,10 +189,10 @@ Final step output: bot creates a `plan_versions` row with `status = awaiting_pas
 
 **Goals:** Daily check-in cron runs for any athlete with `status = active`, generates a structured update, delivers to Telegram. Ad-hoc Telegram replies route through the same agent runtime.
 
-- Daily cron worker: Vercel cron + `job_queue` (no Inngest, per cut #4). Every 30 min, enqueue `daily_checkin` jobs for athletes in their 6:30–7:00 AM local window. Worker drains the queue with `FOR UPDATE SKIP LOCKED`.
-- Daily agent run per §3.7: load memory files, pull last 14 days of Strava, run Claude Agent SDK, validate structured response, write back memory, send to Telegram.
-- Memory file storage: row-per-file in Postgres (`memory_files` table), write-through layer the agent uses. Files mirror today's eight-file layout from `CLAUDE.md` (checkin_log, athlete_profile, race_calendar, personal_records, open_questions, wellness_log, injury_log, weekly_survey_log) — though weekly_survey_log stays empty in v1 since Sunday survey is deferred.
-- Agent runtime: Claude Agent SDK in the cron worker. Tools = read/write memory file, fetch Strava activities, fetch period summary, WebFetch.
+- Job queue: Vercel cron + `job_queue` (no Inngest, per cut #4). Every 30 min the cron *enqueues* `daily_checkin` jobs for athletes in their 6:30–7:00 AM local window. The **Fly.io worker container** drains the queue with `FOR UPDATE SKIP LOCKED` (v0.7).
+- Daily agent run per §3.7: hydrate the athlete's `memory_files` to a per-athlete working directory, run the Agent SDK with built-in tools (it pulls Strava via a Bash script and writes its own files), sync changed files back to `memory_files`, send to Telegram. The agent emits prose directly — no structured-JSON validation step in v0.7 (§3.7).
+- Memory file storage: row-per-file in Postgres (`memory_files`) is the source of truth; hydrated to disk per run and synced back after (v0.7 §3.3). Files mirror today's eight-file layout from `CLAUDE.md` (checkin_log, athlete_profile, race_calendar, personal_records, open_questions, wellness_log, injury_log, weekly_survey_log) — though weekly_survey_log stays empty in v1 since Sunday survey is deferred.
+- Agent runtime: Claude Agent SDK in the Fly.io worker, using its **built-in tools** (Read, Write, Edit, Glob, Grep, Bash, WebSearch) over the athlete's folder — no custom MCP tool catalog (v0.7 §3.1). Strava data comes from a Bash-invoked fetch script.
 - **Daily wellness battery** wired into the morning Telegram check-in per §8.6: readiness 1–10, soreness 1–10 + body part, optional note.
 - Ad-hoc reply mode: inbound TG message → enqueue `tg_message_received` → handler routes to the agent in lighter context (last 3 days of activity + Haiku-routed subset of memory). Per-athlete advisory lock prevents collisions with the daily run.
 
@@ -247,12 +260,13 @@ You said advice quality is non-negotiable — I'd recommend the **hybrid**: Opus
 | Line item                                                  | Cost          |
 | ---------------------------------------------------------- | ------------- |
 | Vercel Pro (recommended for crons + analytics)             | $20           |
+| Fly.io worker container (v0.7 — always-on small machine + volume) | ~$5–25  |
 | Supabase Pro (when you exceed free tier — likely month 2+) | $25           |
 | Sentry (free tier)                                         | $0            |
 | Resend (3k emails/mo free)                                 | $0            |
 | Domain (or defer for v1)                                   | $0–1          |
 | Anthropic API (hybrid model, plan-gen $0 under BYO)        | ~$80–110      |
-| **Total monthly steady state**                             | **~$125–155** |
+| **Total monthly steady state**                             | **~$130–180** |
 
 That's well under the "<$200/mo" ceiling I'd quietly check against, and it's a single-line decision to step up Opus usage if quality demands it.
 
@@ -266,9 +280,9 @@ That's well under the "<$200/mo" ceiling I'd quietly check against, and it's a s
 
 **Database + auth:** Supabase Postgres. Authentication in v0.3 is light: web-side, `/signup` validates against the email allowlist and mints a one-time `link_token`; the Telegram handshake binds `chat_id` ↔ `athlete_id` as the durable identity. The web app reads athlete identity from a session cookie set after Telegram linking. No magic-link / Supabase Auth flow needed in v1 — onboarding lives in Telegram. Row-level security on `athletes`-scoped tables uses the cookie-derived athlete id (or the David-only admin key).
 
-**Background jobs:** Vercel cron + a `job_queue` table in Postgres. Decided in v0.3 to skip Inngest for v1 (cut #4 in §1) — at 25-athlete scale you don't need durable retries badly enough to justify the infra dependency. A daily cron picks up due jobs, locks them with `FOR UPDATE SKIP LOCKED`, and runs them. Failures get logged and retried with exponential backoff on the next tick. Revisit Inngest in v2 if scale or reliability demands it; the swap is a weekend's work.
+**Background jobs:** Vercel cron + a `job_queue` table in Postgres. Decided in v0.3 to skip Inngest for v1 (cut #4 in §1) — at 25-athlete scale you don't need durable retries badly enough to justify the infra dependency. In v0.7 the executor moves: the **Vercel cron enqueues** due jobs into `job_queue`; the **Fly.io worker container drains** the queue with `FOR UPDATE SKIP LOCKED` and runs them. Failures get logged and retried with exponential backoff on the next tick. The same queue carries ad-hoc Telegram messages, so daily and ad-hoc runs share one execution path. Scaling past a few hundred athletes = add worker containers behind the same queue.
 
-**Agent runtime:** Claude Agent SDK in TypeScript, run inside Vercel serverless functions invoked from the cron worker. Each athlete's daily run = one function invocation, idempotent on `(athlete_id, YYYY-MM-DD)`.
+**Agent runtime (v0.7):** Claude Agent SDK in TypeScript, running in a **long-running Fly.io worker container** — *not* a Vercel serverless function. The SDK spawns a ~240 MB native binary that can't fit a 250 MB Vercel function; both Anthropic and Vercel document the container as the intended host (see v0.7 change log). Each athlete gets a **working directory** of files; the worker runs `query()` with the SDK's **built-in tools** (Read, Write, Edit, Glob, Grep, Bash, WebSearch) against that directory, exactly like the personal coach runs Claude Code over `~/projects/health-agent`. The system prompt is the personal coach's `CLAUDE.md`, parameterized per athlete (name, goal race, injuries). Strava data is fetched by a script the agent runs via Bash (mirroring the personal coach's Garmin script pattern), wrapping the existing Strava client. Each daily run is idempotent on `(athlete_id, YYYY-MM-DD)` via the `job_queue` unique key. **Isolation:** per-athlete `cwd`, Bash confined to the athlete's folder + the Strava script, deny-by-default on network/destructive operations — one athlete's agent must never reach another's folder.
 
 **LLM:** Anthropic API. Server-side plan generation deferred (BYO-plan, §3.4). Sonnet 4.6 for daily check-ins; Opus 4.6 for weekly synthesis and any "injury concern detected" branch; Haiku 4.5 for tiny routing/classification calls (e.g. "is this Telegram message a question, a status update, or a plan paste?"). All with prompt caching enabled on the system prompt and memory files.
 
@@ -276,7 +290,7 @@ That's well under the "<$200/mo" ceiling I'd quietly check against, and it's a s
 
 **Telegram:** Direct Bot API via `grammy` (decided in week 0). Webhook → Vercel API route → enqueue handler in `job_queue`. One bot, all users routed by `chat_id` ↔ `athlete_id`.
 
-**Storage:** memory files as `text` columns in Postgres, one row per `(athlete_id, file_name)`. No `memory_file_revisions` table in v1 (cut #7); rely on `agent_run_steps` for the per-write audit trail and accept that we can't replay a memory file to a prior state in v1. If this bites during alpha, add the revisions table — it's a one-migration change.
+**Storage (v0.7):** `memory_files` (one row per `(athlete_id, file_name)`, `text` column) is the **durable source of truth**. The agent does not read/write the DB directly during a run — instead the worker **hydrates** the athlete's files to a working directory on disk before the run, the agent reads/writes real files with built-in tools, and the worker **syncs** changed files back to `memory_files` after. This keeps Supabase authoritative and the per-athlete folder portable across hosts. No `memory_file_revisions` table in v1 (cut #7); rely on `agent_run_steps` for the per-write audit trail. If point-in-time replay bites during alpha, add the revisions table — it's a one-migration change.
 
 **Observability:** Sentry for errors. `agent_runs` + `agent_run_steps` tables (see §3.3) store every agent run's prompt + response + token counts for retrospective debugging. A tiny `/admin` dashboard gated to David's email surfaces these.
 
@@ -388,18 +402,19 @@ The server-side plan-generation pipeline from v0.1 is **deferred**. v1 hands the
 - Daily check-in delivery: Vercel cron fires every 30 min, picks up athletes whose local time is in the 6:30–7:00 AM window today, enqueues a `daily_checkin` job each. Worker drains the queue.
 - **Onboarding state machine** lives in the Telegram handler: `athletes.onboarding_state` jsonb holds `step` and `partial_answers`. Each inbound message advances state if valid, re-asks if not. See §3.9 for the question sequence.
 
-### 3.7 Daily agent loop (per athlete)
+### 3.7 Daily agent loop (per athlete) — v0.7 container model
 
-Vercel serverless function, invoked by the cron worker for each due athlete (athlete-local 6:30 AM window):
+Runs in the Fly.io worker, which dequeues a `daily_checkin` job for each due athlete (athlete-local 6:30 AM window):
 
-1. Load all memory files for the athlete.
-2. Call Strava: list_activities last 14 days, derive 7d + 28d period summaries, derive marathon prediction (rolling Riegel or VDOT against recent long runs).
-3. Call Claude Agent SDK with system prompt + tools (read/write memory, fetch more activities, web search via WebFetch). Domain allowlist for WebFetch is deferred to v1.5 — log all WebFetch calls and review during alpha.
-4. Agent produces a structured response matching the v1 schema (status, risk flags, this week's plan, prehab, follow-ups).
-5. Validate against schema; if invalid, retry once at higher temperature variance, then alert David and skip the send.
-6. Write back updated memory files (atomic — wrap in a single transaction).
-7. Render response into Telegram-friendly markdown; send to the athlete; mirror to David's Telegram if this athlete is still in their 7-day shadow window.
-8. Persist `agent_runs` + `agent_run_steps` for audit.
+1. **Hydrate:** write the athlete's `memory_files` rows to a per-athlete working directory on disk, plus the parameterized `CLAUDE.md` system prompt and the Strava-fetch script.
+2. **Run the Agent SDK** (`query()`) with built-in tools, `cwd` set to that directory. The agent reads its files, runs the Strava script via Bash to pull the last 14 days (+ 7d/28d summaries + marathon prediction), web-searches as needed, reasons, and writes back to its files — the same loop the personal coach runs locally. No custom MCP tools; the SDK's built-ins do the work. `maxTurns` and a per-run cost budget cap the loop.
+3. **Sync back:** changed files in the working directory are written back to `memory_files` (atomic per athlete).
+4. The agent's final message is the athlete-facing response. Render into Telegram-friendly markdown; send; mirror to David's Telegram if this athlete is still in their 7-day shadow window.
+5. **Persist** `agent_runs` (model, tokens, cost) + optionally `agent_run_steps` from the SDK message stream. Decrement the athlete's prepaid balance (§3.11).
+
+Idempotency and concurrency are unchanged from prior versions: the `daily_checkin` job is keyed `daily-{athlete_id}-{YYYY-MM-DD}` (unique in `job_queue`), and a per-athlete advisory lock prevents a daily run and an ad-hoc reply from colliding on the same folder/memory rows.
+
+Response-schema validation note: under the SDK-over-files model the agent emits prose directly (as the personal coach does), so the v0.1 "validate structured JSON, retry on invalid" step is relaxed — the system prompt enforces the response shape, and `agent_run_steps` captures the trace for review. Re-introduce hard schema validation only if alpha shows the agent drifting from the format.
 
 Idempotency: each `daily_checkin` job is keyed `daily-{athlete_id}-{YYYY-MM-DD}` and rows in `job_queue` enforce uniqueness on that key. Re-runs are no-ops. Concurrency: a per-athlete advisory lock (`pg_advisory_xact_lock(hashtext('athlete:' || athlete_id))`) prevents the daily-checkin and an ad-hoc reply from colliding on memory writes (§5.8).
 
@@ -427,9 +442,15 @@ Your own coach in this repo becomes "athlete 1" in the new system. Two phases un
 - **Week 1 (dev self-test):** seed yourself as athlete 1 manually for early-week dev; re-onboard from scratch on day 1.5 via the real allowlist → /signup → Telegram flow to validate end-to-end. Memory files start fresh.
 - **Week 4 (full migration):** ingest your current production memory files (`checkin_log.md`, etc. from this repo) into the DB, replacing the day-1.5 seed data. Point your real Telegram at the production bot. Retire the local Claude Code loop. From week 4 onwards you're a real user, eating your own daily check-ins, which is the single best self-test before alpha.
 
----
+### 3.11 Billing & metering (v0.7)
 
-## 4. Open questions
+Free for the first ~20 friends, then **prepaid pay-per-usage**. The mechanism:
+
+- **Ledger:** `agent_runs` already records `model`, `input_tokens`, `output_tokens`, `cost_usd` per run. The SDK returns usage and `total_cost_usd` on its result message — write those straight through. This is the per-run cost of record.
+- **Balance:** a new `athlete_credits` balance (cents), topped up when an athlete pre-loads credit, decremented by `agent_runs.cost_usd` after each run.
+- **At $0 mid-conversation:** finish the in-flight run (don't truncate a reply the athlete is reading), then refuse new runs with a top-up message until they reload. Enforced at dequeue time — before starting a run, check balance > 0; the run already in flight completes.
+- **Markup:** the prepaid price can include a margin over raw token cost to cover the worker host and overhead; the exact number is a launch-time decision, not an architecture one.
+- **Out of scope for the mechanism itself:** the payment processor integration (Stripe et al.) is deferred until just before the ~20-user threshold. Until then, `athlete_credits` can be topped up manually via the admin console. Build the metering + balance now (it's nearly free to add to the run loop); wire real payments when there's a 20th user.
 
 Decisions that aren't blocking week 0 but need to be answered by week 2–3. Several from v0.1 have been resolved in v0.2 (§8) or v0.3 — those are marked **[resolved]** with the resolution inline.
 
@@ -471,6 +492,10 @@ Ordered by impact-likelihood product, not pure likelihood.
 13. **BYO-plan paste-back UX failure.** The athlete may struggle to get a usable plan out of their LLM, may paste back malformed JSON repeatedly, or may give up partway. Mitigations: (a) ship the BYO prompt template with a strong few-shot example and the literal schema, so the athlete's LLM has every input it needs; (b) validation feedback in human English, not raw Zod errors; (c) escape hatch — the bot offers "want me to ask David to generate a plan for you?" after two failed validation rounds, and David runs it manually through the personal-coach tooling. The escape hatch is a deliberately manual lever to keep us honest about whether real plan-gen automation is needed before we build it.
 
 14. **Onboarding state machine bugs trap a friend mid-flow.** A parser edge case or schema validation error inside `onboarding_state` could leave an athlete unable to advance, with no obvious recovery. Mitigations: David-alert on `onboarding_state` not advancing for 24 hours; a `/restart` slash command that resets the athlete to step 0; admin dashboard exposes raw `onboarding_state` for manual editing.
+
+15. **Multi-tenant isolation in the worker (v0.7 — new, high-priority).** The worker runs the Agent SDK with **Bash** against a per-athlete folder. A bug, or a prompt injection via Strava activity text (§5.10), could let one athlete's run read another athlete's folder, exfiltrate secrets in the container's env, or run arbitrary commands. This is the central new risk of the container model. Mitigations: scope each run to a per-athlete `cwd`; confine Bash to that folder plus the Strava script via deny-by-default permissions; keep per-athlete secrets out of the shared process env (fetch tokens just-in-time, scoped to the running athlete); never let activity text or file content authorize a tool action; run with the least-privilege container user. Treat this as a launch gate, not a polish item.
+
+16. **[resolved by v0.7] Agent SDK can't run in a Vercel function.** The SDK's ~240 MB native binary exceeds Vercel's 250 MB function limit. Resolved by moving the agent runtime to a Fly.io worker container (see v0.7 change log + §3.1). The fallback we considered and rejected — a hand-rolled loop on `@anthropic-ai/sdk` — would have lost the built-in-tool improvisation that makes the personal coach work.
 
 ---
 
@@ -680,3 +705,5 @@ The summary: you didn't lose much by Apple not having OAuth, because the daily w
 - **Cloudflare Workers + D1** — cheap, fast at the edge, but D1 is still rough for relational schemas this size and Anthropic SDK in Workers has been finicky. Revisit at v2.
 - **Bare Vercel cron, no queue** — works at 25 athletes, falls over fast as concurrency grows. Inngest costs nothing at this scale and saves you a real refactor later.
 - **Supabase Edge Functions for the agent loop** — too short on max execution time for multi-minute agent runs. Use a real worker.
+- **Agent SDK inside a Vercel serverless function (v0.7 — tried and rejected).** The SDK's native binary (~240 MB) doesn't fit the 250 MB function limit, and the SDK is designed to run as a long-running process anyway. Resolved by the Fly.io worker container (v0.7).
+- **Hand-rolled loop on `@anthropic-ai/sdk` (v0.7 — considered, rejected).** Would fit a Vercel function but means hand-writing every tool and losing the built-in-tool improvisation that makes the personal coach good. Not worth trading the experience to stay on serverless.

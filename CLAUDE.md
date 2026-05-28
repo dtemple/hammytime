@@ -2,7 +2,7 @@
 
 ## 1. Project summary
 
-Hammytime is a multi-tenant Telegram-based marathon coaching bot for a friends-only (~5–25 athlete) audience. Each athlete onboards entirely through a Telegram conversation, generates their own training plan JSON by pasting a bot-supplied prompt template into their own Claude or ChatGPT session, then pastes the validated JSON back to the bot. A daily Vercel cron runs a Claude Agent SDK loop per athlete: it reads per-athlete memory files and the last 14 days of Strava data, generates a structured coaching response with a daily wellness battery, and delivers it to the athlete in Telegram. A minimalist Next.js 15 web app handles allowlist signup, Strava OAuth handoff, a read-only plan view, and a David-only admin console. There is no web onboarding, no payments, no mobile app — Telegram is the product surface.
+Hammytime is a multi-tenant Telegram-based marathon coaching bot for a friends-only (~5–25 athlete at launch) audience. Each athlete onboards entirely through a Telegram conversation, generates their own training plan JSON by pasting a bot-supplied prompt template into their own Claude or ChatGPT session, then pastes the validated JSON back to the bot. The coaching agent is the **Claude Agent SDK with its built-in tools, running in a Fly.io worker container against a per-athlete folder of files** (v0.7 — a near-1:1 port of the personal coach in `~/projects/health-agent`); a daily Vercel cron *enqueues* jobs into a Postgres `job_queue` that the worker drains. Each run reads the athlete's memory files and the last 14 days of Strava data, generates a coaching response with a daily wellness battery, and delivers it in Telegram. A minimalist Next.js 15 web app handles allowlist signup, Strava OAuth handoff, a read-only plan view, and a David-only admin console. There is no web onboarding and no mobile app — Telegram is the product surface. Billing is free for the first ~20 friends, then prepaid pay-per-usage. **See the SPEC.md v0.7 change-log entry for the architecture pivot rationale (the Agent SDK can't run in a Vercel function).**
 
 ---
 
@@ -84,7 +84,9 @@ These decisions are final for v1. Do not reopen them without a spec update.
 - **Telegram-only onboarding.** The bot drives all onboarding via a conversational state machine. There is no web onboarding flow. The web app surfaces sign-up (allowlist check → deeplink) and nothing more on that path.
 - **BYO-plan generation.** After onboarding, the bot sends the athlete a prompt template with their answers baked in. The athlete iterates in their own Claude or ChatGPT session and pastes the resulting JSON plan back to the bot. There is no server-side plan-generation pipeline in v1.
 - **Strava required.** `activity:read_all` OAuth is mandatory. There is no manual log fallback in v1. A broken Strava connection means the agent runs without fresh data and surfaces the gap explicitly.
-- **Vercel cron + `job_queue` table.** Background jobs use a Postgres `job_queue` table drained by Vercel cron with `FOR UPDATE SKIP LOCKED`. No Inngest in v1.
+- **`job_queue` table + Fly.io worker (v0.7).** Background jobs use a Postgres `job_queue` table. The Vercel cron *enqueues* due jobs; the **Fly.io worker container drains** them with `FOR UPDATE SKIP LOCKED` and runs the agent. No Inngest in v1. (Before v0.7 the cron itself ran the agent in a serverless function — that's retired; the Agent SDK's native binary can't fit a Vercel function.)
+- **Agent runtime = Claude Agent SDK + built-in tools, in the worker container (v0.7).** The coaching agent runs `query()` with the SDK's built-in Read/Write/Edit/Glob/Grep/Bash/WebSearch tools against a per-athlete working directory hydrated from `memory_files`. No custom MCP tool catalog, no hand-rolled loop, no `memory-io` layer. Multi-tenant isolation (per-athlete `cwd`, confined Bash, deny-by-default) is a launch gate.
+- **Prepaid pay-per-usage from ~20 users (v0.7).** Free for the first ~20 friends; after that an athlete pre-loads credit drawn down by usage. `agent_runs` is the cost ledger; a new `athlete_credits` balance is decremented per run. At $0: finish the in-flight run, then block until top-up.
 - **No Supabase Auth magic-link.** Identity is `telegram_chat_id` ↔ `athlete_id`. The web app reads athlete identity from a session cookie set after Telegram linking. The `/signup` page validates against `friend_allowlist` and mints a one-time `link_token`.
 - **Shadow-bcc to David for first 7 days per athlete.** Every outbound bot message is also delivered to David's personal Telegram for the first 7 days per athlete (`athletes.shadow_bcc_until`). There is no 3-day human-in-the-loop approval flow.
 - **Daily wellness battery on.** Morning Telegram check-in includes: readiness 1–10, soreness 1–10 + optional body-part tag, optional one-line note.
@@ -115,13 +117,16 @@ src/
   server/
     telegram/           Bot webhook handler, outbound send helper, onboarding state machine
     strava/             OAuth, webhook receiver, token refresh, activity ingestion
-    agent/              Daily agent loop, ad-hoc loop, memory read/write layer
+    agent/              Onboarding LLM helpers (byo-plan, race-lookup, plan-validator). NOT the coaching agent (v0.7).
   components/           React components (Tailwind only — no component library)
+worker/                 (v0.7) Fly.io worker container: Agent SDK loop over per-athlete folders, job_queue drainer
 supabase/
   migrations/           Numbered SQL migration files
 scripts/                One-off scripts (seed, smoke tests, manual plan-gen)
 Specs/                  SPEC.md and any future spec documents
 ```
+
+> v0.7 note: the daily/ad-hoc coaching loop and the memory read/write layer that used to live in `src/server/agent/` are retired. The coaching agent now runs in `worker/` via the Agent SDK's built-in tools. `src/server/agent/` keeps only the onboarding-time LLM utilities. Exact `worker/` layout is defined in `Specs/M1_IMPLEMENTATION_PLAN.md`.
 
 ---
 

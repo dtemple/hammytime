@@ -4,32 +4,10 @@ vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
 vi.mock('../wellness-log', () => ({ appendWellnessRow: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../../bot', () => ({ sendAndLog: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('grammy', () => ({ Bot: vi.fn(), Context: vi.fn() }));
-vi.mock('@sentry/nextjs', () => ({ captureException: vi.fn() }));
-vi.mock('@/server/agent/daily-checkin', () => ({
-  runDailyCheckin: vi.fn().mockResolvedValue({
-    telegramMessage: 'Solid check-in. Easy 6 miles today at RPE 4–5.',
-    checkinLogEntry: 'Solid check-in. Easy 6 miles today at RPE 4–5.',
-  }),
-  appendCheckinEntry: vi.fn().mockResolvedValue(undefined),
-  persistRun: vi.fn().mockResolvedValue(undefined),
-}));
-vi.mock('@/server/strava/activities', () => ({
-  hasStravaConnection: vi.fn().mockResolvedValue(true),
-  StravaTokenBrokenError: class StravaTokenBrokenError extends Error {
-    constructor(cause?: unknown) {
-      super('Strava token refresh failed or was revoked');
-      this.name = 'StravaTokenBrokenError';
-      if (cause instanceof Error) this.cause = cause;
-    }
-  },
-}));
 
 import { supabaseAdmin } from '@/lib/db';
 import { sendAndLog } from '../../bot';
 import { appendWellnessRow } from '../wellness-log';
-import { runDailyCheckin, appendCheckinEntry, persistRun } from '@/server/agent/daily-checkin';
-import { hasStravaConnection, StravaTokenBrokenError } from '@/server/strava/activities';
-import * as Sentry from '@sentry/nextjs';
 import { handleCheckinCommand, handleWellnessMessage } from '../dispatcher';
 import { READINESS_PROMPT, SORENESS_PROMPT, NOTE_PROMPT, CONCERNING_LINE } from '../wellness';
 
@@ -240,9 +218,12 @@ describe('handleWellnessMessage — awaiting_soreness', () => {
 
 // ---------------------------------------------------------------------------
 // handleWellnessMessage — awaiting_note / onWellnessComplete
+//
+// Post-v0.7: the battery only logs wellness. The morning coaching read runs as
+// a queued daily job in the worker, not off /checkin (SPEC §3.7).
 // ---------------------------------------------------------------------------
 describe('handleWellnessMessage — awaiting_note', () => {
-  it('calls appendWellnessRow, clears state, calls runDailyCheckin, and sends coaching response', async () => {
+  it('logs wellness, clears state, and sends a short confirmation (no coaching run)', async () => {
     const db = makeDb();
     (supabaseAdmin as AnyMock).mockReturnValue(db);
 
@@ -264,27 +245,13 @@ describe('handleWellnessMessage — awaiting_note', () => {
     // State cleared
     expect(db.updateMock).toHaveBeenCalledWith(expect.objectContaining({ checkin_state: {} }));
 
-    // runDailyCheckin called with correct wellness input
-    expect(runDailyCheckin).toHaveBeenCalledOnce();
-    const [calledAthleteId, calledWellness] = (runDailyCheckin as AnyMock).mock.calls[0];
-    expect(calledAthleteId).toBe(ATHLETE_ID);
-    expect(calledWellness.readiness).toBe(7);
-    expect(calledWellness.soreness_score).toBe(3);
-    expect(calledWellness.soreness_body_part).toBeNull();
-    expect(calledWellness.note).toBe("felt good on yesterday's run");
-
-    // Coaching response sent to Telegram
-    expect(sendAndLog).toHaveBeenCalledWith(
-      ATHLETE_ID,
-      CHAT_ID,
-      'Solid check-in. Easy 6 miles today at RPE 4–5.',
-    );
-
-    // checkin_log.md written
-    expect(appendCheckinEntry).toHaveBeenCalledOnce();
-    const [entryAthleteId, , entryContent] = (appendCheckinEntry as AnyMock).mock.calls[0];
-    expect(entryAthleteId).toBe(ATHLETE_ID);
-    expect(entryContent).toBe('Solid check-in. Easy 6 miles today at RPE 4–5.');
+    // Short confirmation sent, echoing the logged values
+    const calls = (sendAndLog as AnyMock).mock.calls as AnyMock[];
+    const sentTexts = calls.map(([, , text]: AnyMock) => text as string);
+    const confirmation = sentTexts.find((t) => t.startsWith('Logged'));
+    expect(confirmation).toBeTruthy();
+    expect(confirmation).toContain('readiness 7');
+    expect(confirmation).toContain('soreness 3');
   });
 
   it("skips note on 'skip' reply", async () => {
@@ -317,7 +284,7 @@ describe('handleWellnessMessage — awaiting_note', () => {
 
     const calls = (sendAndLog as AnyMock).mock.calls as AnyMock[];
     const sentTexts = calls.map(([, , text]: AnyMock) => text as string);
-    expect(sentTexts.every((t) => !t.includes('closer look'))).toBe(true);
+    expect(sentTexts).not.toContain(CONCERNING_LINE);
   });
 
   it('sends concerning line when readiness <= 4', async () => {
@@ -363,109 +330,5 @@ describe('handleWellnessMessage — awaiting_note', () => {
     await handleWellnessMessage(ctx as AnyMock, athlete as AnyMock);
 
     expect(sendAndLog).toHaveBeenCalledWith(ATHLETE_ID, CHAT_ID, CONCERNING_LINE);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// onWellnessComplete — Claude failure fallback
-// ---------------------------------------------------------------------------
-describe('onWellnessComplete — Claude failure fallback', () => {
-  it('sends fallback reply and captures to Sentry when runDailyCheckin throws', async () => {
-    const db = makeDb();
-    (supabaseAdmin as AnyMock).mockReturnValue(db);
-
-    (runDailyCheckin as AnyMock).mockRejectedValueOnce(new Error('Claude timeout'));
-
-    const ctx = makeCtx('skip');
-    const athlete = makeAthlete({
-      sub_step: 'awaiting_note',
-      partial: { readiness: 5, soreness_score: 2, soreness_body_part: null },
-    });
-
-    await handleWellnessMessage(ctx as AnyMock, athlete as AnyMock);
-
-    // Fallback sent
-    expect(sendAndLog).toHaveBeenCalledWith(
-      ATHLETE_ID,
-      CHAT_ID,
-      expect.stringContaining('Coaching response delayed'),
-    );
-
-    // Sentry captured
-    expect(Sentry.captureException).toHaveBeenCalledOnce();
-
-    // checkin_log.md NOT written on failure
-    expect(appendCheckinEntry).not.toHaveBeenCalled();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// onWellnessComplete — Strava hard requirement
-// ---------------------------------------------------------------------------
-describe('onWellnessComplete — Strava hard requirement', () => {
-  it('no Strava connection: sends refusal, records agent_runs row, does not call agent', async () => {
-    const db = makeDb();
-    (supabaseAdmin as AnyMock).mockReturnValue(db);
-    (hasStravaConnection as AnyMock).mockResolvedValueOnce(false);
-
-    const ctx = makeCtx('skip');
-    const athlete = makeAthlete({
-      sub_step: 'awaiting_note',
-      partial: { readiness: 7, soreness_score: 3, soreness_body_part: null },
-    });
-
-    await handleWellnessMessage(ctx as AnyMock, athlete as AnyMock);
-
-    // runDailyCheckin must NOT be called
-    expect(runDailyCheckin).not.toHaveBeenCalled();
-
-    // Refusal message sent, mentions wellness values and /connect_strava
-    const calls = (sendAndLog as AnyMock).mock.calls as AnyMock[];
-    const sentTexts = calls.map(([, , text]: AnyMock) => text as string);
-    const refusal = sentTexts.find((t) => t.includes('/connect_strava'));
-    expect(refusal).toBeTruthy();
-    expect(refusal).toContain('readiness 7');
-    expect(refusal).toContain('soreness 3');
-
-    // persistRun called with strava_not_connected error and zero tokens
-    expect(persistRun).toHaveBeenCalledOnce();
-    const [, , inputTokens, outputTokens, , error] = (persistRun as AnyMock).mock
-      .calls[0] as AnyMock[];
-    expect(inputTokens).toBe(0);
-    expect(outputTokens).toBe(0);
-    expect(error).toBe('strava_not_connected');
-
-    // checkin_log.md NOT written
-    expect(appendCheckinEntry).not.toHaveBeenCalled();
-  });
-
-  it('broken Strava token: sends broken-token refusal, does not capture to Sentry', async () => {
-    const db = makeDb();
-    (supabaseAdmin as AnyMock).mockReturnValue(db);
-    (hasStravaConnection as AnyMock).mockResolvedValueOnce(true);
-    (runDailyCheckin as AnyMock).mockRejectedValueOnce(new StravaTokenBrokenError());
-
-    const ctx = makeCtx('skip');
-    const athlete = makeAthlete({
-      sub_step: 'awaiting_note',
-      partial: { readiness: 6, soreness_score: 4, soreness_body_part: 'left knee' },
-    });
-
-    await handleWellnessMessage(ctx as AnyMock, athlete as AnyMock);
-
-    // Broken-token refusal sent
-    const calls = (sendAndLog as AnyMock).mock.calls as AnyMock[];
-    const sentTexts = calls.map(([, , text]: AnyMock) => text as string);
-    const refusal = sentTexts.find((t) => t.includes('/connect_strava'));
-    expect(refusal).toBeTruthy();
-    expect(refusal).toContain('readiness 6');
-    expect(refusal).toContain('soreness 4');
-    expect(refusal).toContain('broke');
-
-    // Sentry must NOT be called — broken token is athlete-side, not a system error
-    expect(Sentry.captureException).not.toHaveBeenCalled();
-
-    // checkin_log.md NOT written
-    expect(appendCheckinEntry).not.toHaveBeenCalled();
   });
 });
