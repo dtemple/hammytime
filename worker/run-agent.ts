@@ -67,7 +67,14 @@ export async function runAgent(
       }
     }
 
-    if (result?.subtype === 'success' && result.result.trim()) {
+    if (result && result.subtype !== 'success') {
+      // The SDK can return an error result (e.g. an API 429) instead of
+      // throwing. Treat it like a thrown failure so we record the error and
+      // fall back to SOFT_FALLBACK — never let a raw API error reach Telegram.
+      runError = `agent run ended with ${result.subtype}`;
+      replyText = '';
+      console.error(`[run-agent] athlete ${athleteId} run failed: ${result.subtype}`);
+    } else if (result?.subtype === 'success' && result.result.trim()) {
       replyText = result.result;
     }
   } catch (err) {
