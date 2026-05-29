@@ -3,7 +3,7 @@
 # Secrets (ANTHROPIC_API_KEY, SUPABASE_*, TELEGRAM_BOT_TOKEN, DAVID_TELEGRAM_CHAT_ID,
 # STRAVA_*) are set with `fly secrets set`, never committed.
 app = "hammytime-worker"
-primary_region = "sea"
+primary_region = "sjc"
 
 [build]
   dockerfile = "Dockerfile"
