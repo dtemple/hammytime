@@ -87,6 +87,23 @@ export async function refreshAccessToken(refresh_token: string): Promise<{
   };
 }
 
+/**
+ * Revokes an access token on Strava's side. After this, the token can no longer
+ * read the athlete's data and the connection disappears from the athlete's
+ * https://www.strava.com/settings/apps page. Idempotent enough for our use —
+ * an already-revoked token returns 401, which we treat as "already gone".
+ */
+export async function deauthorize(access_token: string): Promise<void> {
+  const res = await fetch(`${STRAVA_AUTH_BASE}/deauthorize`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${access_token}` },
+  });
+  if (!res.ok && res.status !== 401) {
+    const body = await res.text();
+    throw new Error(`Strava deauthorize failed (${res.status}): ${body}`);
+  }
+}
+
 export async function pingStrava(): Promise<{
   ok: boolean;
   latency_ms: number;

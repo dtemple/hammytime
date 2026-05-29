@@ -116,7 +116,7 @@ src/
   lib/                  Shared utilities and type definitions
   server/
     telegram/           Bot webhook handler, outbound send helper, onboarding state machine
-    strava/             OAuth, webhook receiver, token refresh, activity ingestion
+    strava/             OAuth, token refresh, recent-activity fetch (ephemeral — never persisted), disconnect/deauthorization helper
     agent/              Onboarding LLM helpers (byo-plan, race-lookup, plan-validator). NOT the coaching agent (v0.7).
   components/           React components (Tailwind only — no component library)
 worker/                 (v0.7) Fly.io worker container: Agent SDK loop over per-athlete folders, job_queue drainer

@@ -9,6 +9,7 @@ import {
 } from './onboarding/index';
 import { handleCheckinCommand, handleWellnessMessage } from './checkin/dispatcher';
 import { fetchRecentActivities, hasStravaConnection } from '@/server/strava/activities';
+import { disconnectStrava } from '@/server/strava/disconnect';
 import { getOrCreateCalendarToken } from '@/lib/calendar-token';
 import { enqueueJob } from '@/server/jobs/enqueue';
 
@@ -333,6 +334,44 @@ async function handleStravaStatusCommand(ctx: CommandContext<Context>): Promise<
   await ctx.reply(lines.join('\n'));
 }
 
+export async function handleDisconnectStravaCommand(
+  ctx: CommandContext<Context>,
+): Promise<void> {
+  const db = supabaseAdmin();
+  const chatId = String(ctx.chat.id);
+
+  const { data: athlete } = await db
+    .from('athletes')
+    .select('id')
+    .eq('telegram_chat_id', chatId)
+    .maybeSingle();
+
+  if (!athlete) {
+    await ctx.reply('No athlete record found for this chat.');
+    return;
+  }
+
+  await db.from('messages').insert({
+    athlete_id: athlete.id,
+    channel: 'tg',
+    direction: 'in',
+    body: '/disconnect_strava',
+  });
+
+  const { hadConnection } = await disconnectStrava(athlete.id, { revokeOnStrava: true });
+
+  if (!hadConnection) {
+    await sendAndLog(athlete.id, ctx.chat.id, "You don't have a Strava connection on file.");
+    return;
+  }
+
+  await sendAndLog(
+    athlete.id,
+    ctx.chat.id,
+    "Disconnected from Strava and revoked access. I won't see your training anymore — run /connect_strava whenever you want to reconnect.",
+  );
+}
+
 function getBot(): Bot {
   if (!_bot) {
     const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -360,6 +399,7 @@ function getBot(): Bot {
       await handleCheckinCommand(ctx, athlete);
     });
     _bot.command('connect_strava', handleConnectStravaCommand);
+    _bot.command('disconnect_strava', handleDisconnectStravaCommand);
     _bot.command('strava_status', handleStravaStatusCommand);
     _bot.command('calendar', handleCalendarCommand);
     _bot.command('cancel', async (ctx) => {

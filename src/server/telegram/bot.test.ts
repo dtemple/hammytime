@@ -14,12 +14,19 @@ vi.mock('./checkin/dispatcher', () => ({
 vi.mock('child_process', () => ({ execSync: vi.fn().mockReturnValue('abc1234 — test commit') }));
 vi.mock('grammy', () => ({ Bot: vi.fn(), Context: vi.fn() }));
 vi.mock('@/server/jobs/enqueue', () => ({ enqueueJob: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('@/server/strava/disconnect', () => ({ disconnectStrava: vi.fn() }));
 
 import { supabaseAdmin } from '@/lib/db';
 import { Bot } from 'grammy';
 import { handleWellnessMessage } from './checkin/dispatcher';
 import { enqueueJob } from '@/server/jobs/enqueue';
-import { handleInboundText, handleConnectStravaCommand, _resetBotForTest } from './bot';
+import { disconnectStrava } from '@/server/strava/disconnect';
+import {
+  handleInboundText,
+  handleConnectStravaCommand,
+  handleDisconnectStravaCommand,
+  _resetBotForTest,
+} from './bot';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyMock = any;
@@ -309,5 +316,97 @@ describe('/connect_strava command', () => {
     );
     expect(outbound).toBeDefined();
     expect(outbound!.body).toContain(`/strava/connect?athlete_id=${ATHLETE_ID}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /disconnect_strava command
+// ---------------------------------------------------------------------------
+
+describe('/disconnect_strava command', () => {
+  beforeEach(() => {
+    _resetBotForTest();
+    vi.clearAllMocks();
+    process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+  });
+
+  afterEach(() => {
+    delete process.env.TELEGRAM_BOT_TOKEN;
+  });
+
+  // Wires the grammy Bot mock and returns the captured outbound messages + the
+  // sendMessage spy. db returns the athlete row, swallows messages inserts.
+  function setup(athleteRow: object | null) {
+    const sendMessageMock = vi.fn().mockResolvedValue(undefined);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (Bot as AnyMock).mockImplementation(function (this: any) {
+      return {
+        api: { sendMessage: sendMessageMock },
+        command: vi.fn(),
+        on: vi.fn(),
+        catch: vi.fn(),
+      };
+    });
+
+    const messagesInserts: Array<{ direction: string; body: string }> = [];
+    (supabaseAdmin as AnyMock).mockReturnValue({
+      from: vi.fn().mockImplementation((table: string) => {
+        if (table === 'athletes') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({ data: athleteRow, error: null }),
+              }),
+            }),
+          };
+        }
+        if (table === 'messages') {
+          return {
+            insert: vi.fn().mockImplementation((row: { direction: string; body: string }) => {
+              messagesInserts.push(row);
+              return Promise.resolve({ error: null });
+            }),
+          };
+        }
+        return {};
+      }),
+    });
+
+    return { sendMessageMock, messagesInserts };
+  }
+
+  it('replies with no-record message when athlete is not found', async () => {
+    setup(null);
+    const ctx = makeCtx();
+
+    await handleDisconnectStravaCommand(ctx as AnyMock);
+
+    expect(ctx.reply).toHaveBeenCalledWith('No athlete record found for this chat.');
+    expect(disconnectStrava).not.toHaveBeenCalled();
+  });
+
+  it('disconnects, revokes, and confirms when a connection exists', async () => {
+    const { sendMessageMock } = setup({ id: ATHLETE_ID });
+    (disconnectStrava as AnyMock).mockResolvedValue({ hadConnection: true, revoked: true });
+    const ctx = makeCtx();
+
+    await handleDisconnectStravaCommand(ctx as AnyMock);
+
+    expect(disconnectStrava).toHaveBeenCalledWith(ATHLETE_ID, { revokeOnStrava: true });
+    expect(sendMessageMock).toHaveBeenCalledOnce();
+    const [, sentText] = (sendMessageMock as AnyMock).mock.calls[0] as [unknown, string];
+    expect(sentText).toContain('Disconnected from Strava');
+  });
+
+  it('tells the athlete when there is no connection on file', async () => {
+    const { sendMessageMock } = setup({ id: ATHLETE_ID });
+    (disconnectStrava as AnyMock).mockResolvedValue({ hadConnection: false, revoked: false });
+    const ctx = makeCtx();
+
+    await handleDisconnectStravaCommand(ctx as AnyMock);
+
+    expect(disconnectStrava).toHaveBeenCalledWith(ATHLETE_ID, { revokeOnStrava: true });
+    const [, sentText] = (sendMessageMock as AnyMock).mock.calls[0] as [unknown, string];
+    expect(sentText).toContain("don't have a Strava connection");
   });
 });

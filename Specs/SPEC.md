@@ -9,6 +9,12 @@ This doc covers: sequencing + rough costing, technical implementation plan, open
 
 ### Change log
 
+- **v0.7.4 (2026-05-29) — Strava deauthorization handling + athlete disconnect.**
+  - Added the Strava push-subscription webhook (`/api/strava/webhook`) and an athlete-facing `/disconnect_strava` command, driven by a Strava **API-compliance** requirement: their terms require deleting a user's data within 48h of revocation. daybreak persists **no** Strava activity data, so "deletion" = removing the encrypted `oauth_tokens` row (and, when athlete-initiated, revoking on Strava's side).
+  - **New pieces:** `deauthorize()` in `src/server/strava/client.ts`; `disconnectStrava()` single source of truth in `src/server/strava/disconnect.ts`; the webhook route (GET validation handshake, POST always-200 deauth handler — activity events are no-ops); the `/disconnect_strava` bot command; `scripts/register-strava-webhook.ts` (create/list/delete the one app-level subscription); `scripts/disconnect-strava.ts` refactored to delegate to the helper.
+  - **Env:** `STRAVA_WEBHOOK_VERIFY_TOKEN` (subscription handshake) and optional `STRAVA_SUBSCRIPTION_ID` (pin events to our one subscription).
+  - Supersedes the §3.5 "fetch the activity, persist, enqueue `activity_received`" webhook description — under v0.7 the agent pulls Strava live via a Bash script and nothing is persisted, so the webhook's job is deauth compliance, not activity ingestion. See §3.5 and the new §3.5.1.
+
 - **v0.7.3 (2026-05-29) — shadow-bcc removed.**
   - The shadow-bcc — mirroring every outbound coaching message to David's personal Telegram for the first 7 days per athlete — is **removed**, not just disabled. The mirroring code is gone from `worker/send.ts`.
   - **Why:** it created duplicate-message noise and extra per-deploy context to track, for little payoff. Every outbound message is already persisted to the `messages` table, so David can follow along there directly.
@@ -406,9 +412,17 @@ The server-side plan-generation pipeline from v0.1 is **deferred**. v1 hands the
 
 - **OAuth scope:** `read,activity:read_all` (need detail on private activities since trail runners often keep them private).
 - **Backfill:** deferred in v1 (cut #9). On connect we pull only "since signup" activities going forward; cold-start context comes from the step-5 self-reported mileage. If alpha friends consistently want their plan referenced against pre-signup history, add a 90-day backfill in v1.5 — it's a half-day change.
-- **Webhook:** subscribe to athlete create events at the app level (one subscription for the whole bot). On webhook, fetch the activity, persist, and enqueue an `activity_received` job in `job_queue`. The agent reacts within 30 minutes (not instantly — gives space for the athlete to add manual notes in Strava).
+- **Webhook (v0.7.4):** one app-level push subscription (`scripts/register-strava-webhook.ts`), callback at `/api/strava/webhook`. The handler exists primarily for **deauthorization compliance**: Strava's API terms require deleting a user's data within 48h of their revoking access. We persist no Strava activity data, so activity events are no-ops — and "deletion" on a deauth event means removing the `oauth_tokens` row. On `object_type='athlete'` + `updates.authorized='false'`, the handler resolves `owner_id` → `provider_athlete_id` → athlete, calls `disconnectStrava(id, { revokeOnStrava: false })`, and sends the athlete a Telegram notice. The POST always returns 200 fast (Strava disables subscriptions that error/timeout); Strava does not sign event POSTs. See §3.5.1.
 - **Rate limits:** 100 requests / 15 min per app, 1000 / day. At 25 athletes and ~1 activity/day each, no concern.
 - **Token refresh:** Vercel cron every 4 hours, refresh any token expiring within 6 hours. Lazy refresh on use as fallback. Store last-refresh timestamp. On refresh failure, message the athlete in Telegram + alert David.
+
+### 3.5.1 Disconnect / deauthorization (v0.7.4)
+
+`disconnectStrava(athleteId, { revokeOnStrava })` in `src/server/strava/disconnect.ts` is the single source of truth for severing a Strava connection. The deletion (removing the `oauth_tokens` row for `(athlete_id, provider='strava')`) always happens; Strava-side revocation (`POST /oauth/deauthorize`) is best-effort and gated on `revokeOnStrava`. Three callers:
+
+- **`/disconnect_strava` Telegram command** — athlete-initiated. `revokeOnStrava: true` so our app also drops off the athlete's https://www.strava.com/settings/apps page. Confirms in chat; handles "no connection on file".
+- **`/api/strava/webhook` deauth event** — Strava-initiated (athlete revoked on Strava's side). `revokeOnStrava: false` — there is nothing left to revoke. Satisfies the 48h-deletion term.
+- **`scripts/disconnect-strava.ts`** — operator tool, refactored to delegate to the helper (`revokeOnStrava: true`).
 
 ### 3.6 Telegram integration
 

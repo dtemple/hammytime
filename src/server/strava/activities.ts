@@ -42,7 +42,7 @@ export type StravaActivitySummary = {
  * athlete. Returns the decrypted access token string, or null if the athlete
  * has no connected Strava account.
  */
-async function getAccessToken(athleteId: string): Promise<string | null> {
+export async function getAccessToken(athleteId: string): Promise<string | null> {
   const db = supabaseAdmin();
   const { data } = await db
     .from('oauth_tokens')
