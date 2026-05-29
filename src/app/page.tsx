@@ -88,6 +88,7 @@ export default function Home() {
           <Link href="/about">About</Link>
           <Link href="/privacy">Privacy</Link>
           <Link href="/terms">Terms</Link>
+          <Link href="/support">Support</Link>
         </span>
       </footer>
     </div>
