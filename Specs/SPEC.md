@@ -9,6 +9,12 @@ This doc covers: sequencing + rough costing, technical implementation plan, open
 
 ### Change log
 
+- **v0.7.3 (2026-05-29) — shadow-bcc removed.**
+  - The shadow-bcc — mirroring every outbound coaching message to David's personal Telegram for the first 7 days per athlete — is **removed**, not just disabled. The mirroring code is gone from `worker/send.ts`.
+  - **Why:** it created duplicate-message noise and extra per-deploy context to track, for little payoff. Every outbound message is already persisted to the `messages` table, so David can follow along there directly.
+  - **What stays:** the `DAVID_TELEGRAM_CHAT_ID` env var (still used by `src/server/admin/alerts.ts` for onboarding alerts to David) and the now-unused DB columns `athletes.shadow_bcc_until` and `messages.mirrored_to_admin` (left in place — dropping them is a migration not worth doing; both simply go unwritten/unread). The `link_start_handshake` RPC still sets `shadow_bcc_until` on new athletes; harmless now that nothing reads it.
+  - This retires the §1 "shadow bcc" mechanism and the references in §3.6/§3.7 and §6. There is no longer any first-week quality-mirror; the brand-risk mitigation (§6) leans on the schema-validator safety caps plus David reading the `messages` table.
+
 - **v0.7.2 (2026-05-29) — proactive wellness battery removed; battery is `/checkin`-only.**
   - The morning push drops to a **single message**: the coaching/training note. The proactive wellness battery (the second message that started the readiness/soreness prompts from the worker) is removed.
   - **Why:** the battery had split-brain ownership — the Fly.io worker *started* it (set `checkin_state`, sent the readiness prompt) while the Next.js Telegram dispatcher *handled the answers* (`handleWellnessMessage`). Two runtimes coordinating through one `checkin_state` row is more complexity than the signal is worth right now. Making the battery `/checkin`-only collapses ownership entirely into the Telegram dispatcher.
@@ -56,7 +62,7 @@ This doc covers: sequencing + rough costing, technical implementation plan, open
   - Plan generation is **BYO-plan**: the bot hands the athlete a templated prompt with their onboarding answers baked in; they iterate in their own Claude or ChatGPT session and paste the resulting JSON plan back. Server validates against schema. Removes the server-side plan-generation pipeline from v1 entirely.
   - **Strava required**, no manual log fallback in v1.
   - **No Inngest in v1.** Vercel cron + a `job_queue` table is enough at 25-athlete scale.
-  - **No 3-day human-in-the-loop preview.** Replaced with a "shadow bcc" of every outbound message to David's personal Telegram for the first week per athlete.
+  - **No 3-day human-in-the-loop preview.** Replaced with a "shadow bcc" of every outbound message to David's personal Telegram for the first week per athlete. *(The shadow bcc was itself removed in v0.7.3 — see change-log.)*
   - Week 0 and Week 1 now have day-level detail in §2; other weeks remain high-level until planned.
 - v0.2 (2026-05-12) — §8 follow-up decisions added (Telegram vs web-only, biometrics, HealthKit/Garmin), v1 plan revised in §8.6.
 - v0.1 (2026-05-07) — initial draft.
@@ -77,7 +83,7 @@ A multi-tenant version of the existing coach that any of your runners can sign u
 - Adaptive daily-prescription modifications driven by Strava signal + daily wellness battery. The plan itself stays static between versions; only the daily prescription bends.
 - Injury-aware prehab prescriptions.
 - Daily wellness battery — 2 prompts: readiness 1–10, soreness 1–10 (+ optional body-part tag). On-demand via the `/checkin` command in v1; the proactive morning send is deferred (see v0.7.2 change-log). (Reduced from the 3–4 item sketch in §8.6 — see v0.7.1 change-log.)
-- "Shadow bcc" — every outbound bot message also delivered to David's personal Telegram for the first 7 days per athlete, so quality issues get caught fast without a blocking approval step.
+- ~~"Shadow bcc" — every outbound bot message also delivered to David's personal Telegram for the first 7 days per athlete.~~ **Removed (v0.7.3):** created duplicate-message noise; outbound messages are already in the `messages` table for David to review.
 
 **v1 explicitly out of scope (defer):**
 
@@ -214,7 +220,7 @@ Final step output: bot creates a `plan_versions` row with `status = awaiting_pas
 **Goals:** You are a user. The loop runs end-to-end on you for 5+ days. Bugs fixed.
 
 - Telemetry: per-message token counts, agent step traces, error rates → Sentry + the `/admin` console (athletes, recent `agent_runs`, errors, outbound messages — read-only).
-- Quality gates: prompt-cache the system prompt + recent memory; tighten response-format validation; verify the "shadow bcc" to David's Telegram is working for the first-week-per-athlete window (replaces the v0.1 3-day approval flow, per §1).
+- Quality gates: prompt-cache the system prompt + recent memory; tighten response-format validation. (The "shadow bcc" first-week quality-mirror was removed in v0.7.3 — David reviews outbound messages via the `messages` table.)
 - UX polish on web: just the `/app/plan` read-only view. No calendar / profile / history pages in v1 (deferred per §3.2).
 
 **Out-of-pocket:** ~$30–60.
@@ -335,7 +341,7 @@ Deferred from v0.1: `/onboarding/*` (Telegram-only now), `/app` dashboard, `/app
 users                  (id, email, created_at)
 athletes               (id, user_id, name, dob, sex, asthma flag, timezone,
                         telegram_chat_id, free-text notes, onboarding_state jsonb,
-                        shadow_bcc_until timestamptz)
+                        shadow_bcc_until timestamptz)  -- shadow_bcc_until unused since v0.7.3
 injuries               (id, athlete_id, body_part, severity, status, notes, started_at)
 races                  (id, athlete_id, name, date, distance_mi, elevation_ft,
                         target_type[finish|time], target_time_sec, status)
@@ -350,7 +356,7 @@ oauth_tokens           (id, athlete_id, provider, access_token_enc, refresh_toke
 activities             (id, athlete_id, source, source_id, start_at, distance_mi,
                         duration_sec, elevation_ft, avg_hr, type, raw_json)
 messages               (id, athlete_id, channel[tg|web], direction[in|out], body,
-                        sent_at, related_run_id, mirrored_to_admin bool)
+                        sent_at, related_run_id, mirrored_to_admin bool)  -- mirrored_to_admin unused since v0.7.3
 agent_runs             (id, athlete_id, kind[daily|adhoc|weekly|plan_validate], started_at,
                         finished_at, model, input_tokens, output_tokens, cost_usd,
                         result_summary, error)
@@ -361,7 +367,7 @@ job_queue              (id, kind, key_unique, payload jsonb, run_after,
                         locked_at, attempts, last_error, completed_at)
 ```
 
-Removed from v0.1: `memory_file_revisions` (cut #7 — log via `agent_run_steps` instead), `invites` (cut #14 — `friend_allowlist` replaces it). Added: `onboarding_state` and `telegram_chat_id` on `athletes`, `status` + `schema_version` on `plan_versions`, `shadow_bcc_until` on `athletes`, `mirrored_to_admin` on `messages`, the `job_queue` table.
+Removed from v0.1: `memory_file_revisions` (cut #7 — log via `agent_run_steps` instead), `invites` (cut #14 — `friend_allowlist` replaces it). Added: `onboarding_state` and `telegram_chat_id` on `athletes`, `status` + `schema_version` on `plan_versions`, `shadow_bcc_until` on `athletes` (unused since v0.7.3), `mirrored_to_admin` on `messages` (unused since v0.7.3), the `job_queue` table.
 
 The memory-file structure mirrors today's eight-file layout (`checkin_log.md`, `athlete_profile.md`, `race_calendar.md`, `personal_records.md`, `open_questions.md`, `wellness_log.md`, `injury_log.md`, `weekly_survey_log.md`). The agent reads/writes via tools; the web app reads for display. `weekly_survey_log.md` exists in the schema but stays empty in v1 — Sunday survey is deferred.
 
@@ -409,7 +415,7 @@ The server-side plan-generation pipeline from v0.1 is **deferred**. v1 hands the
 - One bot for the whole product. BotFather setup gives you a token.
 - Athlete linking: web shows a deeplink `tg://resolve?domain=BotName&start=<one_time_token>`. Athlete taps, bot receives `/start <token>`, server matches token to `athlete_id`, persists `telegram_chat_id`.
 - Inbound: webhook → Vercel API route → enqueue a `tg_message_received` job in `job_queue` → cron worker dequeues and runs the handler. Handler routes by athlete state: onboarding (drives the onboarding state machine), awaiting_paste (looks for a plan JSON), active (ad-hoc reply mode through the agent).
-- Outbound: agent emits a message; handler sends via Bot API. Long messages chunked at 4096 chars (TG limit). MarkdownV2 subset with strict escaping. Every outbound message is mirrored to David's personal Telegram for the first 7 days per athlete (the "shadow bcc" from §1 in place of the v0.1 3-day approval flow).
+- Outbound: agent emits a message; handler sends via Bot API. Long messages chunked at 4096 chars (TG limit). MarkdownV2 subset with strict escaping. (The "shadow bcc" mirror of every outbound message to David was removed in v0.7.3 — see change-log.)
 - Daily check-in delivery: Vercel cron fires every 30 min, picks up athletes whose local time is in the 6:30–7:00 AM window today, enqueues a `daily_checkin` job each. Worker drains the queue.
 - **Onboarding state machine** lives in the Telegram handler: `athletes.onboarding_state` jsonb holds `step` and `partial_answers`. Each inbound message advances state if valid, re-asks if not. See §3.9 for the question sequence.
 
@@ -420,7 +426,7 @@ Runs in the Fly.io worker, which dequeues a `daily_checkin` job for each due ath
 1. **Hydrate:** write the athlete's `memory_files` rows to a per-athlete working directory on disk, plus the parameterized `CLAUDE.md` system prompt and the Strava-fetch script.
 2. **Run the Agent SDK** (`query()`) with built-in tools, `cwd` set to that directory. The agent reads its files, runs the Strava script via Bash to pull the last 14 days (+ 7d/28d summaries + marathon prediction), web-searches as needed, reasons, and writes back to its files — the same loop the personal coach runs locally. No custom MCP tools; the SDK's built-ins do the work. `maxTurns` and a per-run cost budget cap the loop.
 3. **Sync back:** changed files in the working directory are written back to `memory_files` (atomic per athlete).
-4. The agent's final message is the athlete-facing response — and the *only* morning message. Render into Telegram-friendly markdown; send; mirror to David's Telegram if this athlete is still in their 7-day shadow window. (The wellness battery no longer follows automatically; it's `/checkin`-only — see v0.7.2 change-log.)
+4. The agent's final message is the athlete-facing response — and the *only* morning message. Render into Telegram-friendly markdown; send. (The wellness battery no longer follows automatically; it's `/checkin`-only — see v0.7.2 change-log. The shadow-bcc mirror to David was removed in v0.7.3.)
 5. **Persist** `agent_runs` (model, token split incl. cache, cost) + `agent_run_steps` from the SDK message stream. (Prepaid-balance decrement is deferred — see §3.11; a `// TODO(#12)` hook marks the spot.)
 
 Idempotency and concurrency are unchanged from prior versions: the `daily_checkin` job is keyed `daily-{athlete_id}-{YYYY-MM-DD}` (unique in `job_queue`), and a per-athlete advisory lock prevents a daily run and an ad-hoc reply from colliding on the same folder/memory rows.
@@ -519,7 +525,7 @@ Ordered by impact-likelihood product, not pure likelihood.
 4. **Friend-feedback bias.** Friends are nice. They will not tell you the daily messages are mid. Mitigations: explicit ask for blunt feedback, anonymous feedback channel, weekly NPS-style 1-question Telegram poll, look at engagement numbers (replies / read-time-est) not just self-reported satisfaction.
 5. **Trust gap vs human coaches.** Coaching is partly a relationship business. AI coach has a credibility ceiling for serious athletes that may not lift just because the advice is good. Reframing: target the runner who currently has no coach, not the runner who would otherwise hire one.
 6. **Health-data regulatory exposure.** US: not HIPAA unless you're a covered entity, and you're not. EU: GDPR special category data (health). For friends-only US-based, low risk; for any EU user, you need a data processing agreement, lawful basis (consent), and deletion flows. Recommendation: geofence to US for v1.
-7. **Brand risk of a bad autonomous send.** The agent sends messages to people unprompted every morning. One bad message ("you should run a marathon Sunday on this hamstring") in a public-shareable screenshot is the kind of thing that lives forever on Twitter. Mitigation in v0.3: the "shadow bcc" — every outbound message mirrored to David's personal Telegram for the first 7 days per athlete (replaces the v0.1 3-day approval flow per §1). Lighter than a blocking preview, but you'll see bad messages within minutes of them sending and can follow up directly. Plus the schema-validator safety caps from §5.1 stop the most reckless prescriptions before they leave the building.
+7. **Brand risk of a bad autonomous send.** The agent sends messages to people unprompted every morning. One bad message ("you should run a marathon Sunday on this hamstring") in a public-shareable screenshot is the kind of thing that lives forever on Twitter. The v0.3 mitigation — a "shadow bcc" mirroring every outbound message to David's Telegram for the first week per athlete — was removed in v0.7.3 (duplicate-message noise for little payoff). Mitigation now: the schema-validator safety caps from §5.1 stop the most reckless prescriptions before they leave the building, and every outbound message is persisted to the `messages` table for David to review (and the admin console surfaces it) — after-the-fact rather than within-minutes, but at friends-only scale that's an acceptable trade.
 8. **Strava platform-dependency.** If Strava changes ToS or revokes API access (it has happened to coaching apps), you have no product. Mitigation: design `activities` ingestion to be source-agnostic from day one — Strava is one provider, not the spine.
 9. **Telegram regional / political.** Telegram is banned or restricted in some markets and has political associations some users dislike. For a US-friend audience this is fine; for any broader expansion you'll want SMS/email parity.
 10. **Quitting cost.** If you spend 6 weeks shipping this and nobody uses it past month 2, that's a real opportunity cost. Mitigation: define a "kill criteria" now — e.g. "if <40% of alpha friends are still active at week 8, I sunset this and take the learnings."
