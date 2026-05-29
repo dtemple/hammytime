@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-05-28 (session 18 — v0.7 architecture pivot + worker container built (#11): job_queue drainer, per-athlete folder lifecycle, isolation launch-gate, agent run/persist/send; 34 worker tests green)_
+_Updated: 2026-05-29 (session 19 — worker deployed to Fly prod (#13): container smoke gate passed, secrets set, region sjc, queue draining end-to-end; error-leak fix; daily run verified clean after Anthropic tier raise)_
 
 ---
 
@@ -42,6 +42,17 @@ This session's work (all committed):
 **Not done in #11 (intentional):** the live Fly.io container smoke test (M1 §3.1 — the launch gate equivalent of the Vercel binary check) requires an actual deploy with `fly secrets`; David runs that. The metering decrement is stubbed for #12.
 
 **Wellness battery made `/checkin`-only (2026-05-29).** Removed the proactive morning wellness battery. `worker/jobs/daily-checkin.ts` no longer calls `startWellnessBattery` after the agent run — the morning push is now a single coaching message. The battery is triggered only by the `/checkin` command (handler + `handleWellnessMessage` state machine unchanged, all on the Next.js bot side), which resolves the worker/dispatcher split-brain ownership. Deferred, not killed: `wellnessLogContains` kept (dead, commented) for when the proactive trigger returns. Spec-level change recorded in SPEC v0.7.2 change-log + §3.7; CLAUDE.md §4 scope lock updated. typecheck/lint/390 tests green.
+
+**Worker deployed to Fly.io prod (#13, 2026-05-29).** The v0.7 worker is live and draining the queue end-to-end.
+
+- **Container smoke gate passed** — a minimal `query()` spawns the native linux-x64 claude binary inside the Fly machine and returns. The constraint that killed the Vercel approach (250 MB function limit) does not apply in the container.
+- **Fly app `hammytime-worker`** — one always-on `shared-cpu-1x`/1GB machine in `sjc`, `athlete_data` volume at `/data`, no public service. Secrets set via `fly secrets`: `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `TOKEN_ENCRYPTION_KEY`, `ATHLETE_ROOT=/data/athletes`. (Env audit against the actual code added 3 missing Strava/crypto secrets and dropped 1 unused; shadow-bcc removed so `DAVID_TELEGRAM_CHAT_ID` no longer required.)
+- **Cron auth** — `CRON_SECRET` + `TELEGRAM_WEBHOOK_SECRET` confirmed in Vercel prod (`vercel env ls`). Daily cron schedule `30 13 * * *` = 13:30 UTC = 6:30am PDT / 5:30am PST.
+- **Inbound webhook** — registered to `https://www.daybreak.run/api/tg/webhook` (canonical domain; vercel.app 308-redirects and Telegram won't follow). `getWebhookInfo` clean (no `last_error_message`, 0 pending). Live poller killed so nothing competes for the bot token. Final confirmation of the prod webhook-secret match needs one real inbound message from David.
+- **Error-leak fix (commit 9222469)** — the SDK returns an error result (e.g. a 429) instead of throwing; the worker previously sent the raw API error text to the athlete. Now `result.subtype !== 'success'` routes to `SOFT_FALLBACK` and records the error. typecheck/lint/390 tests green.
+- **Anthropic tier blocker resolved** — first real prod daily run 429'd: a cold-cache daily run needs ~146k input tokens, >> the 30k tokens/min tier-1 limit. David raised the org tier. Post-fix verification run (agent_run `cccde2f3`, ~96s, cost $0.39, `error=null`) completed cleanly and delivered a real coaching message — no leak.
+
+**Open follow-up (out of scope, flagged):** the verified message leaked the agent's narration — it opened with "Good. The files are updated. Here's the message for David:" before the coaching. A system-prompt tuning issue (`worker/prompts/coach.md` / `system-prompt.ts`), not a deploy bug.
 
 ### Earlier (pre-pivot, still valid)
 
@@ -182,11 +193,13 @@ The `// TODO(#12)` decrement hook in `worker/run-agent.ts` stays until the full 
 
 ## Likely next task
 
-**#13 — Wire cron + Telegram to the worker, end-to-end** (M1 plan §7, §10):
+**#13 is done** — worker deployed, queue draining, daily run verified clean. Remaining close-out items:
 
-1. Flip `/api/cron/daily-checkin` and the Telegram webhook to *enqueue* `job_queue` rows instead of running anything inline.
-2. Run the live Fly.io container smoke test (M1 §3.1 launch gate — binary spawns + returns inside the container). **Blocker if it fails the way Vercel did.**
-3. End-to-end test on David as athlete 1: daily job → coaching read that doesn't re-prescribe a completed run; ad-hoc message → reply.
+1. **Confirm the inbound webhook end-to-end** — David sends one real Telegram message; verify it persists as an inbound `messages` row and enqueues a `tg_message` job the worker drains into a reply. This is the only unverified link in the prod path.
+2. **Strava-aware quality test** (M1 §11) — log a real run, confirm the daily message *references the completed run* instead of prescribing it. Needs David's real Strava data.
+3. **Tune the coach prompt** — stop the agent's narration ("Here's the message for David:") from leaking into the athlete-facing message. `worker/prompts/coach.md` / `worker/system-prompt.ts`.
+
+**#12 (full prepaid metering) remains deferred** until the friend set approaches ~20; revisit with real numbers from the cost-tracking views.
 
 **#12 (full prepaid metering) remains deferred** until the friend set approaches ~20; revisit with real numbers from the cost-tracking views.
 
