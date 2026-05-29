@@ -41,6 +41,8 @@ This session's work (all committed):
 
 **Not done in #11 (intentional):** the live Fly.io container smoke test (M1 §3.1 — the launch gate equivalent of the Vercel binary check) requires an actual deploy with `fly secrets`; David runs that. The metering decrement is stubbed for #12.
 
+**Wellness battery made `/checkin`-only (2026-05-29).** Removed the proactive morning wellness battery. `worker/jobs/daily-checkin.ts` no longer calls `startWellnessBattery` after the agent run — the morning push is now a single coaching message. The battery is triggered only by the `/checkin` command (handler + `handleWellnessMessage` state machine unchanged, all on the Next.js bot side), which resolves the worker/dispatcher split-brain ownership. Deferred, not killed: `wellnessLogContains` kept (dead, commented) for when the proactive trigger returns. Spec-level change recorded in SPEC v0.7.2 change-log + §3.7; CLAUDE.md §4 scope lock updated. typecheck/lint/390 tests green.
+
 ### Earlier (pre-pivot, still valid)
 
 - **Prompt 18.5** — production deploy audit + grammy webhook `bot.init()` fix. Bot is live in webhook mode on Vercel; `/ping` and `/checkin` verified end-to-end.

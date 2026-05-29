@@ -73,7 +73,11 @@ export async function appendWellnessRow(athleteId: string, entry: WellnessEntry)
 
 /**
  * Returns true if wellness_log.md contains a row for the given athlete-local date.
- * Used by the daily-checkin cron for idempotency.
+ *
+ * Currently unused: this was the idempotency guard for the proactive morning
+ * wellness battery (don't re-prompt if the athlete already logged today). That
+ * proactive trigger was removed — the battery is now /checkin-only. Kept for
+ * when the proactive morning battery is reintroduced (see worker/jobs/daily-checkin.ts).
  */
 export async function wellnessLogContains(athleteId: string, date: string): Promise<boolean> {
   const { data } = await supabaseAdmin()

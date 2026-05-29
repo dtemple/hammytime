@@ -9,6 +9,12 @@ This doc covers: sequencing + rough costing, technical implementation plan, open
 
 ### Change log
 
+- **v0.7.2 (2026-05-29) — proactive wellness battery removed; battery is `/checkin`-only.**
+  - The morning push drops to a **single message**: the coaching/training note. The proactive wellness battery (the second message that started the readiness/soreness prompts from the worker) is removed.
+  - **Why:** the battery had split-brain ownership — the Fly.io worker *started* it (set `checkin_state`, sent the readiness prompt) while the Next.js Telegram dispatcher *handled the answers* (`handleWellnessMessage`). Two runtimes coordinating through one `checkin_state` row is more complexity than the signal is worth right now. Making the battery `/checkin`-only collapses ownership entirely into the Telegram dispatcher.
+  - **What's deferred, not killed:** the battery itself still exists and is triggered on demand via the `/checkin` command (readiness 1–10, soreness 1–10 + optional body-part tag, unchanged). Only the proactive morning trigger is gone. The `wellnessLogContains` idempotency guard is retained (dead) for when the proactive trigger is reintroduced.
+  - This supersedes the v0.7.1 "morning push is now two messages" entry and §3.7's implied battery-after-coaching step.
+
 - **v0.7 (2026-05-28) — agent runtime moves to a worker container (the big one).**
   - **Why:** the Claude Agent SDK can't run inside a Vercel serverless function. The SDK spawns a native `claude` binary as a subprocess; the linux-x64 binary is ~240 MB uncompressed and Vercel's per-function uncompressed limit is 250 MB (not configurable, enforced by AWS). There's no room for the binary plus the Next.js runtime and deps. This is not a packaging bug — both Anthropic's hosting guide and Vercel's own KB document that the Agent SDK is a **long-running process meant to run in a container**, not a function.
   - **What changes:** the agent runtime moves from "Agent SDK in a Vercel serverless function" to "**Agent SDK with its built-in tools, running in a Fly.io worker container, one working directory per athlete**." This is a near-1:1 port of the personal coach in `~/projects/health-agent`: a folder of markdown/JSON files + Claude Code's built-in Read/Write/Edit/Glob/Grep/Bash/WebSearch tools + a `CLAUDE.md`-style system prompt + a Strava-fetch script. The agent improvises with general-purpose tools instead of relying on a fixed set of hand-written custom tools — which is the capability that makes the local experience good.
@@ -70,7 +76,7 @@ A multi-tenant version of the existing coach that any of your runners can sign u
 - Telegram bot for daily updates + ad-hoc check-ins (the actual product surface).
 - Adaptive daily-prescription modifications driven by Strava signal + daily wellness battery. The plan itself stays static between versions; only the daily prescription bends.
 - Injury-aware prehab prescriptions.
-- Daily wellness battery — 2 prompts: readiness 1–10, soreness 1–10 (+ optional body-part tag). Sent after the morning coaching message. (Reduced from the 3–4 item sketch in §8.6 — see v0.7.1 change-log.)
+- Daily wellness battery — 2 prompts: readiness 1–10, soreness 1–10 (+ optional body-part tag). On-demand via the `/checkin` command in v1; the proactive morning send is deferred (see v0.7.2 change-log). (Reduced from the 3–4 item sketch in §8.6 — see v0.7.1 change-log.)
 - "Shadow bcc" — every outbound bot message also delivered to David's personal Telegram for the first 7 days per athlete, so quality issues get caught fast without a blocking approval step.
 
 **v1 explicitly out of scope (defer):**
@@ -198,7 +204,7 @@ Final step output: bot creates a `plan_versions` row with `status = awaiting_pas
 - Daily agent run per §3.7: hydrate the athlete's `memory_files` to a per-athlete working directory, run the Agent SDK with built-in tools (it pulls Strava via a Bash script and writes its own files), sync changed files back to `memory_files`, send to Telegram. The agent emits prose directly — no structured-JSON validation step in v0.7 (§3.7).
 - Memory file storage: row-per-file in Postgres (`memory_files`) is the source of truth; hydrated to disk per run and synced back after (v0.7 §3.3). Files mirror today's eight-file layout from `CLAUDE.md` (checkin_log, athlete_profile, race_calendar, personal_records, open_questions, wellness_log, injury_log, weekly_survey_log) — though weekly_survey_log stays empty in v1 since Sunday survey is deferred.
 - Agent runtime: Claude Agent SDK in the Fly.io worker, using its **built-in tools** (Read, Write, Edit, Glob, Grep, Bash, WebSearch) over the athlete's folder — no custom MCP tool catalog (v0.7 §3.1). Strava data comes from a Bash-invoked fetch script.
-- **Daily wellness battery** sent after the morning coaching message: 2 prompts — readiness 1–10, soreness 1–10 (+ optional body-part tag). No free-text note. (See v0.7.1 change-log; supersedes the §8.6 sketch.)
+- **Daily wellness battery** triggered on-demand via `/checkin`: 2 prompts — readiness 1–10, soreness 1–10 (+ optional body-part tag). No free-text note. The proactive morning send is deferred (see v0.7.2 change-log). (See v0.7.1 change-log; supersedes the §8.6 sketch.)
 - Ad-hoc reply mode: inbound TG message → enqueue `tg_message_received` → handler routes to the agent in lighter context (last 3 days of activity + Haiku-routed subset of memory). Per-athlete advisory lock prevents collisions with the daily run.
 
 **Out-of-pocket:** ~$10–30 (you running the loop on yourself + one or two test users).
@@ -414,7 +420,7 @@ Runs in the Fly.io worker, which dequeues a `daily_checkin` job for each due ath
 1. **Hydrate:** write the athlete's `memory_files` rows to a per-athlete working directory on disk, plus the parameterized `CLAUDE.md` system prompt and the Strava-fetch script.
 2. **Run the Agent SDK** (`query()`) with built-in tools, `cwd` set to that directory. The agent reads its files, runs the Strava script via Bash to pull the last 14 days (+ 7d/28d summaries + marathon prediction), web-searches as needed, reasons, and writes back to its files — the same loop the personal coach runs locally. No custom MCP tools; the SDK's built-ins do the work. `maxTurns` and a per-run cost budget cap the loop.
 3. **Sync back:** changed files in the working directory are written back to `memory_files` (atomic per athlete).
-4. The agent's final message is the athlete-facing response. Render into Telegram-friendly markdown; send; mirror to David's Telegram if this athlete is still in their 7-day shadow window.
+4. The agent's final message is the athlete-facing response — and the *only* morning message. Render into Telegram-friendly markdown; send; mirror to David's Telegram if this athlete is still in their 7-day shadow window. (The wellness battery no longer follows automatically; it's `/checkin`-only — see v0.7.2 change-log.)
 5. **Persist** `agent_runs` (model, token split incl. cache, cost) + `agent_run_steps` from the SDK message stream. (Prepaid-balance decrement is deferred — see §3.11; a `// TODO(#12)` hook marks the spot.)
 
 Idempotency and concurrency are unchanged from prior versions: the `daily_checkin` job is keyed `daily-{athlete_id}-{YYYY-MM-DD}` (unique in `job_queue`), and a per-athlete advisory lock prevents a daily run and an ad-hoc reply from colliding on the same folder/memory rows.
