@@ -9,6 +9,11 @@ This doc covers: sequencing + rough costing, technical implementation plan, open
 
 ### Change log
 
+- **v0.7.5 (2026-05-29) — Strava brand-guideline compliance (app-submission gate).**
+  - The OAuth entry was a bare redirect with no Strava branding. `/strava/connect` is now an interstitial page rendering the official "Connect with Strava" button (unmodified, 48px); `/strava/connected` shows the official "Powered by Strava" mark. Assets (from Strava's brand pack) live in `public/strava/`. The button + mark are a gate for submitting the app to Strava — reviewers check them directly. See §3.5.
+  - **Webhook scope decision:** v1 stays **deauthorization-only** (Option A) — activity events remain no-ops. Routing by `owner_id` is already in place, so promoting activity-create events to a `job_queue` trigger for proactive post-activity coaching is a **planned v1.5** move (Option B); deferred because it reopens the proactive-send decision deferred in v0.7.2 and multiplies per-run `agent_runs`/credit cost. Even then nothing is persisted — the event is a trigger, not a store.
+  - Cleaned up stale "activity-event / new-activities" webhook language in §2 (Week 2), §3.1, and §3.2 to match.
+
 - **v0.7.4 (2026-05-29) — Strava deauthorization handling + athlete disconnect.**
   - Added the Strava push-subscription webhook (`/api/strava/webhook`) and an athlete-facing `/disconnect_strava` command, driven by a Strava **API-compliance** requirement: their terms require deleting a user's data within 48h of revocation. daybreak persists **no** Strava activity data, so "deletion" = removing the encrypted `oauth_tokens` row (and, when athlete-initiated, revoking on Strava's side).
   - **New pieces:** `deauthorize()` in `src/server/strava/client.ts`; `disconnectStrava()` single source of truth in `src/server/strava/disconnect.ts`; the webhook route (GET validation handshake, POST always-200 deauth handler — activity events are no-ops); the `/disconnect_strava` bot command; `scripts/register-strava-webhook.ts` (create/list/delete the one app-level subscription); `scripts/disconnect-strava.ts` refactored to delegate to the helper.
@@ -200,7 +205,7 @@ Final step output: bot creates a `plan_versions` row with `status = awaiting_pas
 **Goals:** Athlete finishes onboarding → connects Strava → pastes a plan back → has an active `plan_versions` row that the agent can read.
 
 - **Strava OAuth in Telegram.** Bot sends an "authorize Strava" link (web page that initiates OAuth with `read,activity:read_all` scopes). Callback persists encrypted refresh token, fires a Telegram message back to the athlete confirming connection. No backfill in v1 (cut #9 in §1) — only "since signup" activities.
-- **Strava webhook subscription.** App-level subscription (one for the whole bot), routes incoming activity events to the right athlete by `owner_id`.
+- **Strava webhook subscription.** App-level subscription (one for the whole bot), routing by `owner_id` → athlete. In v1 the handler is **deauthorization-only** (the 48h-deletion compliance term); activity events are no-ops since nothing is persisted. Activity-triggered runs are a planned v1.5 move — see §3.5 / §3.5.1.
 - **Token refresh job.** Vercel cron every 4 hours, refresh any token expiring within 6 hours. Lazy refresh on use as a fallback. Surface failures as a Telegram message to the athlete + an admin alert.
 - **BYO-plan paste-back flow.** Athlete pastes JSON plan into Telegram (single long message; Telegram inbound has no 4096-char limit, only outbound). Bot parses, validates against the plan Zod schema, and either: (a) accepts and writes a `plan_versions` row with `status = active`, or (b) replies with structured validation errors and asks the athlete to fix in their Claude/ChatGPT session and re-paste. Athlete can iterate as many times as needed.
 - **Schema validator** with helpful errors. Don't return raw Zod errors — translate them: "I'm expecting 22 weeks, you sent 18" / "Week 5 long run is 30 miles which is above the safety cap for finish-marathon plans — was that intentional?" Build this carefully; it's the only quality gate on plan content in v1.
@@ -309,7 +314,7 @@ That's well under the "<$200/mo" ceiling I'd quietly check against, and it's a s
 
 **LLM:** Anthropic API. Server-side plan generation deferred (BYO-plan, §3.4). Sonnet 4.6 for daily check-ins; Opus 4.6 for weekly synthesis and any "injury concern detected" branch; Haiku 4.5 for tiny routing/classification calls (e.g. "is this Telegram message a question, a status update, or a plan paste?"). All with prompt caching enabled on the system prompt and memory files.
 
-**Strava:** OAuth2, refresh tokens encrypted via Supabase Vault or libsodium. Webhook subscription for new activities. Token refresh job on a 4-hour cron. No backfill on connect in v1 (deferred — see §3.5); first plan and first ~14 days of check-ins use the step-5 self-reported mileage as cold-start context.
+**Strava:** OAuth2, refresh tokens encrypted via Supabase Vault or libsodium. Webhook subscription for deauthorization compliance (activity events are no-ops in v1 — see §3.5.1). Token refresh job on a 4-hour cron. No backfill on connect in v1 (deferred — see §3.5); first plan and first ~14 days of check-ins use the step-5 self-reported mileage as cold-start context.
 
 **Telegram:** Direct Bot API via `grammy` (decided in week 0). Webhook → Vercel API route → enqueue handler in `job_queue`. One bot, all users routed by `chat_id` ↔ `athlete_id`.
 
@@ -325,8 +330,8 @@ The web surface is intentionally minimal in v0.3. Onboarding lives in Telegram; 
 /                              → tiny landing: 3-line value prop + email field
 /signup                        → allowlist check → mint link_token →
                                  render Telegram deeplink + QR
-/strava/connect                → initiates Strava OAuth (linked from
-                                 Telegram during week 2 onboarding)
+/strava/connect                → official "Connect with Strava" button →
+                                 OAuth (linked from Telegram onboarding)
 /strava/callback               → OAuth return, persists encrypted token,
                                  redirects to a "go back to Telegram" page
 /app/plan                      → read-only view of the active plan_version
@@ -335,7 +340,7 @@ The web surface is intentionally minimal in v0.3. Onboarding lives in Telegram; 
                                  agent_runs, errors, outbound messages
 /api/health                    → status pings (Postgres, Anthropic, TG, Strava)
 /api/tg/webhook                → Telegram bot webhook receiver
-/api/strava/webhook            → Strava activity-event webhook receiver
+/api/strava/webhook            → Strava webhook receiver (deauthorization)
 /api/cron/...                  → Vercel cron endpoints
 ```
 
@@ -413,6 +418,8 @@ The server-side plan-generation pipeline from v0.1 is **deferred**. v1 hands the
 - **OAuth scope:** `read,activity:read_all` (need detail on private activities since trail runners often keep them private).
 - **Backfill:** deferred in v1 (cut #9). On connect we pull only "since signup" activities going forward; cold-start context comes from the step-5 self-reported mileage. If alpha friends consistently want their plan referenced against pre-signup history, add a 90-day backfill in v1.5 — it's a half-day change.
 - **Webhook (v0.7.4):** one app-level push subscription (`scripts/register-strava-webhook.ts`), callback at `/api/strava/webhook`. The handler exists primarily for **deauthorization compliance**: Strava's API terms require deleting a user's data within 48h of their revoking access. We persist no Strava activity data, so activity events are no-ops — and "deletion" on a deauth event means removing the `oauth_tokens` row. On `object_type='athlete'` + `updates.authorized='false'`, the handler resolves `owner_id` → `provider_athlete_id` → athlete, calls `disconnectStrava(id, { revokeOnStrava: false })`, and sends the athlete a Telegram notice. The POST always returns 200 fast (Strava disables subscriptions that error/timeout); Strava does not sign event POSTs. See §3.5.1.
+- **Brand-guideline compliance (app-submission launch gate).** Strava's brand guidelines are checked at app review. `/strava/connect` is an interstitial page rendering the official "Connect with Strava" button (unmodified, native 48px) linking to the authorize URL; `/strava/connected` shows the "Powered by Strava" mark, kept less prominent than the page text. Official assets live in `public/strava/`. When the plan view (`/app/plan`) surfaces activity data it will also need the "Powered by Strava" mark plus a "View on Strava" link (exact text, `#FC5200`/bold/underline) on any itemized activity. Treat the button + mark as a gate for submitting the app to Strava.
+- **Activity-triggered runs (planned v1.5 — Option B).** The subscription already routes by `owner_id`, so flipping activity-create events from no-op into a `job_queue` enqueue would give proactive post-activity coaching: the agent fetches live (~30 min after the activity, per Strava's guidance, to let the athlete add notes) and messages them. Deferred from v1 — it reopens the proactive-send decision deferred in v0.7.2 and multiplies `agent_runs`/credit drawdown. No persistence even then: the event is a trigger, not a store.
 - **Rate limits:** 100 requests / 15 min per app, 1000 / day. At 25 athletes and ~1 activity/day each, no concern.
 - **Token refresh:** Vercel cron every 4 hours, refresh any token expiring within 6 hours. Lazy refresh on use as fallback. Store last-refresh timestamp. On refresh failure, message the athlete in Telegram + alert David.
 
