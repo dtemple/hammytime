@@ -85,7 +85,6 @@ export default function Home() {
       <footer className="ht-footer">
         <span>© 2026 Daybreak</span>
         <span className="ht-footer-links">
-          <Link href="/about">About</Link>
           <Link href="/privacy">Privacy</Link>
           <Link href="/terms">Terms</Link>
           <Link href="/support">Support</Link>

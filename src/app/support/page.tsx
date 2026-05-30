@@ -67,16 +67,18 @@ export default function Support() {
 
           <dt>How do I disconnect Strava or stop?</dt>
           <dd>
-            Send <code>/disconnect_strava</code> to the bot, or revoke access from Strava
-            (Settings → My Apps → Daybreak → Revoke Access). Revoking on Strava&apos;s side
-            disconnects you here too.
+            Send <code>/disconnect_strava</code>
+            {' '}
+            to the bot, or revoke access from Strava (Settings → My Apps → Daybreak →
+            Revoke Access). Revoking on Strava&apos;s side disconnects you here too.
           </dd>
 
           <dt>How does the daily check-in work?</dt>
           <dd>
             Daybreak messages you on Telegram. Reply to ask questions or adjust your plan,
-            and send <code>/checkin</code> to log how ready and how sore you&apos;re feeling
-            that day.
+            and send <code>/checkin</code>
+            {' '}
+            to log how ready and how sore you&apos;re feeling that day.
           </dd>
 
           <dt>What does it cost?</dt>
@@ -96,7 +98,6 @@ export default function Support() {
       <footer className="ht-footer">
         <span>© 2026 Daybreak</span>
         <span className="ht-footer-links">
-          <Link href="/about">About</Link>
           <Link href="/privacy">Privacy</Link>
           <Link href="/terms">Terms</Link>
           <Link href="/support">Support</Link>
