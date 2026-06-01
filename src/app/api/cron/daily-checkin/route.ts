@@ -30,6 +30,12 @@ export async function GET(req: Request) {
     if (error) throw new Error(`athletes query failed: ${error.message}`);
 
     const onboarded = (athletes ?? []).filter((a) => {
+      // Test athletes onboard inside a Telegram group (negative chat_id) against
+      // prod. Never enqueue daily coaching for them: the worker sends as the real
+      // bot (which isn't in the group), so the job would fail, retry, and alert —
+      // and with the staging bot off between sessions there's no one to receive it.
+      // See docs/testing-onboarding.md.
+      if (String(a.telegram_chat_id).startsWith('-')) return false;
       const step = (a.onboarding_state as { step?: number } | null)?.step ?? 0;
       return step >= onboardingSteps.length;
     });

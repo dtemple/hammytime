@@ -75,7 +75,8 @@ This session's work (all committed):
 - **`scripts/mint-link-token.ts`** (`npm run token:mint -- <email> [ttl]`) — mints a `start` link_token directly (skips `/signup`) and prints a paste-ready `/start@<bot> <token>` for the group (deep links can't target groups). Warns if the email isn't allowlisted.
 - **`scripts/reset-test-athlete.ts`** (`npm run test:reset -- <email>`) — resets the test athlete to pre-onboarding (clears plans/plan_versions/races/injuries/memory_files, resets `onboarding_state` to step 0, clears `checkin_state`, marks link_tokens used). **Hard guard:** refuses any athlete whose `telegram_chat_id` is not negative (i.e. not a group), so it can never touch the real athlete. Leaves Strava/messages/agent_runs intact.
 - **Runbook: `docs/testing-onboarding.md`** — full one-time setup (BotFather staging bot, disable privacy, create group, get group id, `.env.local` swap) + the per-run loop. Read this first.
-- Note: these scripts run against prod (`.env.local` targets prod Supabase); the daily cron will coach the test athlete (real cost) once onboarded — left unsuppressed by choice.
+- Note: these scripts run against prod (`.env.local` targets prod Supabase). The staging bot's listener is `npm run bot:dev` (the prod Vercel webhook is bound to the real bot token, so it can't serve the staging bot) — must run for the whole test session.
+- **Daily cron now excludes group-chat (test) athletes** (`src/app/api/cron/daily-checkin/route.ts` skips negative `telegram_chat_id`). This stops the test athlete from generating failed jobs + DEAD alerts when the staging bot is off, and fixes a latent bug: the cron picked `onboarded[0]` of all onboarded athletes, so a present test athlete could have starved the real athlete of its daily coaching.
 
 ### Earlier (pre-pivot, still valid)
 

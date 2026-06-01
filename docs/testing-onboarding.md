@@ -66,6 +66,16 @@ npm run seed:allowlist -- davidjtemple@gmail.com
 
 ## Running an onboarding test
 
+> **Why you have to run `bot:dev` even though everything is on prod.** "On prod"
+> means the database, Strava, and the Fly worker. It does *not* mean the staging
+> bot has a listener. The production Vercel webhook is bound to the **real** bot's
+> token, so it only serves the real bot — nothing in prod receives your staging
+> bot's updates. Onboarding logic runs in the Next.js bot layer, so something has
+> to poll the staging bot and run it. `bot:dev` (with the staging token in
+> `.env.local`) is that listener. It talks to the prod database, so you still get
+> all-prod for data and Strava; only the staging bot's message handling runs
+> locally. Keep it running for the whole test session.
+
 ```bash
 # 1. Start the staging bot (polls prod for the group's messages)
 npm run bot:dev
@@ -98,7 +108,7 @@ What it leaves alone: the Strava connection, message history, and `agent_runs`. 
 ## Things to know
 
 - **All these scripts run against production**, because `.env.local` points at the prod Supabase project. `test:reset` is guarded, but `clear:plans` and `seed:allowlist` are **not** — be deliberate with them and never point them at your real email.
-- **The daily cron will coach the test athlete.** Once onboarded, the test athlete is a real prod athlete: the daily cron enqueues a job, the Fly worker runs the agent, and it costs real Anthropic tokens and sends a real message to the group. That's intentional — it exercises the full Strava → coaching loop — but it's not free.
+- **The daily cron skips the test athlete.** The enqueuer in `src/app/api/cron/daily-checkin/route.ts` excludes any athlete with a negative (group) chat_id, so the test athlete never gets a daily coaching job. This keeps the cron focused on your real athlete and avoids failed sends + DEAD alerts when the staging bot is off between sessions. (Inbound `tg_message` coaching is *not* excluded — but those jobs only fire when you actively message during a session with `bot:dev` running, and they'd send via the real bot, which isn't in the group. Testing onboarding doesn't trigger them.)
 - **Test data lives in prod tables** (`agent_runs`, `messages`, `job_queue`, etc.) under the test athlete. Filter it out of any aggregate or admin view by the test athlete id if it becomes noise.
 
 ## Files
