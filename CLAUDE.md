@@ -82,7 +82,7 @@ David has flagged these in his own work as failure modes. They apply more weakly
 These decisions are final for v1. Do not reopen them without a spec update.
 
 - **Telegram-only onboarding.** The bot drives all onboarding via a conversational state machine. There is no web onboarding flow. The web app surfaces sign-up (allowlist check → deeplink) and nothing more on that path.
-- **BYO-plan generation.** After onboarding, the bot sends the athlete a prompt template with their answers baked in. The athlete iterates in their own Claude or ChatGPT session and pastes the resulting JSON plan back to the bot. There is no server-side plan-generation pipeline in v1.
+- **Template-first plan generation (v2 — supersedes BYO; signed off 2026-06-01, SPEC v0.7.8).** After onboarding, the agent selects a plan template (distance × experience tier) from the athlete's onboarding + Strava signal, scales it to current volume and weeks-to-race, lightly customizes it, and emits plan JSON against `src/lib/plan-schema.ts`. BYO-plan (the athlete iterating a bot-supplied prompt in their own Claude/ChatGPT and pasting JSON back) is **deferred, not removed** — it returns later as an optional path, never the default. This reverses the v0.3 "no server-side plan-generation pipeline" anti-goal, by design. Until templates ship, the built reality is still BYO (see §1). Design + sequencing: `Specs/ONBOARDING_V2.md` (W3).
 - **Strava required.** `activity:read_all` OAuth is mandatory. There is no manual log fallback in v1. A broken Strava connection means the agent runs without fresh data and surfaces the gap explicitly.
 - **`job_queue` table + Fly.io worker (v0.7).** Background jobs use a Postgres `job_queue` table. The Vercel cron *enqueues* due jobs; the **Fly.io worker container drains** them with `FOR UPDATE SKIP LOCKED` and runs the agent. No Inngest in v1. (Before v0.7 the cron itself ran the agent in a serverless function — that's retired; the Agent SDK's native binary can't fit a Vercel function.)
 - **Agent runtime = Claude Agent SDK + built-in tools, in the worker container (v0.7).** The coaching agent runs `query()` with the SDK's built-in Read/Write/Edit/Glob/Grep/Bash/WebSearch tools against a per-athlete working directory hydrated from `memory_files`. No custom MCP tool catalog, no hand-rolled loop, no `memory-io` layer. Multi-tenant isolation (per-athlete `cwd`, confined Bash, deny-by-default) is a launch gate.
@@ -166,7 +166,13 @@ npm run bot:dev
 
 # Start everything: Supabase, Next.js dev server, and polling bot in parallel
 npm run dev:all
+
+# Onboarding test loop (runs against PROD via .env.local — see docs/testing-onboarding.md first)
+npm run test:reset -- <email>        # wipe the test athlete back to pre-onboarding (group-chat-only, guarded)
+npm run token:mint -- <email> [ttl]  # mint a start token; prints a paste-ready /start@<bot> <token> for the group
 ```
+
+> Re-testing onboarding without touching the real account: the test athlete onboards in a Telegram **group** (negative `chat_id`) via a staging bot pointed at the same prod DB. Full runbook — one-time setup + per-run loop — in `docs/testing-onboarding.md`. `test:reset` refuses any non-group (positive-id) athlete, so it can't touch the real one.
 
 ---
 
