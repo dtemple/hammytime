@@ -9,6 +9,13 @@ This doc covers: sequencing + rough costing, technical implementation plan, open
 
 ### Change log
 
+- **v0.7.6 (2026-06-01) — voice input (pulls a deferred item forward).**
+  - Athletes can send Telegram **voice notes** anywhere text works — onboarding free-text answers, the `/checkin` wellness battery, and coaching conversation. The bot transcribes the note and dispatches it exactly like a typed message.
+  - **How:** a `message:voice` handler in `src/server/telegram/bot.ts` downloads the OGG/OPUS file via `ctx.getFile()`, transcribes it with **OpenAI `gpt-4o-mini-transcribe`** (`src/lib/transcribe.ts`, native `fetch` — no new dependency), writes the transcript onto `ctx.message.text`, and calls the existing `handleInboundText`. Every downstream path reads it as typed; the transcript persists to `messages.body` through the existing inserts. No schema change.
+  - Transcription is **raw** — no cleanup pass. The coach system prompt (`worker/prompts/coach.md`) notes messages may be voice-transcribed so it reads disfluent text generously. Transcription runs synchronously in the webhook (~2–3s, consistent with onboarding's existing synchronous LLM calls); the coaching path still enqueues a `tg_message` job and returns fast.
+  - **New secret:** `OPENAI_API_KEY` (used in the Next.js webhook, not the worker). Anthropic has no speech-to-text endpoint, so a separate provider is required.
+  - Supersedes the deferral in `Specs/archive/M1.md` ("Voice notes from Telegram… defer until conversational coach is solid") — the conversational coach is live.
+
 - **v0.7.5 (2026-05-29) — Strava brand-guideline compliance (app-submission gate).**
   - The OAuth entry was a bare redirect with no Strava branding. `/strava/connect` is now an interstitial page rendering the official "Connect with Strava" button (unmodified, 48px); `/strava/connected` shows the official "Powered by Strava" mark. Assets (from Strava's brand pack) live in `public/strava/`. The button + mark are a gate for submitting the app to Strava — reviewers check them directly. See §3.5.
   - **Webhook scope decision:** v1 stays **deauthorization-only** (Option A) — activity events remain no-ops. Routing by `owner_id` is already in place, so promoting activity-create events to a `job_queue` trigger for proactive post-activity coaching is a **planned v1.5** move (Option B); deferred because it reopens the proactive-send decision deferred in v0.7.2 and multiplies per-run `agent_runs`/credit cost. Even then nothing is persisted — the event is a trigger, not a store.

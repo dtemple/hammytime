@@ -12,6 +12,7 @@ import { fetchRecentActivities, hasStravaConnection } from '@/server/strava/acti
 import { disconnectStrava } from '@/server/strava/disconnect';
 import { getOrCreateCalendarToken } from '@/lib/calendar-token';
 import { enqueueJob } from '@/server/jobs/enqueue';
+import { transcribeOgg } from '@/lib/transcribe';
 
 let _bot: Bot | null = null;
 
@@ -207,6 +208,43 @@ export async function handleInboundText(ctx: Context): Promise<void> {
   } else {
     await ctx.reply('Your onboarding is complete — daily coaching is coming soon.');
   }
+}
+
+// Transcribes a Telegram voice note and dispatches it exactly like a typed
+// message. We write the transcript onto ctx.message.text so every downstream
+// path (wellness, onboarding, coaching) picks it up through handleInboundText.
+export async function handleInboundVoice(ctx: Context): Promise<void> {
+  // Instant acknowledgement while transcription runs (a few seconds).
+  try {
+    await ctx.react('👀');
+  } catch (err) {
+    console.warn('[bot] react failed', err);
+  }
+
+  let transcript: string;
+  try {
+    const file = await ctx.getFile();
+    const url = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Telegram file download failed (${res.status})`);
+    }
+    const buf = await res.arrayBuffer();
+    transcript = await transcribeOgg(buf);
+  } catch (err) {
+    console.error('[bot] voice transcription failed', err);
+    await ctx.reply("Voice transcription is having trouble right now — mind typing it for now?");
+    return;
+  }
+
+  if (!transcript) {
+    await ctx.reply("Couldn't make out that audio — mind typing it or trying again?");
+    return;
+  }
+
+  // Inject the transcript so downstream handlers read it as if typed.
+  (ctx.message as { text?: string }).text = transcript;
+  await handleInboundText(ctx);
 }
 
 export async function handleConnectStravaCommand(ctx: CommandContext<Context>): Promise<void> {
@@ -433,6 +471,9 @@ function getBot(): Bot {
       if (!ctx.message.text.startsWith('/')) {
         await handleInboundText(ctx);
       }
+    });
+    _bot.on('message:voice', async (ctx) => {
+      await handleInboundVoice(ctx);
     });
     _bot.on('callback_query:data', async (ctx) => {
       const data = ctx.callbackQuery.data;
