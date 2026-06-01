@@ -61,14 +61,14 @@ This session's work (all committed):
 - **`worker/run-agent.ts`** — starts the loop for `tg_message` only (daily check-ins are proactive — no one waiting), clears it in the run's `finally`. The reply send clears the indicator on Telegram's side.
 - No schema/payload change (worker never needs `message_id`; reaction stays 👀 after reply — no completion swap). Fixed the `run-agent` test mock to export `startTyping`. Commit `ab762fd`, pushed to main (Vercel auto-deploy) + `fly deploy` (worker). typecheck/lint/407 tests green; David confirmed the reaction + typing render in a real chat.
 
-**Voice-note input (session 21, 2026-06-01 — committed to main, not yet deployed/tested).** Athletes can send a Telegram voice note anywhere text works — onboarding free-text answers, the `/checkin` battery, and coaching. The clean part: all three inbound handlers read `ctx.message?.text ?? ''`, so we transcribe and inject the transcript onto `ctx.message.text`, then reuse the existing `handleInboundText`. No downstream refactor, no schema change — the transcript persists to `messages.body` through the inserts already there.
+**Voice-note input (session 21, 2026-06-01 — ✅ live in prod, confirmed working by David).** Athletes can send a Telegram voice note anywhere text works — onboarding free-text answers, the `/checkin` battery, and coaching. The clean part: all three inbound handlers read `ctx.message?.text ?? ''`, so we transcribe and inject the transcript onto `ctx.message.text`, then reuse the existing `handleInboundText`. No downstream refactor, no schema change — the transcript persists to `messages.body` through the inserts already there.
 
 - **`src/lib/transcribe.ts`** (new) — `transcribeOgg(audio)` POSTs the OGG to OpenAI `gpt-4o-mini-transcribe` via native `fetch`/`FormData`. No new npm dependency. Throws on missing key / non-2xx.
 - **`src/server/telegram/bot.ts`** — new `handleInboundVoice`: 👀 reaction → `ctx.getFile()` download → transcribe → inject transcript → `handleInboundText`. Registered a `message:voice` handler beside `message:text`. Empty/garbled transcript and transcription failures get friendly "type it instead" replies; webhook still 200s.
 - **Transcription is raw** (no cleanup pass). `worker/prompts/coach.md` got one line telling the coach to read voice-transcribed text generously and ask when a garbled term matters.
-- **New secret `OPENAI_API_KEY`** — used in the Next.js webhook only, *not* the Fly worker. Anthropic has no STT endpoint, so a separate provider is required. Added to `.env.example` and to local `.env.local`. **Still needs to be set in Vercel prod (`vercel env add OPENAI_API_KEY production`) before it works live.**
+- **New secret `OPENAI_API_KEY`** — used in the Next.js webhook only, *not* the Fly worker. Anthropic has no STT endpoint, so a separate provider is required. Set in `.env.example`, local `.env.local`, and Vercel prod (Production + Preview).
 - Spec-level change recorded in **SPEC v0.7.6** — pulls forward the deferred voice item from `Specs/archive/M1.md`. Commit `33d2e49`. typecheck/lint clean.
-- **Not done:** Vercel env var, deploy, and live end-to-end test (send a real voice note → confirm transcript row + coach reply). The webhook runs on Vercel so no `fly deploy` is needed for this feature.
+- **Deployed + verified:** pushed to main → Vercel prod deploy `m12mf0m4d` (webhook-only, no `fly deploy` needed). First live test failed with an OpenAI `insufficient_quota` 429 (account billing, not code — the catch block correctly fell back to "type it for now"); after David added OpenAI billing credit, voice→transcript→coach-reply confirmed working end-to-end.
 
 **Onboarding test harness (session 22, 2026-06-01).** A repeatable way to test onboarding against prod without disturbing David's real day-to-day athlete. The constraint: one Telegram account, and `athletes.telegram_chat_id` is `UNIQUE`, so the real and test athletes can't share the same private chat in one DB. Solution: onboard the test athlete inside a **Telegram group** (negative `chat_id`, distinct from the private chat) talking to a **second/staging bot** that points at the same prod database — so Strava OAuth and the full loop work as-is.
 
@@ -215,8 +215,6 @@ The `// TODO(#12)` decrement hook in `worker/run-agent.ts` stays until the full 
 ---
 
 ## Likely next task
-
-**Voice input (session 21) close-out** — set `OPENAI_API_KEY` in Vercel prod, deploy, then send a real Telegram voice note and confirm: 👀 reaction → transcript row in `messages` (`direction='in'`) → `tg_message` job → coach reply that addresses the spoken content. Webhook-only feature, so no `fly deploy` needed.
 
 **#13 is done** — worker deployed, queue draining, daily run verified clean. Remaining close-out items:
 
