@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-06-01 (session 21 — voice-note input committed: Telegram voice notes are transcribed (OpenAI gpt-4o-mini-transcribe) and dispatched through the existing text path, so voice works anywhere text does. Code committed to main; not yet deployed and not yet live-tested.)_
+_Updated: 2026-06-01 (session 22 — onboarding test harness: staging bot + Telegram group lets David re-test onboarding against prod without touching the real account. Two scripts (`token:mint`, `test:reset`) + a runbook at `docs/testing-onboarding.md`.)_
 
 ---
 
@@ -69,6 +69,13 @@ This session's work (all committed):
 - **New secret `OPENAI_API_KEY`** — used in the Next.js webhook only, *not* the Fly worker. Anthropic has no STT endpoint, so a separate provider is required. Added to `.env.example` and to local `.env.local`. **Still needs to be set in Vercel prod (`vercel env add OPENAI_API_KEY production`) before it works live.**
 - Spec-level change recorded in **SPEC v0.7.6** — pulls forward the deferred voice item from `Specs/archive/M1.md`. Commit `33d2e49`. typecheck/lint clean.
 - **Not done:** Vercel env var, deploy, and live end-to-end test (send a real voice note → confirm transcript row + coach reply). The webhook runs on Vercel so no `fly deploy` is needed for this feature.
+
+**Onboarding test harness (session 22, 2026-06-01).** A repeatable way to test onboarding against prod without disturbing David's real day-to-day athlete. The constraint: one Telegram account, and `athletes.telegram_chat_id` is `UNIQUE`, so the real and test athletes can't share the same private chat in one DB. Solution: onboard the test athlete inside a **Telegram group** (negative `chat_id`, distinct from the private chat) talking to a **second/staging bot** that points at the same prod database — so Strava OAuth and the full loop work as-is.
+
+- **`scripts/mint-link-token.ts`** (`npm run token:mint -- <email> [ttl]`) — mints a `start` link_token directly (skips `/signup`) and prints a paste-ready `/start@<bot> <token>` for the group (deep links can't target groups). Warns if the email isn't allowlisted.
+- **`scripts/reset-test-athlete.ts`** (`npm run test:reset -- <email>`) — resets the test athlete to pre-onboarding (clears plans/plan_versions/races/injuries/memory_files, resets `onboarding_state` to step 0, clears `checkin_state`, marks link_tokens used). **Hard guard:** refuses any athlete whose `telegram_chat_id` is not negative (i.e. not a group), so it can never touch the real athlete. Leaves Strava/messages/agent_runs intact.
+- **Runbook: `docs/testing-onboarding.md`** — full one-time setup (BotFather staging bot, disable privacy, create group, get group id, `.env.local` swap) + the per-run loop. Read this first.
+- Note: these scripts run against prod (`.env.local` targets prod Supabase); the daily cron will coach the test athlete (real cost) once onboarded — left unsuppressed by choice.
 
 ### Earlier (pre-pivot, still valid)
 
