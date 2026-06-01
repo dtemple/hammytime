@@ -7,7 +7,10 @@ vi.mock('../folder', () => ({
   syncBack: vi.fn().mockResolvedValue(undefined),
   cleanup: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('../send', () => ({ sendReply: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('../send', () => ({
+  sendReply: vi.fn().mockResolvedValue(undefined),
+  startTyping: vi.fn().mockResolvedValue(() => {}),
+}));
 vi.mock('../persist', () => ({ persistRun: vi.fn().mockResolvedValue('run-1') }));
 vi.mock('../system-prompt', () => ({
   renderSystemPrompt: vi.fn().mockResolvedValue('SYSTEM PROMPT'),

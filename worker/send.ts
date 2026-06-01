@@ -18,6 +18,32 @@ function bot(): Bot {
   return _bot;
 }
 
+const TYPING_REFRESH_MS = 4000; // Telegram clears 'typing' after ~5s; refresh under that.
+
+/**
+ * Starts a repeating 'typing…' chat action for the athlete and returns a stop fn.
+ * Best-effort: a missing chat_id or a failed action never throws into the caller.
+ */
+export async function startTyping(athleteId: string): Promise<() => void> {
+  const { data: athlete } = await supabaseAdmin()
+    .from('athletes')
+    .select('telegram_chat_id')
+    .eq('id', athleteId)
+    .maybeSingle();
+
+  const chatId = athlete?.telegram_chat_id;
+  if (!chatId) return () => {};
+
+  const ping = () =>
+    bot()
+      .api.sendChatAction(chatId, 'typing')
+      .catch((e) => console.warn('[worker] sendChatAction failed', e));
+
+  void ping(); // fire immediately
+  const timer = setInterval(() => void ping(), TYPING_REFRESH_MS);
+  return () => clearInterval(timer);
+}
+
 export function chunk(text: string, size = TELEGRAM_MAX_CHARS): string[] {
   const trimmed = text.trim();
   if (trimmed.length === 0) return [];

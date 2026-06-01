@@ -10,7 +10,7 @@ import { COACH_MODEL, MAX_BUDGET_USD, MAX_TURNS } from './config';
 import { cleanup, hydrate, syncBack } from './folder';
 import { ALLOWED_TOOLS, makeIsolationGuard, scrubbedEnv } from './isolation';
 import { persistRun, type CapturedStep, type RunKind } from './persist';
-import { sendReply } from './send';
+import { sendReply, startTyping } from './send';
 import { buildPrompt, loadRecentHistory, renderSystemPrompt } from './system-prompt';
 
 export type RunSource = 'daily_checkin' | 'tg_message';
@@ -31,6 +31,16 @@ export async function runAgent(
   const startedAt = new Date().toISOString();
   const timezone = await loadTimezone(athleteId);
   const folder = await hydrate(athleteId);
+
+  // Only for athlete-initiated messages — daily check-ins are proactive, so
+  // no one is waiting on a typing indicator. Cleared in the outer finally.
+  let stopTyping: () => void = () => {};
+  if (source === 'tg_message') {
+    stopTyping = await startTyping(athleteId).catch((e) => {
+      console.warn('[run-agent] startTyping failed', e);
+      return () => {};
+    });
+  }
 
   let result: SDKResultMessage | null = null;
   let runError: string | null = null;
@@ -106,6 +116,7 @@ export async function runAgent(
     const finalReply = replyText.trim() || SOFT_FALLBACK;
     await sendReply(athleteId, finalReply, runId ?? undefined);
   } finally {
+    stopTyping();
     await cleanup(folder.dir).catch((e) =>
       console.error(`[run-agent] cleanup failed for ${athleteId}:`, e),
     );

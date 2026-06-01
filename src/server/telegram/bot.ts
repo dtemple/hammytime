@@ -196,6 +196,14 @@ export async function handleInboundText(ctx: Context): Promise<void> {
       athlete_id: athlete.id,
       text,
     });
+    try {
+      // Instant "got it" while the worker spins up — the typing indicator
+      // (driven by the worker during the agent run) carries the rest.
+      await ctx.react('👀');
+    } catch (err) {
+      // Reaction is cosmetic — never let it break the enqueue/200.
+      console.warn('[bot] react failed', err);
+    }
   } else {
     await ctx.reply('Your onboarding is complete — daily coaching is coming soon.');
   }
