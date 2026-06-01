@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-06-01 (session 22 — onboarding test harness: staging bot + Telegram group lets David re-test onboarding against prod without touching the real account. Two scripts (`token:mint`, `test:reset`) + a runbook at `docs/testing-onboarding.md`.)_
+_Updated: 2026-06-01 (session 23 — onboarding v2 W1: Strava-forward plumbing. Data-layer only — `getLoggedInAthlete`, `getFitnessSnapshot`, `deriveTimezone` in `src/server/strava/activities.ts`, the functions W2/W3 will consume. No state-machine or callback wiring yet.)_
 
 ---
 
@@ -77,6 +77,20 @@ This session's work (all committed):
 - **Runbook: `docs/testing-onboarding.md`** — full one-time setup (BotFather staging bot, disable privacy, create group, get group id, `.env.local` swap) + the per-run loop. Read this first.
 - Note: these scripts run against prod (`.env.local` targets prod Supabase). The staging bot's listener is `npm run bot:dev` (the prod Vercel webhook is bound to the real bot token, so it can't serve the staging bot) — must run for the whole test session.
 - **Daily cron now excludes group-chat (test) athletes** (`src/app/api/cron/daily-checkin/route.ts` skips negative `telegram_chat_id`). This stops the test athlete from generating failed jobs + DEAD alerts when the staging bot is off, and fixes a latent bug: the cron picked `onboarded[0]` of all onboarded athletes, so a present test athlete could have starved the real athlete of its daily coaching.
+
+**Onboarding v2 — W1 Strava-forward plumbing (session 23, 2026-06-01).** First build step of the onboarding-v2 redesign (`Specs/ONBOARDING_V2.md`). W0 (test harness) landed in session 22; W1 builds the Strava **data layer** that W2 (state-machine restructure) and W3 (template plan-gen) will consume to pre-fill onboarding buttons. **Pure data layer — returns structured values, writes nothing, touches no state machine.** All in `src/server/strava/activities.ts`:
+
+- **`getLoggedInAthlete(athleteId)` → `StravaProfile | null`** — net-new `GET /athlete` call (profile previously came only from the OAuth token-exchange response). Every field `?? null` for privacy-hidden data; throws `StravaTokenBrokenError` on a 401 that survives a refresh retry. Lives in `activities.ts` (not `client.ts`) to avoid the `client ↔ activities` import cycle.
+- **`getFitnessSnapshot(athleteId, days=56)` → `StravaFitnessSnapshot | null`** — 8-week training snapshot: recent (trailing-4wk) + avg (8wk) weekly mileage, longest run, runs/week, clamped `suggested_days_per_week` (3–6), `dominant_long_run_weekday` (mode of each week's longest run), road/trail mix. `null` for no Strava connection; **zero-count snapshot** for connected-but-no-activities (so W2 knows to fall back to asking).
+- **`deriveTimezone(activities, profile?)` → `string | null`** — parses the IANA zone from the most recent activity's Strava `timezone` field; returns `null` when none (W2 asks/confirms). **No city→IANA library** — deliberate scope call (David signed off).
+- **Supporting:** added `timezone` to `StravaActivitySummary` + `mapActivity` (additive); threaded optional `perPage` (default 50) through `fetchRecentActivities`/`callStravaActivities` so the snapshot pulls `per_page=200` over 8 weeks without disturbing the worker's 14-day callers.
+- **Tests:** new `activities.test.ts`, 11 cases — profile mapping, privacy-nulls, no-connection, 401→`StravaTokenBrokenError`, snapshot math on a fixed fixture set, empty-history fallback, timezone parsing. typecheck/lint/**418 tests** green (407 prior + 11 new).
+
+**Two deliberate deviations from the literal W1 bullet list, both confirmed with David:** (1) callback-resume wiring (`/strava/callback` kicking onboarding forward) **deferred to W2** — the A1 step it would resume into doesn't exist until the state-machine restructure, and the A1 confirmation copy belongs there. (2) timezone falls back to `null` rather than city→IANA (no dataset/library).
+
+**Pre-existing latent issue noted, left alone (out of W1 scope):** `fetchRecentActivities` throws a plain `Error` on a persistent 401, not `StravaTokenBrokenError`, so the worker's typed-error branch (`worker/strava.ts:90`) only ever fires for the new `getLoggedInAthlete`. Harmless today (worker degrades to `broken: true` either way), but the friendlier "expired or revoked" message never reaches the activity path. Worth a real fix if token breakage becomes common.
+
+**Deploy:** Next.js-side plumbing not yet wired into any route → Vercel auto-deploy on push to main. No `fly deploy` needed (worker behavior unchanged — additive type field + unused new functions).
 
 ### Earlier (pre-pivot, still valid)
 
@@ -216,6 +230,12 @@ The `// TODO(#12)` decrement hook in `worker/run-agent.ts` stays until the full 
 ---
 
 ## Likely next task
+
+**Onboarding v2 — W2 (state-machine restructure).** The next workstream in `Specs/ONBOARDING_V2.md`. Replaces the 7 rigid steps with the Phase-A button beats (goal, experience, race via `lookupRace`, days/week, long-run day, injury quick-check) + the enrichment-dump step (inline LLM extraction → echo → confirm). W2 consumes the W1 data layer (`getLoggedInAthlete`, `getFitnessSnapshot`, `deriveTimezone`) to pre-fill buttons, and is where the **Strava-forward ordering** (A0→A1) and the **callback-resume wiring deferred from W1** get built (the A1 confirmation copy lives with that step). Model three goal states: committed race, race-intended-but-unselected (A4b), and day-to-day-no-race. W2 needs W1 (done); W4 needs W2 + W3. David is kicking W2 off in a new thread.
+
+---
+
+### Prior close-out items (v0.7 worker)
 
 **#13 is done** — worker deployed, queue draining, daily run verified clean. Remaining close-out items:
 
