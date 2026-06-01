@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-06-01 (session 20 — typing/"working on it" indicator shipped to prod: 👀 reaction on receipt (webhook) + looped sendChatAction('typing') during the agent run (worker, gated to tg_message). Both surfaces deployed and confirmed live by David.)_
+_Updated: 2026-06-01 (session 21 — voice-note input committed: Telegram voice notes are transcribed (OpenAI gpt-4o-mini-transcribe) and dispatched through the existing text path, so voice works anywhere text does. Code committed to main; not yet deployed and not yet live-tested.)_
 
 ---
 
@@ -60,6 +60,15 @@ This session's work (all committed):
 - **`worker/send.ts`** — new `startTyping(athleteId)` fetches `telegram_chat_id`, fires `sendChatAction('typing')` immediately, then on a 4s `setInterval` (Telegram clears typing after ~5s), and returns a stop fn.
 - **`worker/run-agent.ts`** — starts the loop for `tg_message` only (daily check-ins are proactive — no one waiting), clears it in the run's `finally`. The reply send clears the indicator on Telegram's side.
 - No schema/payload change (worker never needs `message_id`; reaction stays 👀 after reply — no completion swap). Fixed the `run-agent` test mock to export `startTyping`. Commit `ab762fd`, pushed to main (Vercel auto-deploy) + `fly deploy` (worker). typecheck/lint/407 tests green; David confirmed the reaction + typing render in a real chat.
+
+**Voice-note input (session 21, 2026-06-01 — committed to main, not yet deployed/tested).** Athletes can send a Telegram voice note anywhere text works — onboarding free-text answers, the `/checkin` battery, and coaching. The clean part: all three inbound handlers read `ctx.message?.text ?? ''`, so we transcribe and inject the transcript onto `ctx.message.text`, then reuse the existing `handleInboundText`. No downstream refactor, no schema change — the transcript persists to `messages.body` through the inserts already there.
+
+- **`src/lib/transcribe.ts`** (new) — `transcribeOgg(audio)` POSTs the OGG to OpenAI `gpt-4o-mini-transcribe` via native `fetch`/`FormData`. No new npm dependency. Throws on missing key / non-2xx.
+- **`src/server/telegram/bot.ts`** — new `handleInboundVoice`: 👀 reaction → `ctx.getFile()` download → transcribe → inject transcript → `handleInboundText`. Registered a `message:voice` handler beside `message:text`. Empty/garbled transcript and transcription failures get friendly "type it instead" replies; webhook still 200s.
+- **Transcription is raw** (no cleanup pass). `worker/prompts/coach.md` got one line telling the coach to read voice-transcribed text generously and ask when a garbled term matters.
+- **New secret `OPENAI_API_KEY`** — used in the Next.js webhook only, *not* the Fly worker. Anthropic has no STT endpoint, so a separate provider is required. Added to `.env.example` and to local `.env.local`. **Still needs to be set in Vercel prod (`vercel env add OPENAI_API_KEY production`) before it works live.**
+- Spec-level change recorded in **SPEC v0.7.6** — pulls forward the deferred voice item from `Specs/archive/M1.md`. Commit `33d2e49`. typecheck/lint clean.
+- **Not done:** Vercel env var, deploy, and live end-to-end test (send a real voice note → confirm transcript row + coach reply). The webhook runs on Vercel so no `fly deploy` is needed for this feature.
 
 ### Earlier (pre-pivot, still valid)
 
@@ -199,6 +208,8 @@ The `// TODO(#12)` decrement hook in `worker/run-agent.ts` stays until the full 
 ---
 
 ## Likely next task
+
+**Voice input (session 21) close-out** — set `OPENAI_API_KEY` in Vercel prod, deploy, then send a real Telegram voice note and confirm: 👀 reaction → transcript row in `messages` (`direction='in'`) → `tg_message` job → coach reply that addresses the spoken content. Webhook-only feature, so no `fly deploy` needed.
 
 **#13 is done** — worker deployed, queue draining, daily run verified clean. Remaining close-out items:
 
