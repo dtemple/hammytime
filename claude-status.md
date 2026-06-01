@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-05-29 (session 19 — worker deployed to Fly prod (#13): container smoke gate passed, secrets set, region sjc, queue draining end-to-end; error-leak fix; daily run verified clean after Anthropic tier raise)_
+_Updated: 2026-06-01 (session 20 — typing/"working on it" indicator shipped to prod: 👀 reaction on receipt (webhook) + looped sendChatAction('typing') during the agent run (worker, gated to tg_message). Both surfaces deployed and confirmed live by David.)_
 
 ---
 
@@ -52,7 +52,14 @@ This session's work (all committed):
 - **Error-leak fix (commit 9222469)** — the SDK returns an error result (e.g. a 429) instead of throwing; the worker previously sent the raw API error text to the athlete. Now `result.subtype !== 'success'` routes to `SOFT_FALLBACK` and records the error. typecheck/lint/390 tests green.
 - **Anthropic tier blocker resolved** — first real prod daily run 429'd: a cold-cache daily run needs ~146k input tokens, >> the 30k tokens/min tier-1 limit. David raised the org tier. Post-fix verification run (agent_run `cccde2f3`, ~96s, cost $0.39, `error=null`) completed cleanly and delivered a real coaching message — no leak.
 
-**Open follow-up (out of scope, flagged):** the verified message leaked the agent's narration — it opened with "Good. The files are updated. Here's the message for David:" before the coaching. A system-prompt tuning issue (`worker/prompts/coach.md` / `system-prompt.ts`), not a deploy bug.
+**Open follow-up (deferred 2026-06-01 — do not pick up until it recurs):** the first verified prod message leaked the agent's narration — it opened with "Good. The files are updated. Here's the message for David:" before the coaching. Root cause: `worker/prompts/coach.md` §"Your final message goes straight to the athlete" already forbids that exact preamble and the agent ignored it, so a prompt-only fix is unreliable; the robust fix is a `<message>…</message>` output contract extracted in `worker/run-agent.ts` (designed in the planning session, not implemented). **David has not seen the leak recur since, so we're putting it aside** — revisit only if it shows up again in a real message. The full design is captured in the plan file `~/.claude/plans/i-m-working-on-hammytime-robust-wolf.md` if/when we return to it.
+
+**Typing / "working on it" indicator (session 20, 2026-06-01 — shipped to prod, confirmed live).** Closes the silent gap between an athlete sending a message and the reply landing (~3s queue poll + 5–30s agent run). Two coordinated signals, one per process:
+
+- **`src/server/telegram/bot.ts`** — webhook reacts `ctx.react('👀')` to the inbound message the instant it's enqueued (best-effort, wrapped so a failure never blocks the 200). Confirms receipt sub-second.
+- **`worker/send.ts`** — new `startTyping(athleteId)` fetches `telegram_chat_id`, fires `sendChatAction('typing')` immediately, then on a 4s `setInterval` (Telegram clears typing after ~5s), and returns a stop fn.
+- **`worker/run-agent.ts`** — starts the loop for `tg_message` only (daily check-ins are proactive — no one waiting), clears it in the run's `finally`. The reply send clears the indicator on Telegram's side.
+- No schema/payload change (worker never needs `message_id`; reaction stays 👀 after reply — no completion swap). Fixed the `run-agent` test mock to export `startTyping`. Commit `ab762fd`, pushed to main (Vercel auto-deploy) + `fly deploy` (worker). typecheck/lint/407 tests green; David confirmed the reaction + typing render in a real chat.
 
 ### Earlier (pre-pivot, still valid)
 
@@ -197,7 +204,7 @@ The `// TODO(#12)` decrement hook in `worker/run-agent.ts` stays until the full 
 
 1. **Confirm the inbound webhook end-to-end** — David sends one real Telegram message; verify it persists as an inbound `messages` row and enqueues a `tg_message` job the worker drains into a reply. This is the only unverified link in the prod path.
 2. **Strava-aware quality test** (M1 §11) — log a real run, confirm the daily message *references the completed run* instead of prescribing it. Needs David's real Strava data.
-3. **Tune the coach prompt** — stop the agent's narration ("Here's the message for David:") from leaking into the athlete-facing message. `worker/prompts/coach.md` / `worker/system-prompt.ts`.
+3. ~~**Tune the coach prompt** — stop the agent's narration leak.~~ **Deferred 2026-06-01** — hasn't recurred since the first run; design captured, set aside until it shows up again (see the "Open follow-up" note above).
 
 **#12 (full prepaid metering) remains deferred** until the friend set approaches ~20; revisit with real numbers from the cost-tracking views.
 
