@@ -144,6 +144,7 @@ describe('GET /api/calendar/[token].ics', () => {
     expect(eventCount).toBe(
       seedPlanJson.weeks.reduce((n: number, w: { days: unknown[] }) => n + w.days.length, 0),
     );
-    expect(body).toContain('v1-w1-d0@hammytime');
+    // UID keys on the stable plan id, not the version id, so coach edits don't churn every event.
+    expect(body).toContain('p1-w1-d0@hammytime');
   });
 });

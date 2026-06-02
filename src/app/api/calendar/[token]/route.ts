@@ -43,7 +43,7 @@ export async function GET(
     .maybeSingle();
 
   let parsedPlan = null;
-  let planVersionId: string | null = null;
+  let planId: string | null = null;
   let planStartDate: string | null = null;
 
   if (plan?.current_version_id) {
@@ -57,7 +57,7 @@ export async function GET(
       const result = PlanSchema.safeParse(version.plan_json);
       if (result.success) {
         parsedPlan = result.data;
-        planVersionId = version.id;
+        planId = plan.id;
         planStartDate = plan.start_date;
       }
     }
@@ -67,7 +67,7 @@ export async function GET(
     athleteName: athlete.name,
     timezone: athlete.timezone,
     plan: parsedPlan,
-    planVersionId,
+    planId,
     planStartDate,
   });
 

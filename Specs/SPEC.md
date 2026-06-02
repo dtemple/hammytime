@@ -9,6 +9,14 @@ This doc covers: sequencing + rough costing, technical implementation plan, open
 
 ### Change log
 
+- **v0.7.11 (2026-06-02) — coach edits the plan in chat; the calendar tracks the working plan, with drift vs. baseline.**
+  - **Problem fixed.** The subscribed calendar feed (`/api/calendar/{token}.ics`) renders only from `plan_versions.plan_json` (via `plans.current_version_id`), but the coach was forbidden to touch the plan and its edits were discarded — so a conversational rework ("move the long run to Wednesday, rework the week") never reached the athlete's calendar. This realizes the **append-by-version** plan-modification rule the schema section already described (a modification creates a new `plan_versions` row with `supersedes_id` back) and the in-chat plan edits the v0.7.10 advisory caps assume.
+  - **Working vs. baseline split (one new column).** New `plans.baseline_version_id` anchors the original **plan of record**; `current_version_id` is the **working** plan the calendar renders. A settled coach edit appends a new `plan_versions` row (`generated_by='coach_agent'`, `status='active'`, `supersedes_id` set) and repoints `current_version_id` via the `record_plan_edit` RPC — baseline untouched. Existing plans backfill baseline = current; a plan with no baseline anchor self-heals to its current version on the next worker run, before any edit moves current forward.
+  - **Worker.** `marathon_training_plan.json` is now the coach's **working copy** (no longer immutable input). On a changed-and-`PlanSchema`-valid file the worker publishes a new version (`worker/plan-version.ts`, after sync-back on clean runs). Gate is **schema-validity only** — the advisory caps are warn-not-refuse in chat, so they don't block persistence; a schema-invalid edit is dropped and the last good version stays active (the calendar never renders a broken plan). `coach.md` updated for working-copy semantics, edit rules (keep per-day `date`, settled changes only), and that `race_calendar.md` is the races list, not the schedule.
+  - **Drift surfaced to the coach.** Each run the worker diffs baseline vs. working (`src/lib/plan-drift.ts`: cumulative + per-week planned mileage, per-day workout changes) and writes a read-only `plan_drift.md` into the athlete folder; the coach raises material drift conversationally. **No automated threshold / off-track alert yet** — deferred until real edits calibrate a number.
+  - **Calendar UID stability.** Event UIDs now key on the stable plan id, not the version id, so a coach edit moves only changed days instead of dropping and re-adding all ~154 events. Existing subscribers resync once.
+  - **Deferred (recorded in `claude-status.md`):** the drift threshold / off-track flag; the re-baseline action (moving the anchor on a deliberate re-plan); an alert on a dropped schema-invalid edit.
+
 - **v0.7.10 (2026-06-02) — W3 template plan-gen engine built (templates + renderer + validator + dual-layer caps).**
   - **Engine complete and unit-tested.** The five remaining templates are authored and registered (`marathon-performance`, `half-foundation`, `half-development`, `short-race`, `base-maintenance`), and the stubbed bodies are implemented: `computeRenderParams` (selector), the `renderPlan` pipeline (`allocatePhases → buildWeeks → placeStrength → applyOverlays → PlanSchema.parse`), and `validateSafety`. A rendered plan is `PlanSchema`-valid and passes `validateSafety` for representative athletes across all six templates × the three goal states (committed / intended-with-date / intended-no-date open-ended) — covered by `src/lib/plan-templates/__tests__/`. Deterministic (no LLM), runs inline for the instant B1 preview; the worker agent customizes on top later. §3.4 rewritten to the template-first reality (BYO deferred, not removed).
   - **Safety-cap numbers locked** (were "approved-with-tuning" in v0.7.9): ramp ≤12% or +3 mi; long-run step ≤2 / 3 post-cutback; long run ≤50% of the week (templates target 35%); ≥1 easy day between hard days; per-distance long-run ceilings 5k 8 / 10k 10 / half 15 / marathon 22 / keep-fit 14 (`src/lib/plan-templates/caps.ts`).
@@ -394,7 +402,8 @@ athletes               (id, user_id, name, dob, sex, asthma flag, timezone,
 injuries               (id, athlete_id, body_part, severity, status, notes, started_at)
 races                  (id, athlete_id, name, date, distance_mi, elevation_ft,
                         target_type[finish|time], target_time_sec, status)
-plans                  (id, athlete_id, goal_race_id, start_date, weeks, current_version_id)
+plans                  (id, athlete_id, goal_race_id, start_date, weeks, current_version_id,
+                        baseline_version_id)  -- baseline = original plan of record; current = working plan (v0.7.11)
 plan_versions          (id, plan_id, version, plan_json, schema_version,
                         generated_by[athlete_llm|manual|claude_v2],
                         status[awaiting_paste|active|superseded],
@@ -416,7 +425,7 @@ job_queue              (id, kind, key_unique, payload jsonb, run_after,
                         locked_at, attempts, last_error, completed_at)
 ```
 
-Removed from v0.1: `memory_file_revisions` (cut #7 — log via `agent_run_steps` instead), `invites` (cut #14 — `friend_allowlist` replaces it). Added: `onboarding_state` and `telegram_chat_id` on `athletes`, `status` + `schema_version` on `plan_versions`, `shadow_bcc_until` on `athletes` (unused since v0.7.3), `mirrored_to_admin` on `messages` (unused since v0.7.3), the `job_queue` table.
+Removed from v0.1: `memory_file_revisions` (cut #7 — log via `agent_run_steps` instead), `invites` (cut #14 — `friend_allowlist` replaces it). Added: `onboarding_state` and `telegram_chat_id` on `athletes`, `status` + `schema_version` on `plan_versions`, `shadow_bcc_until` on `athletes` (unused since v0.7.3), `mirrored_to_admin` on `messages` (unused since v0.7.3), the `job_queue` table, `baseline_version_id` on `plans` (v0.7.11).
 
 The memory-file structure mirrors today's eight-file layout (`checkin_log.md`, `athlete_profile.md`, `race_calendar.md`, `personal_records.md`, `open_questions.md`, `wellness_log.md`, `injury_log.md`, `weekly_survey_log.md`). The agent reads/writes via tools; the web app reads for display. `weekly_survey_log.md` exists in the schema but stays empty in v1 — Sunday survey is deferred.
 

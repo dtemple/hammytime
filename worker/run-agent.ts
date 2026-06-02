@@ -8,6 +8,7 @@ import { query, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/cla
 import { supabaseAdmin } from '@/lib/db';
 import { COACH_MODEL, MAX_BUDGET_USD, MAX_TURNS } from './config';
 import { cleanup, hydrate, syncBack } from './folder';
+import { persistPlanEdit } from './plan-version';
 import { ALLOWED_TOOLS, makeIsolationGuard, scrubbedEnv } from './isolation';
 import { persistRun, type CapturedStep, type RunKind } from './persist';
 import { sendReply, startTyping } from './send';
@@ -98,6 +99,10 @@ export async function runAgent(
     if (!runError) {
       await syncBack(athleteId, folder).catch((e) =>
         console.error(`[run-agent] syncBack failed for ${athleteId}:`, e),
+      );
+      // Publish any coach edit to the plan as a new working version → calendar.
+      await persistPlanEdit(athleteId, folder).catch((e) =>
+        console.error(`[run-agent] persistPlanEdit failed for ${athleteId}:`, e),
       );
     }
 

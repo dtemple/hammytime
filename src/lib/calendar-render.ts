@@ -7,7 +7,10 @@ type RenderInput = {
   athleteName: string;
   timezone: string;
   plan: Plan | null;
-  planVersionId: string | null;
+  // The plan id (stable across versions), not the version id — so a coach edit
+  // that bumps the working version keeps event UIDs stable and only changed
+  // days move, instead of every event being dropped and re-added.
+  planId: string | null;
   planStartDate: string | null; // ISO yyyy-mm-dd from plans.start_date
 };
 
@@ -136,7 +139,7 @@ export function renderPlanIcs(input: RenderInput): string {
   const cal = ical({});
   applyCalendarMeta(cal, input);
 
-  if (!input.plan || !input.planVersionId) {
+  if (!input.plan || !input.planId) {
     return cal.toString();
   }
 
@@ -147,7 +150,7 @@ export function renderPlanIcs(input: RenderInput): string {
       const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
 
       const event = cal.createEvent({
-        id: `${input.planVersionId}-w${week.week_number}-d${dayIndex}@hammytime`,
+        id: `${input.planId}-w${week.week_number}-d${dayIndex}@hammytime`,
         start,
         end,
         allDay: true,

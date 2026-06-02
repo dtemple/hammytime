@@ -26,9 +26,14 @@ type AnyMock = any;
 const ATHLETE = '11111111-2222-3333-4444-555555555555';
 
 let memoryRows: { file_name: string; content_md: string }[];
-let planRow: { current_version_id: string | null } | null;
-let versionRow: { plan_json: unknown } | null;
+let planRow: {
+  id: string;
+  current_version_id: string | null;
+  baseline_version_id: string | null;
+} | null;
+let versionRows: { id: string; plan_json: unknown }[];
 let upsertCalls: { rows: unknown[]; opts: unknown }[];
+let planUpdateCalls: unknown[];
 
 function makeDb() {
   return {
@@ -45,12 +50,20 @@ function makeDb() {
       if (table === 'plans') {
         return {
           select: () => ({
-            eq: () => ({ order: () => ({ limit: () => ({ maybeSingle: () => ({ data: planRow }) }) }) }),
+            eq: () => ({
+              order: () => ({ limit: () => ({ maybeSingle: () => ({ data: planRow }) }) }),
+            }),
+          }),
+          update: (vals: unknown) => ({
+            eq: () => {
+              planUpdateCalls.push(vals);
+              return { error: null };
+            },
           }),
         };
       }
       if (table === 'plan_versions') {
-        return { select: () => ({ eq: () => ({ maybeSingle: () => ({ data: versionRow }) }) }) };
+        return { select: () => ({ in: () => ({ data: versionRows, error: null }) }) };
       }
       throw new Error(`unexpected table ${table}`);
     },
@@ -62,9 +75,10 @@ beforeEach(() => {
     { file_name: 'athlete_profile.md', content_md: '# Profile' },
     { file_name: 'latest_state.md', content_md: 'state v1' },
   ];
-  planRow = { current_version_id: 'ver-1' };
-  versionRow = { plan_json: { weeks: 16 } };
+  planRow = { id: 'plan-1', current_version_id: 'ver-1', baseline_version_id: 'ver-1' };
+  versionRows = [{ id: 'ver-1', plan_json: { weeks: 16 } }];
   upsertCalls = [];
+  planUpdateCalls = [];
   (supabaseAdmin as AnyMock).mockImplementation(() => makeDb());
   (buildStravaContext as AnyMock).mockResolvedValue({ connected: true, activities: [] });
 });
@@ -82,9 +96,20 @@ describe('hydrate', () => {
     expect(readFileSync(path.join(folder.dir, 'athlete_profile.md'), 'utf8')).toBe('# Profile');
     expect(readFileSync(path.join(folder.dir, 'latest_state.md'), 'utf8')).toBe('state v1');
     expect(existsSync(path.join(folder.dir, 'marathon_training_plan.json'))).toBe(true);
+    expect(existsSync(path.join(folder.dir, 'plan_drift.md'))).toBe(true);
     expect(existsSync(path.join(folder.dir, 'strava_recent.json'))).toBe(true);
+    expect(folder.planHash).toBeDefined();
 
-    expect(Object.keys(folder.memoryHashes).sort()).toEqual(['athlete_profile.md', 'latest_state.md']);
+    expect(Object.keys(folder.memoryHashes).sort()).toEqual([
+      'athlete_profile.md',
+      'latest_state.md',
+    ]);
+  });
+
+  it('self-heals a missing baseline anchor to the current version', async () => {
+    planRow = { id: 'plan-1', current_version_id: 'ver-1', baseline_version_id: null };
+    await hydrate(ATHLETE);
+    expect(planUpdateCalls).toEqual([{ baseline_version_id: 'ver-1' }]);
   });
 
   it('refuses a non-uuid athlete id', async () => {

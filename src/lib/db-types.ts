@@ -651,6 +651,7 @@ export type Database = {
       plans: {
         Row: {
           athlete_id: string
+          baseline_version_id: string | null
           created_at: string
           current_version_id: string | null
           goal_race_id: string | null
@@ -661,6 +662,7 @@ export type Database = {
         }
         Insert: {
           athlete_id: string
+          baseline_version_id?: string | null
           created_at?: string
           current_version_id?: string | null
           goal_race_id?: string | null
@@ -671,6 +673,7 @@ export type Database = {
         }
         Update: {
           athlete_id?: string
+          baseline_version_id?: string | null
           created_at?: string
           current_version_id?: string | null
           goal_race_id?: string | null
@@ -685,6 +688,13 @@ export type Database = {
             columns: ["athlete_id"]
             isOneToOne: false
             referencedRelation: "athletes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "plans_baseline_version_id_fkey"
+            columns: ["baseline_version_id"]
+            isOneToOne: false
+            referencedRelation: "plan_versions"
             referencedColumns: ["id"]
           },
           {
@@ -881,6 +891,16 @@ export type Database = {
       link_start_handshake: {
         Args: { p_telegram_chat_id: string; p_token: string }
         Returns: Json
+      }
+      record_plan_edit: {
+        Args: {
+          p_plan_id: string
+          p_plan_json: Json
+          p_start_date: string
+          p_supersedes_version_id: string
+          p_total_weeks: number
+        }
+        Returns: string
       }
       set_onboarding_state: {
         Args: { p_athlete_id: string; p_new_state: Json }

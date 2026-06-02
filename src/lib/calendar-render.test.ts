@@ -15,7 +15,7 @@ describe('renderPlanIcs', () => {
       athleteName: 'Test',
       timezone: 'America/Los_Angeles',
       plan: null,
-      planVersionId: null,
+      planId: null,
       planStartDate: null,
     });
     expect(ics).toContain('BEGIN:VCALENDAR');
@@ -29,7 +29,7 @@ describe('renderPlanIcs', () => {
       athleteName: 'David',
       timezone: 'America/Los_Angeles',
       plan: seedPlan,
-      planVersionId: 'plan-version-uuid',
+      planId: 'plan-version-uuid',
       planStartDate: '2026-03-30',
     });
     const expectedEventCount = seedPlan.weeks.reduce((n, w) => n + w.days.length, 0);
@@ -42,7 +42,7 @@ describe('renderPlanIcs', () => {
       athleteName: 'David',
       timezone: 'America/Los_Angeles',
       plan: seedPlan,
-      planVersionId: 'plan-version-uuid',
+      planId: 'plan-version-uuid',
       planStartDate: '2026-03-30',
     });
 
@@ -62,14 +62,14 @@ describe('renderPlanIcs', () => {
       athleteName: 'David',
       timezone: 'America/Los_Angeles',
       plan: seedPlan,
-      planVersionId: 'plan-version-uuid',
+      planId: 'plan-version-uuid',
       planStartDate: '2026-03-30',
     });
     const ics2 = renderPlanIcs({
       athleteName: 'David',
       timezone: 'America/Los_Angeles',
       plan: seedPlan,
-      planVersionId: 'plan-version-uuid',
+      planId: 'plan-version-uuid',
       planStartDate: '2026-03-30',
     });
 
@@ -86,7 +86,7 @@ describe('renderPlanIcs', () => {
       athleteName: 'David',
       timezone: 'America/Los_Angeles',
       plan: seedPlan,
-      planVersionId: 'pv',
+      planId: 'pv',
       planStartDate: '2026-03-30',
     });
     const parsed = ical.sync.parseICS(ics);
@@ -104,7 +104,7 @@ describe('renderPlanIcs', () => {
       athleteName: 'David',
       timezone: 'America/Los_Angeles',
       plan: seedPlan,
-      planVersionId: 'fixed-uuid-for-snapshot',
+      planId: 'fixed-uuid-for-snapshot',
       planStartDate: '2026-03-30',
     });
     // Strip DTSTAMP lines which include current time

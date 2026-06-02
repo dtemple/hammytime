@@ -1,32 +1,48 @@
 // Per-athlete working-directory lifecycle (M1 plan §3.3, §4).
 //
 // memory_files (rows of athlete_id, file_name, content_md) is the source of
-// truth. For each run we hydrate those rows to disk, let the agent read/write
-// real files, then sync changed/new files back. Two input-only files are also
-// written for the agent to read but are NEVER synced back: the pre-fetched
-// Strava context and the immutable training plan.
+// truth for the agent's markdown files. For each run we hydrate those rows to
+// disk, let the agent read/write real files, then sync changed/new files back.
+// Three derived files are also written for the agent to read but are skipped by
+// the memory_files sync-back: the pre-fetched Strava context, a drift summary,
+// and the working training plan. The plan is the one the agent may edit — a
+// changed, valid plan is persisted as a new plan_versions row (plan-version.ts),
+// not a memory_files row.
 
 import { createHash } from 'crypto';
 import { mkdir, readFile, readdir, rm, writeFile } from 'fs/promises';
 import path from 'path';
 import { supabaseAdmin } from '@/lib/db';
+import { computeDrift, renderDriftSummary, type PlanDrift } from '@/lib/plan-drift';
+import { PlanSchema } from '@/lib/plan-schema';
 import { ATHLETE_ROOT, STRAVA_LOOKBACK_DAYS } from './config';
 import { buildStravaContext } from './strava';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Files the worker writes as agent input — excluded from sync-back so the agent
-// can't accidentally persist them into memory_files.
-export const INPUT_ONLY_FILES = new Set(['strava_recent.json', 'marathon_training_plan.json']);
+// Files the worker writes as agent input — excluded from the memory_files
+// sync-back. strava_recent.json and plan_drift.md are read-only derived input.
+// marathon_training_plan.json is the coach's working plan: it IS persisted on a
+// change, but as a new plan_versions row (see plan-version.ts), not a
+// memory_files row — so it's skipped here too.
+export const INPUT_ONLY_FILES = new Set([
+  'strava_recent.json',
+  'marathon_training_plan.json',
+  'plan_drift.md',
+]);
 
 export type HydratedFolder = {
   dir: string;
   // file_name -> sha256 of the content written at hydrate time. Used by
   // syncBack to detect which files the agent actually changed.
   memoryHashes: Record<string, string>;
+  // sha256 of marathon_training_plan.json at hydrate time, if the athlete has a
+  // plan. persistPlanEdit compares against this to detect a coach edit. Absent
+  // when the athlete has no active plan.
+  planHash?: string;
 };
 
-function hash(content: string): string {
+export function hash(content: string): string {
   return createHash('sha256').update(content, 'utf8').digest('hex');
 }
 
@@ -62,26 +78,26 @@ export async function hydrate(athleteId: string): Promise<HydratedFolder> {
     memoryHashes[row.file_name] = hash(content);
   }
 
-  // Active training plan (immutable input) — written as JSON if one exists.
-  const planJson = await loadActivePlanJson(athleteId);
-  if (planJson != null) {
-    await writeFile(
-      path.join(dir, 'marathon_training_plan.json'),
-      JSON.stringify(planJson, null, 2),
-      'utf8',
-    );
+  // The working training plan the coach edits, written as JSON if one exists.
+  // We record its hash so persistPlanEdit can tell whether the agent changed it.
+  const refs = await loadPlanRefs(athleteId);
+  let planHash: string | undefined;
+  if (refs?.currentJson != null) {
+    const planText = JSON.stringify(refs.currentJson, null, 2);
+    await writeFile(path.join(dir, 'marathon_training_plan.json'), planText, 'utf8');
+    planHash = hash(planText);
   }
+
+  // Drift summary (read-only input) — how far the working plan has moved from
+  // the original baseline. The coach reads this and raises material drift.
+  await writeFile(path.join(dir, 'plan_drift.md'), buildDriftMarkdown(refs), 'utf8');
 
   // Pre-fetched Strava context (input). The coach reads this instead of
   // spawning a fetch — see isolation.ts for why Bash stays denied.
   const strava = await buildStravaContext(athleteId, STRAVA_LOOKBACK_DAYS);
-  await writeFile(
-    path.join(dir, 'strava_recent.json'),
-    JSON.stringify(strava, null, 2),
-    'utf8',
-  );
+  await writeFile(path.join(dir, 'strava_recent.json'), JSON.stringify(strava, null, 2), 'utf8');
 
-  return { dir, memoryHashes };
+  return { dir, memoryHashes, planHash };
 }
 
 /**
@@ -93,8 +109,12 @@ export async function syncBack(athleteId: string, folder: HydratedFolder): Promi
   const entries = await readdir(folder.dir, { withFileTypes: true });
   const now = new Date().toISOString();
 
-  const changed: { athlete_id: string; file_name: string; content_md: string; updated_at: string }[] =
-    [];
+  const changed: {
+    athlete_id: string;
+    file_name: string;
+    content_md: string;
+    updated_at: string;
+  }[] = [];
 
   for (const entry of entries) {
     if (!entry.isFile()) continue;
@@ -120,11 +140,23 @@ export async function cleanup(dir: string): Promise<void> {
   await rm(dir, { recursive: true, force: true });
 }
 
-async function loadActivePlanJson(athleteId: string): Promise<unknown | null> {
+type PlanRefs = {
+  planId: string;
+  currentVersionId: string;
+  currentJson: unknown | null; // working plan (what the calendar renders)
+  baselineJson: unknown | null; // original plan of record
+};
+
+/**
+ * Loads the athlete's working + baseline plan JSON. Self-heals the baseline
+ * anchor: a plan with no baseline_version_id yet adopts its current version as
+ * the original plan of record, before any coach edit moves current forward.
+ */
+async function loadPlanRefs(athleteId: string): Promise<PlanRefs | null> {
   const db = supabaseAdmin();
   const { data: plan } = await db
     .from('plans')
-    .select('current_version_id')
+    .select('id, current_version_id, baseline_version_id')
     .eq('athlete_id', athleteId)
     .order('created_at', { ascending: false })
     .limit(1)
@@ -132,11 +164,36 @@ async function loadActivePlanJson(athleteId: string): Promise<unknown | null> {
 
   if (!plan?.current_version_id) return null;
 
-  const { data: version } = await db
-    .from('plan_versions')
-    .select('plan_json')
-    .eq('id', plan.current_version_id)
-    .maybeSingle();
+  let baselineVersionId = plan.baseline_version_id;
+  if (!baselineVersionId) {
+    baselineVersionId = plan.current_version_id;
+    await db.from('plans').update({ baseline_version_id: baselineVersionId }).eq('id', plan.id);
+  }
 
-  return version?.plan_json ?? null;
+  const ids = [...new Set([plan.current_version_id, baselineVersionId])];
+  const { data: versions } = await db.from('plan_versions').select('id, plan_json').in('id', ids);
+  const byId = new Map((versions ?? []).map((v) => [v.id, v.plan_json]));
+
+  return {
+    planId: plan.id,
+    currentVersionId: plan.current_version_id,
+    currentJson: byId.get(plan.current_version_id) ?? null,
+    baselineJson: byId.get(baselineVersionId) ?? null,
+  };
+}
+
+const NO_DRIFT: PlanDrift = {
+  hasEdits: false,
+  cumulative: { baselineMiles: 0, workingMiles: 0, deltaMiles: 0, deltaPct: null },
+  weeks: [],
+  changedWeekCount: 0,
+  changedDayCount: 0,
+};
+
+function buildDriftMarkdown(refs: PlanRefs | null): string {
+  if (!refs?.currentJson || !refs.baselineJson) return renderDriftSummary(NO_DRIFT);
+  const working = PlanSchema.safeParse(refs.currentJson);
+  const baseline = PlanSchema.safeParse(refs.baselineJson);
+  if (!working.success || !baseline.success) return renderDriftSummary(NO_DRIFT);
+  return renderDriftSummary(computeDrift(baseline.data, working.data));
 }
