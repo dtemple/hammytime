@@ -16,7 +16,9 @@ const SUMMARY_MAP: Record<Day['type'], { emoji: string; label: string }> = {
   easy: { emoji: '🐢', label: 'Easy' },
   easy_with_strides: { emoji: '🐢', label: 'Easy + Strides' },
   hill_repeats: { emoji: '⛰️', label: 'Hills' },
+  intervals: { emoji: '🔥', label: 'Intervals' },
   trail_tempo: { emoji: '💨', label: 'Trail Tempo' },
+  tempo: { emoji: '💨', label: 'Tempo' },
   upper_body_strength: { emoji: '💪', label: 'Upper Body' },
   lower_body_strength: { emoji: '🦵', label: 'Lower Body' },
   race: { emoji: '🏁', label: 'Race' },
@@ -54,7 +56,9 @@ function summaryFor(day: Day): string {
       day.type === 'easy' ||
       day.type === 'easy_with_strides' ||
       day.type === 'hill_repeats' ||
+      day.type === 'intervals' ||
       day.type === 'trail_tempo' ||
+      day.type === 'tempo' ||
       day.type === 'race') &&
     typeof day.planned_distance_miles === 'number'
   ) {

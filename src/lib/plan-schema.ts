@@ -11,7 +11,9 @@ export const DayTypeEnum = z.enum([
   'easy',
   'easy_with_strides',
   'hill_repeats',
+  'intervals', // flat road / track VO2 work (added v2 — road & short-race templates)
   'trail_tempo',
+  'tempo', // flat road threshold work (added v2 — road & short-race templates)
   'upper_body_strength',
   'lower_body_strength',
   'race',
@@ -65,8 +67,17 @@ export const DaySchema = z.object({
   uphill_hr_zone: z.tuple([z.number(), z.number()]).optional(),
   uphill_rpe: z.tuple([z.number(), z.number()]).optional(),
 
-  // trail_tempo fields
+  // tempo / trail_tempo fields (shared — flat road `tempo` and trail `trail_tempo`)
   tempo_block_min: z.number().nonnegative().optional(),
+
+  // intervals fields (reuses warmup_min/cooldown_min/repeats/repeat_duration_sec/
+  // recovery above). repeat_distance_m is for distance-based reps (e.g. 5x1000m);
+  // repeat_duration_sec for time-based (e.g. 5x3min).
+  repeat_distance_m: z.number().positive().optional(),
+
+  // Pace targeting — road and time-goal work. HR/RPE stay primary on trail and
+  // effort-led (finish) plans; a concrete pace range is added when one applies.
+  target_pace_sec_per_mile: z.tuple([z.number(), z.number()]).optional(),
 
   // race day fields
   elevation_gain_ft: z.number().nonnegative().optional(),
@@ -171,6 +182,9 @@ const PaceZoneSchema = z.object({
   hr_zone: z.tuple([z.number(), z.number()]),
   hr_percent_max: z.tuple([z.number(), z.number()]),
   rpe: z.tuple([z.number(), z.number()]),
+  // Concrete pace range (sec/mile) — present on road / time-goal plans where pace
+  // leads. Effort-led (trail / finish) plans leave this off and use HR/RPE.
+  pace_sec_per_mile: z.tuple([z.number(), z.number()]).optional(),
 });
 
 const ComplianceRuleSchema = z.object({
@@ -192,7 +206,9 @@ const AgentGuidanceSchema = z.object({
       easy: PaceZoneSchema,
       long_run: PaceZoneSchema,
       tempo: PaceZoneSchema,
-      hill_repeat: PaceZoneSchema,
+      hill_repeat: PaceZoneSchema.optional(), // trail / hill plans only
+      interval: PaceZoneSchema.optional(), // road / short-race VO2 plans
+      marathon_pace: PaceZoneSchema.optional(), // time-goal marathon / half
       strides: PaceZoneSchema,
     })
     .optional(),
