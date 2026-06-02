@@ -503,10 +503,14 @@ function getBot(): Bot {
     _bot.on('callback_query:data', async (ctx) => {
       const data = ctx.callbackQuery.data;
       const db = supabaseAdmin();
+      // Key on the CHAT the button lives in, not the user who tapped. In a private
+      // chat these are equal; in a group (test harness) the user id is positive and
+      // the athlete is keyed on the negative group chat id, so ctx.from.id would miss.
+      const chatId = ctx.chat?.id ?? ctx.from.id;
       const { data: athlete } = await db
         .from('athletes')
         .select('*')
-        .eq('telegram_chat_id', String(ctx.from.id))
+        .eq('telegram_chat_id', String(chatId))
         .maybeSingle();
 
       if (!athlete) {
