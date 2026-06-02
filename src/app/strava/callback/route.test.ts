@@ -10,6 +10,7 @@ vi.mock('@/lib/state-sign', () => ({ verify: vi.fn() }));
 vi.mock('@/server/strava/client', () => ({ exchangeCode: vi.fn() }));
 vi.mock('@/lib/crypto', () => ({ encryptToken: vi.fn() }));
 vi.mock('@/server/telegram/bot', () => ({ sendAndLog: vi.fn() }));
+vi.mock('@/server/telegram/onboarding/index', () => ({ resumeAfterStrava: vi.fn() }));
 vi.mock('@sentry/nextjs', () => ({ captureException: vi.fn() }));
 
 import { supabaseAdmin } from '@/lib/db';
@@ -17,6 +18,7 @@ import { verify } from '@/lib/state-sign';
 import { exchangeCode } from '@/server/strava/client';
 import { encryptToken } from '@/lib/crypto';
 import { sendAndLog } from '@/server/telegram/bot';
+import { resumeAfterStrava } from '@/server/telegram/onboarding/index';
 import * as Sentry from '@sentry/nextjs';
 import { GET } from './route';
 
@@ -73,6 +75,9 @@ beforeEach(() => {
   (exchangeCode as AnyMock).mockResolvedValue(MOCK_TOKENS);
   (encryptToken as AnyMock).mockResolvedValue('encrypted-token');
   (sendAndLog as AnyMock).mockResolvedValue(undefined);
+  // Default: athlete is not mid-onboarding, so the route falls back to the
+  // standard "connected" confirmation.
+  (resumeAfterStrava as AnyMock).mockResolvedValue(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -95,6 +100,19 @@ describe('GET /strava/callback — happy path', () => {
     const [, , text] = (sendAndLog as AnyMock).mock.calls[0] as [string, string, string];
     expect(text).toContain('Strava connected');
     expect(text).toContain('/checkin');
+  });
+
+  it('resumes onboarding instead of the standard confirmation when mid-onboarding', async () => {
+    (supabaseAdmin as AnyMock).mockReturnValue(makeDb());
+    (resumeAfterStrava as AnyMock).mockResolvedValue(true);
+    const req = makeRequest({ code: 'auth-code', state: 'valid-state' });
+
+    const res = await GET(req);
+
+    expect(res.status).toBe(307);
+    expect(resumeAfterStrava).toHaveBeenCalledWith(ATHLETE_ID);
+    // resume sends its own A1 message — the route must not also send the standard one.
+    expect(sendAndLog).not.toHaveBeenCalled();
   });
 
   it('still redirects when athlete has no telegram_chat_id (no sendAndLog call)', async () => {

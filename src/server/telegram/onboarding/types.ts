@@ -56,5 +56,12 @@ export interface OnboardingStep {
   // with handleMessage to fire the opening question without needing a dummy Question entry.
   initialPrompt?: string;
   // If set, sent alongside initialPrompt as reply_markup (inline keyboard).
-  initialKeyboard?: InlineKeyboard;
+  // May be a function so the keyboard can be built from per-athlete data (e.g.
+  // pre-highlighting the Strava-suggested experience tier / days / long-run day);
+  // the dispatcher awaits it at transition time.
+  initialKeyboard?: InlineKeyboard | ((athleteId: string) => Promise<InlineKeyboard>);
+  // If defined and resolves true, the dispatcher skips this step entirely on entry
+  // and advances to the next. Async + DB-backed because partial is wiped between
+  // steps. Unused in W2; reserved for the day-to-day path (W3/W4).
+  skipStep?: (athleteId: string) => Promise<boolean>;
 }

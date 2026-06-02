@@ -193,6 +193,63 @@ export type Database = {
           },
         ]
       }
+      athlete_training_profile: {
+        Row: {
+          athlete_id: string
+          created_at: string
+          days_per_week: number | null
+          experience_tier: string | null
+          goal_distance: string | null
+          goal_race_id: string | null
+          goal_state: string
+          goal_type: string
+          long_run_day: number | null
+          target_date: string | null
+          updated_at: string
+        }
+        Insert: {
+          athlete_id: string
+          created_at?: string
+          days_per_week?: number | null
+          experience_tier?: string | null
+          goal_distance?: string | null
+          goal_race_id?: string | null
+          goal_state: string
+          goal_type: string
+          long_run_day?: number | null
+          target_date?: string | null
+          updated_at?: string
+        }
+        Update: {
+          athlete_id?: string
+          created_at?: string
+          days_per_week?: number | null
+          experience_tier?: string | null
+          goal_distance?: string | null
+          goal_race_id?: string | null
+          goal_state?: string
+          goal_type?: string
+          long_run_day?: number | null
+          target_date?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "athlete_training_profile_athlete_id_fkey"
+            columns: ["athlete_id"]
+            isOneToOne: true
+            referencedRelation: "athletes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "athlete_training_profile_goal_race_id_fkey"
+            columns: ["goal_race_id"]
+            isOneToOne: false
+            referencedRelation: "races"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       athletes: {
         Row: {
           asthma: boolean
@@ -828,6 +885,14 @@ export type Database = {
       set_onboarding_state: {
         Args: { p_athlete_id: string; p_new_state: Json }
         Returns: undefined
+      }
+      set_onboarding_state_if_substep: {
+        Args: {
+          p_athlete_id: string
+          p_expected_substep: string
+          p_new_state: Json
+        }
+        Returns: boolean
       }
     }
     Enums: {

@@ -5,6 +5,7 @@ import { exchangeCode } from '@/server/strava/client';
 import { encryptToken } from '@/lib/crypto';
 import { supabaseAdmin } from '@/lib/db';
 import { sendAndLog } from '@/server/telegram/bot';
+import { resumeAfterStrava } from '@/server/telegram/onboarding/index';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
@@ -66,20 +67,26 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: `DB upsert failed: ${upsertErr.message}` }, { status: 500 });
   }
 
-  // Telegram confirmation — best-effort, never fails the callback.
+  // Telegram side — best-effort, never fails the callback.
+  // Mid-onboarding (beat A1): resume the flow into profile-confirm. Otherwise
+  // (an already-onboarded athlete reconnecting Strava): the standard confirmation.
   try {
-    const { data: confirmedAthlete } = await db
-      .from('athletes')
-      .select('id, telegram_chat_id')
-      .eq('id', athleteId)
-      .maybeSingle();
+    const resumed = await resumeAfterStrava(athleteId);
 
-    if (confirmedAthlete?.telegram_chat_id) {
-      await sendAndLog(
-        confirmedAthlete.id,
-        confirmedAthlete.telegram_chat_id,
-        'Strava connected. I can now read your training when you /checkin.',
-      );
+    if (!resumed) {
+      const { data: confirmedAthlete } = await db
+        .from('athletes')
+        .select('id, telegram_chat_id')
+        .eq('id', athleteId)
+        .maybeSingle();
+
+      if (confirmedAthlete?.telegram_chat_id) {
+        await sendAndLog(
+          confirmedAthlete.id,
+          confirmedAthlete.telegram_chat_id,
+          'Strava connected. I can now read your training when you /checkin.',
+        );
+      }
     }
   } catch (err) {
     Sentry.captureException(err);

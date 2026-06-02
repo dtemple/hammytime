@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { loadOnboardingState, advanceQuestion, resetOnboarding } from '../state';
+import { loadOnboardingState, advanceQuestion, advanceIfSubstep, resetOnboarding } from '../state';
 
 vi.mock('@/lib/db', () => ({
   supabaseAdmin: vi.fn(),
@@ -77,6 +77,48 @@ describe('advanceQuestion', () => {
     await expect(
       advanceQuestion('athlete-1', { step: 0, question: 0, partial: {} }),
     ).rejects.toThrow('advanceQuestion failed');
+  });
+});
+
+describe('advanceIfSubstep', () => {
+  function makeRpcMock(data: unknown, error: unknown = null) {
+    return { from: vi.fn(), rpc: vi.fn().mockResolvedValue({ data, error }) };
+  }
+
+  it('passes the guard sub_step and returns whether it wrote', async () => {
+    const db = makeRpcMock(true);
+    vi.mocked(supabaseAdmin).mockReturnValue(db as AnyDB);
+
+    const newState = { step: 0, question: 0, partial: { sub_step: 'confirm_name' } };
+    const wrote = await advanceIfSubstep('athlete-1', newState, 'awaiting_strava');
+
+    expect(wrote).toBe(true);
+    expect(db.rpc).toHaveBeenCalledWith('set_onboarding_state_if_substep', {
+      p_athlete_id: 'athlete-1',
+      p_new_state: newState,
+      p_expected_substep: 'awaiting_strava',
+    });
+  });
+
+  it('returns false when the guard no-ops (already advanced)', async () => {
+    const db = makeRpcMock(false);
+    vi.mocked(supabaseAdmin).mockReturnValue(db as AnyDB);
+
+    const wrote = await advanceIfSubstep(
+      'athlete-1',
+      { step: 0, question: 0, partial: {} },
+      'awaiting_strava',
+    );
+    expect(wrote).toBe(false);
+  });
+
+  it('throws on RPC error', async () => {
+    const db = makeRpcMock(null, { message: 'boom' });
+    vi.mocked(supabaseAdmin).mockReturnValue(db as AnyDB);
+
+    await expect(
+      advanceIfSubstep('athlete-1', { step: 0, question: 0, partial: {} }, 'awaiting_strava'),
+    ).rejects.toThrow('advanceIfSubstep failed');
   });
 });
 

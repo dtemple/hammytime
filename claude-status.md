@@ -1,6 +1,6 @@
 # claude-status.md — hammytime project snapshot
 
-_Updated: 2026-06-01 (session 23 — onboarding v2 W1: Strava-forward plumbing. Data-layer only — `getLoggedInAthlete`, `getFitnessSnapshot`, `deriveTimezone` in `src/server/strava/activities.ts`, the functions W2/W3 will consume. No state-machine or callback wiring yet.)_
+_Updated: 2026-06-01 (session 24 — onboarding v2 W2: state-machine restructure. Replaced the 7 rigid steps with 5 button-driven beats (A1–A7) + the enrichment dump (C1), wired Strava-callback resume, and added the queryable `athlete_training_profile` schema. typecheck/lint/305 tests green. Code-complete; live end-to-end via the W0 harness still to run.)_
 
 ---
 
@@ -87,6 +87,15 @@ This session's work (all committed):
 - **Tests:** new `activities.test.ts`, 11 cases — profile mapping, privacy-nulls, no-connection, 401→`StravaTokenBrokenError`, snapshot math on a fixed fixture set, empty-history fallback, timezone parsing. typecheck/lint/**418 tests** green (407 prior + 11 new).
 
 **Two deliberate deviations from the literal W1 bullet list, both confirmed with David:** (1) callback-resume wiring (`/strava/callback` kicking onboarding forward) **deferred to W2** — the A1 step it would resume into doesn't exist until the state-machine restructure, and the A1 confirmation copy belongs there. (2) timezone falls back to `null` rather than city→IANA (no dataset/library).
+
+**Onboarding v2 — W2 state-machine restructure (session 24, 2026-06-01).** Replaced the 7 rigid steps with the Phase-A button beats + the enrichment dump, all on the existing dispatcher contract (`handleMessage`/`handleCallback`/`onComplete`, integer `step` index). Three decisions confirmed with David: structured outputs land in a new **`athlete_training_profile`** table (not markdown, not athletes columns); the W2 interim terminal is a **"plan coming soon" stub** (no plan row — daily coach has nothing until W3/W4, by design); the **enrichment dump (C1) is built in W2** as the terminal step.
+
+- **Migration `20260601000000_athlete_training_profile.sql`** — 1:1 table (athlete_id PK) carrying goal_type/goal_state/experience_tier/goal_distance/days_per_week/long_run_day/target_date/goal_race_id, CHECK-constrained, modelling the three goal states (committed / intended / day_to_day). Plus `set_onboarding_state_if_substep` RPC: re-reads `partial.sub_step` *inside* the advisory lock and no-ops if it doesn't match — closes the double-Strava-callback race. `db-types` regenerated.
+- **5 new steps** (`src/server/telegram/onboarding/steps/00-profile-confirm` … `04-enrichment`): profile-confirm (A1 name/tz confirm), goal-setup (A2+A4+A4b — branchy, salvaged the `lookupRace` confirm/manual flow from the old races step), training-shape (A3+A5+A6, Strava-prefilled via async `initialKeyboard`), injury-check (A7 light capture, not the old per-part loop), enrichment (C1 — Haiku extraction with stated/inferred/unknown provenance, echo-confirm, stated-only structured backfill, terminal stub). Old `00-basics`…`06-plan-fork` retired (`byo-plan.ts` kept on disk, unwired, as W3's deferred fallback).
+- **Dispatcher/types changes (all additive, backward-compatible):** `initialKeyboard` may now be `(athleteId) => Promise<InlineKeyboard>` (awaited in `completeStep`) so A3/A5/A6 can pre-highlight Strava defaults; optional `skipStep` hook (unused in W2, reserved for the day-to-day path); the not-done callback/message paths now send a *fresh keyboarded message* when `replyMarkup`+`reply` are both set (multi-screen button flows + the enrichment echo) while preserving the in-place edit for single-screen toggles.
+- **A0 + callback-resume:** `handleStart`/`handleRestart` now send the A0 welcome + a URL `[Connect Strava]` button and seed `sub_step:'awaiting_strava'`; `/strava/callback` calls new `resumeAfterStrava` (in `onboarding/strava-resume.ts`) which fetches the Strava profile, derives name/tz, and enters profile-confirm — falling back to the old "connected" confirmation for an already-onboarded athlete reconnecting.
+- **Tests:** 5 new step test files + `advanceIfSubstep` wrapper tests + updated callback-route test; old onboarding step tests removed. typecheck/lint/**305 tests** green (was 418 — net drop is the ~210 retired old-step tests minus the new ones).
+- **Day-to-day path is "coming soon" in W2** (a no-op alert per the spec), so only committed + intended goal states are reachable; the `day_to_day` enum value is in the schema for later. **Live end-to-end via the W0 harness not yet run** — needs the staging bot + a real Strava OAuth round-trip (David runs that). No `fly deploy` needed (worker unchanged); Vercel auto-deploys the webhook/callback on push.
 
 **Pre-existing latent issue noted, left alone (out of W1 scope):** `fetchRecentActivities` throws a plain `Error` on a persistent 401, not `StravaTokenBrokenError`, so the worker's typed-error branch (`worker/strava.ts:90`) only ever fires for the new `getLoggedInAthlete`. Harmless today (worker degrades to `broken: true` either way), but the friendlier "expired or revoked" message never reaches the activity path. Worth a real fix if token breakage becomes common.
 
@@ -231,7 +240,12 @@ The `// TODO(#12)` decrement hook in `worker/run-agent.ts` stays until the full 
 
 ## Likely next task
 
-**Onboarding v2 — W2 (state-machine restructure).** The next workstream in `Specs/ONBOARDING_V2.md`. Replaces the 7 rigid steps with the Phase-A button beats (goal, experience, race via `lookupRace`, days/week, long-run day, injury quick-check) + the enrichment-dump step (inline LLM extraction → echo → confirm). W2 consumes the W1 data layer (`getLoggedInAthlete`, `getFitnessSnapshot`, `deriveTimezone`) to pre-fill buttons, and is where the **Strava-forward ordering** (A0→A1) and the **callback-resume wiring deferred from W1** get built (the A1 confirmation copy lives with that step). Model three goal states: committed race, race-intended-but-unselected (A4b), and day-to-day-no-race. W2 needs W1 (done); W4 needs W2 + W3. David is kicking W2 off in a new thread.
+**Onboarding v2 — W3 (template plan-gen) and/or W4 (preview + adjust loop).** W2 is code-complete (this session). Per the sequencing in `Specs/ONBOARDING_V2.md`, W3 (template library + selector reading `athlete_training_profile` × Strava snapshot, with the safety-cap validator) and W4 (plan preview B1 + adjust loop + next-actions, which inserts the preview between injury-check and enrichment) are the remaining build before opening to more friends. Two things to do first/alongside:
+
+1. **Run W2 live end-to-end via the W0 harness** (`docs/testing-onboarding.md`) — the staging bot + a real Strava OAuth round-trip, exercising all three goal paths (committed / A4b intended / — day-to-day is "coming soon" so not yet reachable). Assert `athlete_training_profile` rows, `races`/`injuries`, provenance-tagged memory, and terminal `onboarding_state`. This is the one unverified link.
+2. **W3 selector input note:** confirm how a `no-timeline` intended athlete (target_date null) routes (rolling-base template per spec line 73). The selector reads `experience_tier × goal_distance × weeks-to-target_date × snapshot.avg_weekly_mileage`.
+
+**Audit before friends onboard on v2:** `buildTemplateValues`/`loadAthleteData` in `byo-plan.ts` (dormant/unwired) and any worker coach-prompt regex still read the old `athlete_profile.md` sections (`Schedule`/`Goals`/`Anything else`) and `extractNotesValue`, which W2 no longer writes. Grep and reconcile in W3/W4.
 
 ---
 

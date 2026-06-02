@@ -1,7 +1,8 @@
 import { execSync } from 'child_process';
-import { Bot, CommandContext, Context } from 'grammy';
+import { Bot, CommandContext, Context, InlineKeyboard } from 'grammy';
 import { supabaseAdmin } from '@/lib/db';
 import {
+  advanceQuestion,
   handleOnboardingCallback,
   handleOnboardingMessage,
   onboardingSteps,
@@ -36,6 +37,43 @@ export async function sendAndLog(
     channel: 'tg',
     direction: 'out',
     body: text,
+  });
+}
+
+// Web base URL for OAuth handoff links.
+export function appBaseUrl(): string {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
+  );
+}
+
+export function stravaConnectUrl(athleteId: string): string {
+  return `${appBaseUrl()}/strava/connect?athlete_id=${athleteId}`;
+}
+
+// Beat A0 (onboarding v2): welcome + the Connect Strava unlock. Seeds the
+// onboarding state to 'awaiting_strava' so the Strava callback's resumeAfterStrava
+// can advance the athlete into profile-confirm (step 0). Shared by /start and /restart.
+async function sendWelcomeAndConnect(athleteId: string, chatId: number | string): Promise<void> {
+  await advanceQuestion(athleteId, {
+    step: 0,
+    question: 0,
+    partial: { sub_step: 'awaiting_strava' },
+  });
+
+  const keyboard = new InlineKeyboard().url('Connect Strava', stravaConnectUrl(athleteId));
+  await getBot().api.sendMessage(
+    chatId,
+    "You're in. I'm Daybreak — I'll build your training and check in with you most mornings. " +
+      'First thing: connect Strava so I can read your running instead of interrogating you about it.',
+    { reply_markup: keyboard },
+  );
+  await supabaseAdmin().from('messages').insert({
+    athlete_id: athleteId,
+    channel: 'tg',
+    direction: 'out',
+    body: 'Welcome — connect Strava to get started.',
   });
 }
 
@@ -81,17 +119,7 @@ async function handleStart(ctx: CommandContext<Context>): Promise<void> {
     body: `/start ${token}`,
   });
 
-  await sendAndLog(
-    athleteId,
-    ctx.chat.id,
-    "Hi — I'm your training coach. We'll spend a few minutes getting you set up, then I'll give you a prompt to take to Claude or ChatGPT to build your training plan.",
-  );
-
-  // Ask the first onboarding question
-  const firstQuestion = onboardingSteps[0]?.questions[0];
-  if (firstQuestion) {
-    await sendAndLog(athleteId, ctx.chat.id, firstQuestion.prompt);
-  }
+  await sendWelcomeAndConnect(athleteId, ctx.chat.id);
 }
 
 async function handleRestart(ctx: CommandContext<Context>): Promise<void> {
@@ -114,10 +142,7 @@ async function handleRestart(ctx: CommandContext<Context>): Promise<void> {
   const build = getBuildInfo();
   if (build) await ctx.reply(`[build: ${build}]`);
 
-  const firstQuestion = onboardingSteps[0]?.questions[0];
-  if (firstQuestion) {
-    await sendAndLog(athlete.id, ctx.chat.id, firstQuestion.prompt);
-  }
+  await sendWelcomeAndConnect(athlete.id, ctx.chat.id);
 }
 
 export async function handleInboundText(ctx: Context): Promise<void> {

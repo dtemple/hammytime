@@ -31,6 +31,25 @@ export async function advanceQuestion(athleteId: string, newState: OnboardingSta
   if (error) throw new Error(`advanceQuestion failed: ${error.message}`);
 }
 
+/**
+ * Idempotent advance guarded on the current partial.sub_step. Writes the new
+ * state only if the stored sub_step equals `expectedSubStep`; returns whether it
+ * wrote. Used by the Strava callback resume, which can fire twice (Strava retries).
+ */
+export async function advanceIfSubstep(
+  athleteId: string,
+  newState: OnboardingState,
+  expectedSubStep: string,
+): Promise<boolean> {
+  const { data, error } = await supabaseAdmin().rpc('set_onboarding_state_if_substep', {
+    p_athlete_id: athleteId,
+    p_new_state: newState,
+    p_expected_substep: expectedSubStep,
+  });
+  if (error) throw new Error(`advanceIfSubstep failed: ${error.message}`);
+  return data === true;
+}
+
 export async function resetOnboarding(athleteId: string): Promise<void> {
   const { error } = await supabaseAdmin().rpc('set_onboarding_state', {
     p_athlete_id: athleteId,

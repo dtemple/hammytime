@@ -1,10 +1,35 @@
 import type { Context } from 'grammy';
+import type { InlineKeyboard } from 'grammy';
 import { supabaseAdmin } from '@/lib/db';
 import type { Database } from '@/lib/db-types';
 import { sendAndLog, telegramBot } from '../bot';
 import { advanceQuestion, loadOnboardingState } from './state';
-import type { OnboardingState, Question } from './types';
+import type { OnboardingState, OnboardingStep, Question } from './types';
 import { onboardingSteps } from './index';
+
+// Resolve a step's initialKeyboard, which may be a static keyboard or a
+// per-athlete builder (e.g. pre-highlighting Strava-derived defaults).
+async function resolveInitialKeyboard(
+  step: OnboardingStep,
+  athleteId: string,
+): Promise<InlineKeyboard | undefined> {
+  const k = step.initialKeyboard;
+  if (!k) return undefined;
+  return typeof k === 'function' ? await k(athleteId) : k;
+}
+
+// Walk forward from `fromIdx` (exclusive) past any step whose skipStep resolves
+// true, returning the index of the first step to actually enter (or
+// onboardingSteps.length if all remaining steps are skipped).
+async function nextEnterableStep(fromIdx: number, athleteId: string): Promise<number> {
+  let idx = fromIdx;
+  while (idx < onboardingSteps.length) {
+    const step = onboardingSteps[idx];
+    if (!step?.skipStep || !(await step.skipStep(athleteId))) return idx;
+    idx += 1;
+  }
+  return onboardingSteps.length;
+}
 
 type AthleteRow = Database['public']['Tables']['athletes']['Row'];
 
@@ -40,6 +65,22 @@ async function askQuestion(
   await sendAndLog(athleteId, chatId, question.prompt);
 }
 
+// Send a message carrying an inline keyboard and persist it (sendAndLog is text-only).
+async function sendWithKeyboard(
+  athleteId: string,
+  chatId: number | string,
+  text: string,
+  keyboard: InlineKeyboard,
+): Promise<void> {
+  await telegramBot().api.sendMessage(chatId, text, { reply_markup: keyboard });
+  await supabaseAdmin().from('messages').insert({
+    athlete_id: athleteId,
+    channel: 'tg',
+    direction: 'out',
+    body: text,
+  });
+}
+
 /**
  * Routes an inbound text message through the onboarding state machine.
  *
@@ -70,7 +111,13 @@ export async function handleOnboardingMessage(ctx: Context, athlete: AthleteRow)
         question: 0,
         partial: result.newPartial,
       });
-      if (result.reply) await sendAndLog(athleteId, chatId, result.reply);
+      // A text answer can advance into a button screen (e.g. the enrichment echo +
+      // confirm buttons): send a fresh keyboarded message when replyMarkup is set.
+      if (result.reply && result.replyMarkup) {
+        await sendWithKeyboard(athleteId, chatId, result.reply, result.replyMarkup);
+      } else if (result.reply) {
+        await sendAndLog(athleteId, chatId, result.reply);
+      }
       return true;
     }
     // Step complete: run onComplete then advance to next step
@@ -125,7 +172,7 @@ async function completeStep(
   chatId: number | string,
   state: OnboardingState,
 ): Promise<boolean> {
-  const nextStepIdx = state.step + 1;
+  const nextStepIdx = await nextEnterableStep(state.step + 1, athleteId);
 
   if (nextStepIdx < onboardingSteps.length) {
     const nextStep = onboardingSteps[nextStepIdx];
@@ -139,10 +186,11 @@ async function completeStep(
         partial: {},
       };
       await advanceQuestion(athleteId, newState);
-      if (nextStep.initialKeyboard && nextStep.initialPrompt) {
+      const keyboard = await resolveInitialKeyboard(nextStep, athleteId);
+      if (keyboard && nextStep.initialPrompt) {
         // Send initialPrompt with inline keyboard; log separately (sendAndLog uses plain text API)
         await telegramBot().api.sendMessage(chatId, nextStep.initialPrompt, {
-          reply_markup: nextStep.initialKeyboard,
+          reply_markup: keyboard,
         });
         await supabaseAdmin().from('messages').insert({
           athlete_id: athleteId,
@@ -227,10 +275,15 @@ export async function handleOnboardingCallback(
     partial: result.newPartial,
   });
 
-  if (result.replyMarkup) {
+  if (result.replyMarkup && result.reply) {
+    // Multi-screen advance (e.g. goal → race-choice → distance): retire the old
+    // keyboard so it can't be re-tapped, then send a fresh keyboarded message.
+    await ctx.editMessageReplyMarkup().catch(() => undefined);
+    await sendWithKeyboard(athleteId, chatId, result.reply, result.replyMarkup);
+  } else if (result.replyMarkup) {
+    // In-place re-render of the same screen (e.g. a toggle).
     await ctx.editMessageReplyMarkup({ reply_markup: result.replyMarkup });
-  }
-  if (result.reply) {
+  } else if (result.reply) {
     await sendAndLog(athleteId, chatId, result.reply);
   }
 }
