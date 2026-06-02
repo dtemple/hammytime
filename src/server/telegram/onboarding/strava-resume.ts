@@ -1,6 +1,6 @@
 import { InlineKeyboard } from 'grammy';
 import { supabaseAdmin } from '@/lib/db';
-import { telegramBot } from '../bot';
+import { botApiForChat } from '../bot';
 import { fetchRecentActivities, getLoggedInAthlete, deriveTimezone } from '@/server/strava/activities';
 import { advanceIfSubstep, loadOnboardingState } from './state';
 import type { ProfileConfirmPartial } from './steps/00-profile-confirm';
@@ -19,7 +19,7 @@ async function sendWithKeyboard(
   text: string,
   keyboard?: InlineKeyboard,
 ): Promise<void> {
-  await telegramBot().api.sendMessage(chatId, text, keyboard ? { reply_markup: keyboard } : {});
+  await botApiForChat(chatId).sendMessage(chatId, text, keyboard ? { reply_markup: keyboard } : {});
   await supabaseAdmin().from('messages').insert({
     athlete_id: athleteId,
     channel: 'tg',

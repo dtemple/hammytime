@@ -544,6 +544,31 @@ export function telegramBot(): Bot {
   return getBot();
 }
 
+let _stagingBot: Bot | null = null;
+
+/**
+ * Outbound API selector for the onboarding test harness.
+ *
+ * A test athlete onboards in a Telegram group (negative chat id) that contains only
+ * the staging bot. But the Strava OAuth callback runs on prod Vercel with the *real*
+ * bot's token — so a group-bound send (the A1 resume message) would go out from a bot
+ * that isn't in the group and never arrive. When STAGING_BOT_TOKEN is set, group
+ * (negative) chats are served by the staging bot instead.
+ *
+ * Real athletes have positive chat ids and always use the primary bot. With
+ * STAGING_BOT_TOKEN unset (normal prod), this is a no-op. Mirrors the cron's existing
+ * negative-chat-id == test-athlete convention.
+ */
+export function botApiForChat(chatId: number | string): Bot['api'] {
+  const isGroup = String(chatId).startsWith('-');
+  const stagingToken = process.env.STAGING_BOT_TOKEN;
+  if (isGroup && stagingToken) {
+    if (!_stagingBot) _stagingBot = new Bot(stagingToken);
+    return _stagingBot.api;
+  }
+  return getBot().api;
+}
+
 export async function pingTelegram(): Promise<{ latency_ms: number }> {
   const start = Date.now();
   await getBot().api.getMe();
@@ -557,4 +582,5 @@ export async function pingTelegram(): Promise<{ latency_ms: number }> {
  */
 export function _resetBotForTest(): void {
   _bot = null;
+  _stagingBot = null;
 }

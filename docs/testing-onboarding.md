@@ -54,6 +54,18 @@ TELEGRAM_BOT_MODE=polling
 
 > ⚠️ Do **not** run `npm run bot:dev` with the **real** bot's token in `.env.local`. Polling with the real token competes with the production webhook and will start intercepting your real messages. Always swap to the staging token first.
 
+### 4b. Set `STAGING_BOT_TOKEN` in Vercel prod (one-time, for the v2 Strava-resume step)
+
+The Strava OAuth callback runs on **prod Vercel**, which uses the *real* bot's token — but your test group only contains the staging bot, so the onboarding-v2 "you're {name}, that you?" resume message would be sent by a bot that isn't in the group and never arrive. Setting `STAGING_BOT_TOKEN` in prod makes the callback route **group (negative) chat** sends through the staging bot. Real athletes (positive chat ids) are unaffected.
+
+```bash
+# staging bot token = the same token you put in .env.local
+vercel env add STAGING_BOT_TOKEN production
+# (paste the staging bot token when prompted, then redeploy or push)
+```
+
+Leave it unset and prod behaves exactly as before (real bot for everything).
+
 ### 5. Allowlist the test email (production)
 
 Onboarding mints a token for an allowlisted email. Make sure your test email is on the prod allowlist:
