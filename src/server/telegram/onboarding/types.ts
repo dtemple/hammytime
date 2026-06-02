@@ -31,6 +31,9 @@ export type StepHandleResult =
       newPartial: Record<string, unknown>;
       // If set, dispatcher sends this before calling onComplete.
       reply?: string;
+      // If set alongside reply, the final message carries this inline keyboard
+      // (e.g. the terminal next-actions: Add to calendar / Adjust / Done).
+      replyMarkup?: InlineKeyboard;
     };
 
 export interface OnboardingStep {
@@ -60,6 +63,12 @@ export interface OnboardingStep {
   // pre-highlighting the Strava-suggested experience tier / days / long-run day);
   // the dispatcher awaits it at transition time.
   initialKeyboard?: InlineKeyboard | ((athleteId: string) => Promise<InlineKeyboard>);
+  // If defined, the dispatcher calls this on step entry to build a DYNAMIC
+  // opening message (text + optional keyboard) — used by the B1 plan preview,
+  // whose text is rendered from the freshly generated plan. Takes precedence
+  // over initialPrompt/initialKeyboard. The step owns its own failure copy;
+  // the dispatcher only sends a last-resort fallback if onEnter throws.
+  onEnter?: (athleteId: string) => Promise<{ text: string; keyboard?: InlineKeyboard }>;
   // If defined and resolves true, the dispatcher skips this step entirely on entry
   // and advances to the next. Async + DB-backed because partial is wiped between
   // steps. Unused in W2; reserved for the day-to-day path (W3/W4).

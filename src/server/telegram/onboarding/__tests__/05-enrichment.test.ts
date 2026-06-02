@@ -4,10 +4,12 @@ const createMock = vi.fn();
 vi.mock('@/lib/anthropic', () => ({ anthropicClient: () => ({ messages: { create: createMock } }) }));
 vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
 vi.mock('../memory', () => ({ upsertProfileSection: vi.fn() }));
+vi.mock('@/server/admin/alerts', () => ({ sendDavidAlert: vi.fn().mockResolvedValue(undefined) }));
 
 import { supabaseAdmin } from '@/lib/db';
 import { upsertProfileSection } from '../memory';
-import { enrichmentStep } from '../steps/04-enrichment';
+import { sendDavidAlert } from '@/server/admin/alerts';
+import { enrichmentStep } from '../steps/05-enrichment';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyMock = any;
@@ -65,14 +67,16 @@ describe('enrichment — dump extraction + echo', () => {
 });
 
 describe('enrichment — skip / confirm callbacks', () => {
-  it('Skip completes without writing', async () => {
+  it('Skip completes and offers the next-actions menu', async () => {
     const r = await cb('enrich:skip', { sub_step: 'awaiting_dump' });
     expect(r.done).toBe(true);
+    if (r.done) expect(r.replyMarkup).toBeDefined();
   });
 
-  it('All correct completes', async () => {
+  it('All correct completes with the next-actions menu', async () => {
     const r = await cb('enrich:correct', { sub_step: 'confirm', extracted: FULL });
     expect(r.done).toBe(true);
+    if (r.done) expect(r.replyMarkup).toBeDefined();
   });
 
   it('Let me fix loops back to the dump', async () => {
@@ -94,13 +98,21 @@ describe('enrichment — onComplete provenance backfill', () => {
     };
     const db = {
       from: vi.fn().mockImplementation((t: string) =>
-        t === 'athletes' ? { update: () => ({ eq: updateEq }) } : races,
+        t === 'athletes'
+          ? {
+              // alertOnboardingComplete reads the name; the backfill updates dob.
+              select: () => ({ eq: () => ({ maybeSingle: () => ({ data: { name: 'Alice' } }) }) }),
+              update: () => ({ eq: updateEq }),
+            }
+          : races,
       ),
     };
     (supabaseAdmin as AnyMock).mockReturnValue(db);
 
     await enrichmentStep.onComplete('a1', { sub_step: 'confirm', extracted: FULL });
 
+    // onboarding-complete alert fired
+    expect(sendDavidAlert as AnyMock).toHaveBeenCalled();
     // dob written from stated age
     expect(updateEq).toHaveBeenCalledWith('id', 'a1');
     // memory written with provenance tags

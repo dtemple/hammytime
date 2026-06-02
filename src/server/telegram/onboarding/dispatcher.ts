@@ -3,6 +3,7 @@ import type { InlineKeyboard } from 'grammy';
 import { supabaseAdmin } from '@/lib/db';
 import type { Database } from '@/lib/db-types';
 import { sendAndLog, telegramBot } from '../bot';
+import { sendDavidAlert } from '@/server/admin/alerts';
 import { advanceQuestion, loadOnboardingState } from './state';
 import type { OnboardingState, OnboardingStep, Question } from './types';
 import { onboardingSteps } from './index';
@@ -121,7 +122,11 @@ export async function handleOnboardingMessage(ctx: Context, athlete: AthleteRow)
       return true;
     }
     // Step complete: run onComplete then advance to next step
-    if (result.reply) await sendAndLog(athleteId, chatId, result.reply);
+    if (result.reply && result.replyMarkup) {
+      await sendWithKeyboard(athleteId, chatId, result.reply, result.replyMarkup);
+    } else if (result.reply) {
+      await sendAndLog(athleteId, chatId, result.reply);
+    }
     await step.onComplete(athleteId, result.newPartial);
     return await completeStep(athleteId, chatId, { ...state, partial: result.newPartial });
   }
@@ -177,6 +182,26 @@ async function completeStep(
   if (nextStepIdx < onboardingSteps.length) {
     const nextStep = onboardingSteps[nextStepIdx];
     if (!nextStep) return false;
+
+    // --- Dynamic entry (B1 plan preview): the step renders its own opening
+    // message from freshly generated data. Advance first so a retry tap routes
+    // back to this step; the step owns its failure copy, so onEnter throwing
+    // here is a last-resort path only. ---
+    if (nextStep.onEnter) {
+      await advanceQuestion(athleteId, { step: nextStepIdx, question: 0, partial: {} });
+      try {
+        const { text, keyboard } = await nextStep.onEnter(athleteId);
+        if (keyboard) await sendWithKeyboard(athleteId, chatId, text, keyboard);
+        else await sendAndLog(athleteId, chatId, text);
+      } catch (err) {
+        console.error(`[onboarding] onEnter failed for step ${nextStep.id}`, err);
+        await sendAndLog(athleteId, chatId, "Give me a moment — I'm putting your plan together.");
+        await sendDavidAlert(
+          `onEnter failed for step ${nextStep.id}, athlete ${athleteId}: ${String(err)}`,
+        ).catch(() => {});
+      }
+      return true;
+    }
 
     // --- Custom sub-flow step: send initialPrompt instead of questions[0] ---
     if (nextStep.handleMessage) {
@@ -263,7 +288,11 @@ export async function handleOnboardingCallback(
   }
 
   if (result.done) {
-    if (result.reply) await sendAndLog(athleteId, chatId, result.reply);
+    if (result.reply && result.replyMarkup) {
+      await sendWithKeyboard(athleteId, chatId, result.reply, result.replyMarkup);
+    } else if (result.reply) {
+      await sendAndLog(athleteId, chatId, result.reply);
+    }
     await step.onComplete(athleteId, result.newPartial);
     await completeStep(athleteId, chatId, { ...state, partial: result.newPartial });
     return;

@@ -2,6 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { z } from 'zod';
 import { supabaseAdmin } from '@/lib/db';
 import { anthropicClient } from '@/lib/anthropic';
+import { sendDavidAlert } from '@/server/admin/alerts';
 import { upsertProfileSection } from '../memory';
 import { formatFinishTime } from '../parsing/durations';
 import type { OnboardingStep, StepHandleResult } from '../types';
@@ -9,11 +10,22 @@ import type { OnboardingStep, StepHandleResult } from '../types';
 // Phase C (onboarding v2): the optional freeform/voice "dump". One message → inline
 // Haiku extraction with stated/inferred/unknown provenance → echo back for
 // confirmation. Voice already works (handleInboundVoice transcribes upstream).
-// This is the terminal step in W2: the plan preview (B1) lands in W4 before it.
+// Terminal step: the plan (B1) is already generated + shown, so this signs off
+// and hands over the next-actions menu (Phase D).
 
-const STUB =
-  "You're all set — I've got enough to start. I'm putting your plan together; I'll have it for you shortly. " +
-  'Talk to me anytime in the meantime.';
+// Closing message (the plan was already shown at B1, so don't promise it later).
+const DONE_MESSAGE =
+  "You're all set. Your plan's ready and I'll check in with you most mornings. A few things you can do now:";
+
+// Phase D next-actions. The callbacks are handled in bot.ts (top-level, before the
+// onboarding gate) since onboarding is terminal by the time these are tapped.
+function nextActionsKeyboard(): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('Add to calendar', 'next:calendar')
+    .text('Adjust the plan', 'next:adjust')
+    .row()
+    .text("That's it for today", 'next:done');
+}
 
 const Provenance = z.enum(['stated', 'inferred', 'unknown']);
 const Field = z.object({ value: z.union([z.string(), z.number(), z.null()]), provenance: Provenance });
@@ -164,7 +176,8 @@ async function handleMessage(
     return {
       done: true,
       newPartial: { ...p, raw: text.trim(), extracted: extracted ?? undefined },
-      reply: STUB,
+      reply: DONE_MESSAGE,
+      replyMarkup: nextActionsKeyboard(),
     };
   }
 
@@ -185,10 +198,15 @@ async function handleCallback(
   const p = asPartial(partialRaw);
 
   if (data === 'enrich:skip') {
-    return { done: true, newPartial: { sub_step: 'awaiting_dump' }, reply: STUB };
+    return {
+      done: true,
+      newPartial: { sub_step: 'awaiting_dump' },
+      reply: DONE_MESSAGE,
+      replyMarkup: nextActionsKeyboard(),
+    };
   }
   if (data === 'enrich:correct') {
-    return { done: true, newPartial: p, reply: STUB };
+    return { done: true, newPartial: p, reply: DONE_MESSAGE, replyMarkup: nextActionsKeyboard() };
   }
   if (data === 'enrich:fix') {
     return {
@@ -200,10 +218,27 @@ async function handleCallback(
   return { done: false, newPartial: p };
 }
 
+// Fires the onboarding-complete alert to David. Best-effort — never blocks
+// completion (the byo path used the same wrap-and-swallow shape).
+async function alertOnboardingComplete(athleteId: string): Promise<void> {
+  const { data: athlete } = await supabaseAdmin()
+    .from('athletes')
+    .select('name')
+    .eq('id', athleteId)
+    .maybeSingle();
+  await sendDavidAlert(
+    `${athlete?.name ?? athleteId} finished onboarding — template plan active.`,
+  ).catch(() => {});
+}
+
 async function onComplete(athleteId: string, partialRaw: Record<string, unknown>): Promise<void> {
+  // Onboarding is complete here (this is the terminal step) regardless of whether
+  // the athlete dumped anything — alert David first, before any early return.
+  await alertOnboardingComplete(athleteId);
+
   const p = partialRaw as EnrichmentPartial;
   const e = p.extracted;
-  if (!e && !p.raw) return; // Skipped.
+  if (!e && !p.raw) return; // Skipped enrichment, but onboarding is still done.
 
   // Provenance-tagged memory prose for the daily coach + W5 gap-tracker.
   const lines: string[] = [];

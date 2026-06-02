@@ -1,6 +1,7 @@
 import { execSync } from 'child_process';
 import { Bot, CommandContext, Context, InlineKeyboard } from 'grammy';
 import { supabaseAdmin } from '@/lib/db';
+import type { Database } from '@/lib/db-types';
 import {
   advanceQuestion,
   handleOnboardingCallback,
@@ -14,6 +15,8 @@ import { disconnectStrava } from '@/server/strava/disconnect';
 import { getOrCreateCalendarToken } from '@/lib/calendar-token';
 import { enqueueJob } from '@/server/jobs/enqueue';
 import { transcribeOgg } from '@/lib/transcribe';
+
+type AthleteRow = Database['public']['Tables']['athletes']['Row'];
 
 let _bot: Bot | null = null;
 
@@ -342,8 +345,12 @@ async function handleCalendarCommand(ctx: CommandContext<Context>): Promise<void
   });
 
   const { url } = await getOrCreateCalendarToken(athlete.id);
+  await sendAndLog(athlete.id, ctx.chat.id, calendarSubscribeText(url));
+}
 
-  const reply = [
+// Shared by the /calendar command and the onboarding next-action [Add to calendar].
+function calendarSubscribeText(url: string): string {
+  return [
     'Your training calendar:',
     url,
     '',
@@ -354,8 +361,43 @@ async function handleCalendarCommand(ctx: CommandContext<Context>): Promise<void
     '',
     'Workouts will appear on their day. Updates automatically when your plan changes.',
   ].join('\n');
+}
 
-  await sendAndLog(athlete.id, ctx.chat.id, reply);
+// Phase D next-actions, tapped after onboarding is terminal (so they can't route
+// through the onboarding dispatcher). Mirrors the [Adjust it] handoff: [Adjust]
+// enqueues a coach tg_message; [Add to calendar] surfaces the subscribe URL.
+async function handleNextAction(
+  ctx: Context,
+  athlete: AthleteRow,
+  data: string,
+): Promise<void> {
+  const chatId = ctx.chat?.id ?? ctx.from!.id;
+
+  if (data === 'next:calendar') {
+    const { url } = await getOrCreateCalendarToken(athlete.id);
+    await ctx.answerCallbackQuery();
+    await sendAndLog(athlete.id, chatId, calendarSubscribeText(url));
+    return;
+  }
+
+  if (data === 'next:adjust') {
+    // callbackQuery.id keys the dedup so a webhook retry of the same tap enqueues once.
+    await enqueueJob('tg_message', `tg_adjust:${athlete.id}:${ctx.callbackQuery?.id ?? 'cb'}`, {
+      athlete_id: athlete.id,
+      text: "I'd like to adjust my training plan — take a look and let's talk through what to change.",
+    });
+    await ctx.answerCallbackQuery();
+    await sendAndLog(athlete.id, chatId, "On it — I'll take a look and message you in a moment.");
+    return;
+  }
+
+  if (data === 'next:done') {
+    await ctx.answerCallbackQuery();
+    await sendAndLog(athlete.id, chatId, "Sounds good. I'll check in with you in the morning — talk then.");
+    return;
+  }
+
+  await ctx.answerCallbackQuery();
 }
 
 async function handleStravaStatusCommand(ctx: CommandContext<Context>): Promise<void> {
@@ -515,6 +557,14 @@ function getBot(): Bot {
 
       if (!athlete) {
         await ctx.answerCallbackQuery();
+        return;
+      }
+
+      // Phase D next-actions are tapped after onboarding is terminal, so they
+      // must be handled before the onboarding-state gate below (which otherwise
+      // dismisses every callback once onboarding is complete).
+      if (data.startsWith('next:')) {
+        await handleNextAction(ctx, athlete, data);
         return;
       }
 
