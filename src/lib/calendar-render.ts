@@ -1,5 +1,6 @@
 import ical, { ICalCalendar } from 'ical-generator';
 import type { Day, Plan, Week } from './plan-schema';
+import { resolveExercise } from './exercise-library';
 
 type StrengthSession = NonNullable<Plan['strength_workouts']>['upper_body'];
 
@@ -79,17 +80,23 @@ function renderExercise(
   ex: NonNullable<StrengthSession>['exercises'][number],
   taper: boolean,
 ): string {
+  // Append the corpus source link when the exercise resolves. A calendar
+  // DESCRIPTION is plain text, so a bare URL is correct here (the one place it
+  // is). Unmatched → no link, line unchanged. Never a fabricated URL.
+  const entry = resolveExercise({ slug: ex.exercise_slug, name: ex.name });
+  const link = entry ? ` ${entry.source}` : '';
+
   if (ex.duration_min !== undefined) {
     const dur =
       taper && ex.taper_duration_min !== undefined ? ex.taper_duration_min : ex.duration_min;
     const areas = ex.areas && ex.areas.length > 0 ? ` (${ex.areas.join(', ')})` : '';
-    return `- ${ex.name} — ${dur} min${areas}`;
+    return `- ${ex.name} — ${dur} min${areas}${link}`;
   }
   const sets = taper && ex.taper_sets !== undefined ? ex.taper_sets : ex.sets;
   const reps = taper && ex.taper_reps !== undefined ? ex.taper_reps : ex.reps;
-  if (sets === undefined || reps === undefined) return `- ${ex.name}`;
+  if (sets === undefined || reps === undefined) return `- ${ex.name}${link}`;
   const unit = ex.reps_unit ? ` ${ex.reps_unit}` : '';
-  return `- ${ex.name} — ${sets}×${reps}${unit}`;
+  return `- ${ex.name} — ${sets}×${reps}${unit}${link}`;
 }
 
 function strengthSessionFor(plan: Plan, day: Day): StrengthSession | undefined {

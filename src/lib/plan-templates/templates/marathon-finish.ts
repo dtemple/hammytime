@@ -125,10 +125,28 @@ export const marathonFinish: PlanTemplate = {
         taper_duration_min: 20,
         race_week_duration_min: 15,
         exercises: [
-          { name: 'Single-leg calf raises', sets: 3, reps: 15, reps_unit: 'per_side' },
-          { name: 'Split squats', sets: 3, reps: 10, reps_unit: 'per_leg' },
+          {
+            name: 'Single-leg calf raises',
+            exercise_slug: 'single-leg-calf-raise',
+            sets: 3,
+            reps: 15,
+            reps_unit: 'per_side',
+          },
+          {
+            name: 'Split squats',
+            exercise_slug: 'bulgarian-split-squat',
+            sets: 3,
+            reps: 10,
+            reps_unit: 'per_leg',
+          },
           { name: 'Glute bridges', sets: 3, reps: 15 },
-          { name: 'Side planks', sets: 2, reps: 30, reps_unit: 'seconds' },
+          {
+            name: 'Side planks',
+            exercise_slug: 'side-plank',
+            sets: 2,
+            reps: 30,
+            reps_unit: 'seconds',
+          },
         ],
       },
       upper_body: {
@@ -137,8 +155,14 @@ export const marathonFinish: PlanTemplate = {
         race_week_duration_min: 15,
         exercises: [
           { name: 'Push-ups', sets: 3, reps: 12 },
-          { name: 'Dead bugs', sets: 3, reps: 10, reps_unit: 'per_side' },
-          { name: 'Plank', sets: 3, reps: 45, reps_unit: 'seconds' },
+          {
+            name: 'Dead bugs',
+            exercise_slug: 'dead-bug',
+            sets: 3,
+            reps: 10,
+            reps_unit: 'per_side',
+          },
+          { name: 'Plank', exercise_slug: 'front-plank', sets: 3, reps: 45, reps_unit: 'seconds' },
         ],
       },
     },

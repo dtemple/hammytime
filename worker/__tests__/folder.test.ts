@@ -100,6 +100,12 @@ describe('hydrate', () => {
     expect(existsSync(path.join(folder.dir, 'strava_recent.json'))).toBe(true);
     expect(folder.planHash).toBeDefined();
 
+    // The static exercise corpus is copied in for the coach to read.
+    const corpus = readFileSync(path.join(folder.dir, 'exercises.md'), 'utf8');
+    expect(corpus).toContain('# Exercise library');
+    // It is not a memory file — no hash recorded, so syncBack treats it as input.
+    expect(Object.keys(folder.memoryHashes)).not.toContain('exercises.md');
+
     expect(Object.keys(folder.memoryHashes).sort()).toEqual([
       'athlete_profile.md',
       'latest_state.md',
@@ -152,6 +158,16 @@ describe('syncBack', () => {
     const folder = await hydrate(ATHLETE);
     await syncBack(ATHLETE, folder);
     expect(upsertCalls).toHaveLength(0);
+  });
+
+  it('never writes the exercise corpus back, even if the agent edits it', async () => {
+    const folder = await hydrate(ATHLETE);
+    writeFileSync(path.join(folder.dir, 'exercises.md'), 'tampered');
+    await syncBack(ATHLETE, folder);
+    const synced = upsertCalls.flatMap((c) =>
+      (c.rows as { file_name: string }[]).map((r) => r.file_name),
+    );
+    expect(synced).not.toContain('exercises.md');
   });
 });
 

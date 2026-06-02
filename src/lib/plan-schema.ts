@@ -231,6 +231,10 @@ const AgentGuidanceSchema = z.object({
 
 const ExerciseSchema = z.object({
   name: z.string(),
+  // Optional link into the exercise corpus (worker/knowledge/exercises.md). Set
+  // on template exercises with a confident match; the calendar and chat resolve
+  // it to the canonical `source` URL. Absent → no link, recommendation stands.
+  exercise_slug: z.string().optional(),
   sets: z.number().int().positive().optional(),
   reps: z.number().optional(),
   reps_unit: z.string().optional(), // "per_side" | "per_leg" | "seconds" | …

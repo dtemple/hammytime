@@ -10,8 +10,9 @@
 // not a memory_files row.
 
 import { createHash } from 'crypto';
-import { mkdir, readFile, readdir, rm, writeFile } from 'fs/promises';
+import { copyFile, mkdir, readFile, readdir, rm, writeFile } from 'fs/promises';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { supabaseAdmin } from '@/lib/db';
 import { computeDrift, renderDriftSummary, type PlanDrift } from '@/lib/plan-drift';
 import { PlanSchema } from '@/lib/plan-schema';
@@ -29,7 +30,14 @@ export const INPUT_ONLY_FILES = new Set([
   'strava_recent.json',
   'marathon_training_plan.json',
   'plan_drift.md',
+  // Static read-only exercise corpus copied in at hydrate — never per-athlete
+  // data, so it must never be written back to memory_files.
+  'exercises.md',
 ]);
+
+// The corpus source, resolved relative to this module so the path is correct
+// regardless of cwd. Ships in the worker image (Dockerfile `COPY worker`).
+const CORPUS_SRC = fileURLToPath(new URL('knowledge/exercises.md', import.meta.url));
 
 export type HydratedFolder = {
   dir: string;
@@ -96,6 +104,10 @@ export async function hydrate(athleteId: string): Promise<HydratedFolder> {
   // spawning a fetch — see isolation.ts for why Bash stays denied.
   const strava = await buildStravaContext(athleteId, STRAVA_LOOKBACK_DAYS);
   await writeFile(path.join(dir, 'strava_recent.json'), JSON.stringify(strava, null, 2), 'utf8');
+
+  // Static read-only exercise corpus (input). Grounds the coach's exercise
+  // advice in vetted cues + canonical source links. Excluded from syncBack.
+  await copyFile(CORPUS_SRC, path.join(dir, 'exercises.md'));
 
   return { dir, memoryHashes, planHash };
 }

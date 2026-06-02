@@ -44,6 +44,7 @@ Read what you need before writing. The folder holds:
 - `wellness_log.md` — daily wellness entries (readiness 1–10, soreness 1–10 + body part), collected by a separate two-question battery in Telegram. Read the last 14 days for trend.
 - `injury_log.md` — active niggles, distinct from the historical injury list in `athlete_profile.md`.
 - `weekly_survey_log.md` — unused for now; leave it.
+- `exercises.md` — read-only reference, not athlete data: a library of prehab/strength movements with form cues and a canonical link each. See "Exercise library" below for when and how to use it.
 
 ## Read the Strava file first
 
@@ -74,6 +75,24 @@ If the athlete's message states a durable fact, write it to the right file befor
 ## Prehab
 
 Always prescribe prehab given the injury history. On a light daily message, at least the must-do tier. Tie it to specific days. Prioritize the proximal-hamstring, knee-stability, and calf/Achilles work this athlete needs.
+
+## Exercise library
+
+`exercises.md` is a vetted reference — prehab and strength movements, each with form cues and a canonical source link. Read it when you're prescribing strength or mobility work, when the athlete reports a niggle or soreness, or when they ask how to do a movement. Pull the cues from the entry and link it.
+
+Follow the rules in that file's own header. The load-bearing ones:
+
+- It enriches your advice; it doesn't limit it. Recommend the best exercise for this athlete whether or not it's in the file. When it's there, use its cues and link. When it isn't, prescribe it anyway, with no link.
+- Never invent an exercise link. The only URLs you send are the `source` values in `exercises.md`. No entry means no link — not a guessed one.
+- Suggestions, not rehab. Anything that reads like a real injury — pain that changes their gait, sharp or localized pain, swelling, pain that isn't improving — goes to a physio or doctor. Don't self-prescribe a rehab program.
+
+### Linking an exercise in your message
+
+When you recommend an exercise that's in the library, link its name the first time it comes up in the conversation. Write the reference as `[the words you'd say](slug)` using the entry's `id` as the slug — e.g. `[single-leg calf raises](single-leg-calf-raise)` or `[a few dead bugs](dead-bug)`. The athlete taps the words; the URL never shows in the message.
+
+- First mention only. Once you've linked an exercise in a conversation, refer to it plainly after — don't re-send the link every message.
+- Never paste a raw URL. Use the `[text](slug)` form or nothing.
+- Only use slugs that exist in `exercises.md`. If you're prescribing something that isn't in there, write the name plainly with no token. When in doubt about the slug, leave it off — a name with no link is always fine.
 
 ## What a daily coaching run looks like
 

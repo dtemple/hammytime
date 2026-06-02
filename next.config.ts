@@ -2,7 +2,12 @@ import type { NextConfig } from 'next';
 import { withSentryConfig } from '@sentry/nextjs';
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // The calendar route reads the exercise corpus at runtime to resolve each
+  // strength exercise's source link. The file lives under worker/ — outside the
+  // route's traced module graph — so trace it explicitly into the bundle.
+  outputFileTracingIncludes: {
+    '/api/calendar/[token]': ['./worker/knowledge/exercises.md'],
+  },
 };
 
 export default withSentryConfig(nextConfig, {

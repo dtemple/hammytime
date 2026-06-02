@@ -4,8 +4,35 @@
 
 import { Bot } from 'grammy';
 import { supabaseAdmin } from '@/lib/db';
+import { resolveExercise } from '@/lib/exercise-library';
 
 const TELEGRAM_MAX_CHARS = 4096;
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// The coach marks an exercise link as `[visible text](slug)` where slug is a
+// corpus id (worker/knowledge/exercises.md). Slug is constrained to id-shaped
+// chars so arbitrary parens in prose can't be mistaken for a link.
+const LINK_TOKEN_RE = /\[([^\]]+)\]\(([a-z0-9-]+)\)/g;
+
+/**
+ * Renders a coach message for Telegram HTML parse mode. The whole string is
+ * HTML-escaped first, then the controlled `[text](slug)` tokens become `<a>`
+ * tags resolved against the corpus — a matched slug links to its canonical
+ * `source`, an unmatched one collapses to plain text (no link, no fabricated
+ * URL). Escaping happens before substitution, so arbitrary agent prose can
+ * never break parsing, and the only URLs that appear are corpus `source`s.
+ */
+export function renderTelegramHtml(text: string): string {
+  return escapeHtml(text).replace(LINK_TOKEN_RE, (_m, label: string, slug: string) => {
+    const entry = resolveExercise({ slug });
+    if (!entry) return label;
+    const href = escapeHtml(entry.source).replace(/"/g, '&quot;');
+    return `<a href="${href}">${label}</a>`;
+  });
+}
 
 let _bot: Bot | null = null;
 
@@ -73,7 +100,12 @@ export async function sendReply(athleteId: string, text: string, runId?: string)
   if (chunks.length === 0) return;
 
   for (const part of chunks) {
-    await bot().api.sendMessage(athlete.telegram_chat_id, part);
+    // Render per chunk: substitution happens after the 4096 split, so an <a>
+    // tag can never straddle a boundary and break the send. We store the
+    // original `[text](slug)` token text — readable, no URL spam in the log.
+    await bot().api.sendMessage(athlete.telegram_chat_id, renderTelegramHtml(part), {
+      parse_mode: 'HTML',
+    });
     await db.from('messages').insert({
       athlete_id: athleteId,
       channel: 'tg',

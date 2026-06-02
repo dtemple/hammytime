@@ -99,6 +99,28 @@ describe('renderPlanIcs', () => {
     expect(upper!.description).toContain('Push-ups or Bench Press');
   });
 
+  it('links a strength exercise to its corpus source URL', () => {
+    const ics = renderPlanIcs({
+      athleteName: 'David',
+      timezone: 'America/Los_Angeles',
+      plan: seedPlan,
+      planId: 'pv',
+      planStartDate: '2026-03-30',
+    });
+    const parsed = ical.sync.parseICS(ics);
+    const upper = Object.values(parsed).find(
+      (e) => (e as { uid?: string }).uid === 'pv-w1-d2@hammytime',
+    ) as { description?: string } | undefined;
+    // The seed's upper-body day has "Dead Bug" — resolved by name-fallback to
+    // the `dead-bug` corpus entry, so its source URL rides the exercise line.
+    const desc = upper!.description ?? '';
+    expect(desc).toContain('https://www.youtube.com/watch?v=BZYaCzbP09M');
+    // Bird Dog has no corpus entry → no link (no fabricated URL).
+    const birdDog = desc.split('\n').find((l) => l.includes('Bird Dog'));
+    expect(birdDog).toBeDefined();
+    expect(birdDog).not.toMatch(/https?:\/\//);
+  });
+
   it('snapshot of the rendered calendar', () => {
     const ics = renderPlanIcs({
       athleteName: 'David',
