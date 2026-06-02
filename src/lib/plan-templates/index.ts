@@ -19,27 +19,32 @@ import {
   type SelectorProfile,
 } from './selector';
 import { marathonFinish } from './templates/marathon-finish';
+import { marathonPerformance } from './templates/marathon-performance';
+import { halfFoundation } from './templates/half-foundation';
+import { halfDevelopment } from './templates/half-development';
+import { shortRace } from './templates/short-race';
+import { baseMaintenance } from './templates/base-maintenance';
 
-/** Authored templates by id. The other five (marathon-performance,
- *  half-foundation, half-development, short-race, base-maintenance) are pending
- *  in W3 — `getTemplate` throws a clear error until they land. */
-export const TEMPLATES: Partial<Record<TemplateId, PlanTemplate>> = {
+/** All six authored templates by id. */
+export const TEMPLATES: Record<TemplateId, PlanTemplate> = {
   'marathon-finish': marathonFinish,
+  'marathon-performance': marathonPerformance,
+  'half-foundation': halfFoundation,
+  'half-development': halfDevelopment,
+  'short-race': shortRace,
+  'base-maintenance': baseMaintenance,
 };
 
 export function getTemplate(id: TemplateId): PlanTemplate {
-  const template = TEMPLATES[id];
-  if (!template) {
-    throw new Error(`getTemplate: template "${id}" is not authored yet (W3)`);
-  }
-  return template;
+  return TEMPLATES[id];
 }
 
 /**
  * Compose selection: profile + Strava snapshot → the chosen template and the
- * render params for it. `computeRenderParams` is still stubbed (W3 build), so
- * this throws there until the renderer build lands — the wiring is in place,
- * the behavior follows.
+ * render params for it. The resolved template is threaded into
+ * `computeRenderParams` (it reads the template's volume floors, strength
+ * defaults, supported microcycles, and overlays) — passing it here avoids a
+ * circular import between the selector and this registry.
  */
 export function selectPlan(
   profile: SelectorProfile,
@@ -48,6 +53,6 @@ export function selectPlan(
 ): { templateId: TemplateId; template: PlanTemplate; params: RenderParams } {
   const templateId = selectTemplateId(profile.goalDistance, profile.experienceTier);
   const template = getTemplate(templateId);
-  const params = computeRenderParams(profile, snapshot, caps);
+  const params = computeRenderParams(profile, snapshot, caps, template);
   return { templateId, template, params };
 }

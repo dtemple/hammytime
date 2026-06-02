@@ -7,6 +7,8 @@ import { readFile } from 'fs/promises';
 import path from 'path';
 import { supabaseAdmin } from '@/lib/db';
 import { loadAthleteData } from '@/server/agent/byo-plan';
+import { DRAFT_SAFETY_CAPS } from '@/lib/plan-templates/caps';
+import type { SafetyCaps } from '@/lib/plan-templates/types';
 import type { RunSource } from './run-agent';
 
 export type HistoryMsg = { direction: string; body: string };
@@ -67,9 +69,7 @@ function formatTime(sec: number): string {
   return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-function injuryHistory(
-  injuries: Awaited<ReturnType<typeof loadAthleteData>>['injuries'],
-): string {
+function injuryHistory(injuries: Awaited<ReturnType<typeof loadAthleteData>>['injuries']): string {
   if (injuries.length === 0) return '_None flagged during onboarding._';
   return injuries
     .map((i) => {
@@ -85,6 +85,34 @@ function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+// The athlete's long-run ceiling, picked from the per-distance caps by their
+// goal-race distance (generic when there's no race on file).
+function longRunCeiling(caps: SafetyCaps, distanceMi: number | null): number | null {
+  if (distanceMi == null) return null;
+  if (distanceMi <= 4) return caps.maxLongRunMiByDistance['5k'];
+  if (distanceMi <= 7.5) return caps.maxLongRunMiByDistance['10k'];
+  if (distanceMi <= 16) return caps.maxLongRunMiByDistance['half'];
+  return caps.maxLongRunMiByDistance['marathon'];
+}
+
+// Render the safety caps from the single source of truth (src/lib/plan-templates/caps.ts)
+// so gen-time (the rendered plan's agent_guidance) and chat-time (this prompt)
+// enforce the same numbers.
+export function safetyCapsBlock(caps: SafetyCaps, distanceMi: number | null): string {
+  const pct = Math.round(caps.maxWeeklyRampPct * 100);
+  const share = Math.round(caps.maxLongRunShareOfWeekly * 100);
+  const ceiling = longRunCeiling(caps, distanceMi);
+  const lines = [
+    `- Weekly mileage: don't ramp more than ${pct}% or ${caps.minWeeklyRampMi} mi week to week, whichever is greater. Cutback weeks go down; re-ramping out of a cutback to the prior peak is expected.`,
+    `- Long run: at most +${caps.maxLongRunStepMi} mi week to week (+${caps.postCutbackLongRunStepMi} the week after a cutback), and no more than ${share}% of that week's mileage.`,
+    ceiling != null
+      ? `- Long-run ceiling for this athlete's race: about ${ceiling} mi.`
+      : `- Long-run ceiling by race: 5k ${caps.maxLongRunMiByDistance['5k']} / 10k ${caps.maxLongRunMiByDistance['10k']} / half ${caps.maxLongRunMiByDistance.half} / marathon ${caps.maxLongRunMiByDistance.marathon} mi.`,
+    `- Keep at least ${caps.minEasyDaysBetweenHard} easy or rest day between any two hard days.`,
+  ];
+  return lines.join('\n');
+}
+
 export async function renderSystemPrompt(athleteId: string): Promise<string> {
   const data = await loadAthleteData(athleteId);
   const template = await loadTemplate();
@@ -95,10 +123,9 @@ export async function renderSystemPrompt(athleteId: string): Promise<string> {
     sex: data.athlete.sex ?? 'sex unknown',
     timezone: data.athlete.timezone,
     goal_race_line: goalRaceLine(data.goalRace),
-    asthma_line: data.athlete.asthma
-      ? '- Mild asthma — watch cold/dry/high-effort conditions'
-      : '',
+    asthma_line: data.athlete.asthma ? '- Mild asthma — watch cold/dry/high-effort conditions' : '',
     injury_history: injuryHistory(data.injuries),
+    safety_caps: safetyCapsBlock(DRAFT_SAFETY_CAPS, data.goalRace?.distance_mi ?? null),
   };
 
   return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {

@@ -1,4 +1,5 @@
-// Safety caps — starting values, approved-with-tuning (onboarding v2, W3).
+// Safety caps — values locked for W3 (onboarding v2). Approved-with-tuning
+// 2026-06-01; the numbers below are the settled launch values.
 //
 // Caps are ADVISORY, not refusals. The product manages the athlete's plan; it
 // never makes the decision for them. Two moments:
@@ -11,13 +12,17 @@
 //     ("A jump that size carries real injury risk; I'd strongly recommend
 //     against it. But if you want it in your plan, I can do that.")
 //
+// One source of truth: these caps flow into BOTH the rendered plan's
+// agent_guidance.compliance_rules (gen-time, via the renderer) AND the worker
+// coach prompt (chat-time, via worker/system-prompt.ts) — so generation and
+// conversation enforce the same numbers.
+//
 // Two-level design: each template carries a softer DESIGN TARGET (e.g.
-// volume.longRun.shareOfWeeklyMax = 0.35) the renderer aims for; the caps below
-// are the threshold past which the coach must warn + confirm.
+// volume.longRun.shareOfWeeklyMax = 0.35) the renderer aims for in typical weeks;
+// the caps below are the threshold past which the coach must warn + confirm.
 //
 // Sources: the existing canonical plan's agent_guidance.compliance_rules
 // (long_run_progression, weekly_volume_cap) + standard endurance guidance.
-// Treat as a proposal to tune together, not settled fact.
 
 import type { SafetyCaps } from './types';
 
