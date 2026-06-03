@@ -4,10 +4,12 @@ const createMock = vi.fn();
 vi.mock('@/lib/anthropic', () => ({ anthropicClient: () => ({ messages: { create: createMock } }) }));
 vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
 vi.mock('../memory', () => ({ upsertProfileSection: vi.fn() }));
+vi.mock('../known-gaps-memory', () => ({ seedKnownGaps: vi.fn() }));
 vi.mock('@/server/admin/alerts', () => ({ sendDavidAlert: vi.fn().mockResolvedValue(undefined) }));
 
 import { supabaseAdmin } from '@/lib/db';
 import { upsertProfileSection } from '../memory';
+import { seedKnownGaps } from '../known-gaps-memory';
 import { sendDavidAlert } from '@/server/admin/alerts';
 import { enrichmentStep } from '../steps/05-enrichment';
 
@@ -113,6 +115,8 @@ describe('enrichment — onComplete provenance backfill', () => {
 
     // onboarding-complete alert fired
     expect(sendDavidAlert as AnyMock).toHaveBeenCalled();
+    // known-gaps tracker seeded for the daily coach
+    expect(seedKnownGaps as AnyMock).toHaveBeenCalledWith('a1', FULL);
     // dob written from stated age
     expect(updateEq).toHaveBeenCalledWith('id', 'a1');
     // memory written with provenance tags

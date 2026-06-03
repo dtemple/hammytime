@@ -1,0 +1,100 @@
+// W5 (onboarding v2): seed the per-athlete known-gaps tracker the daily coach
+// fills opportunistically. Onboarding keeps the structured interview short and
+// leaves the nice-to-haves (age, target time, tune-up races, strength
+// equipment, schedule constraints, recent long run) for the coach to ask about
+// at the moment the answer changes a prescription — see Specs/ONBOARDING_V2.md
+// (W5) and src/lib/known-gaps.ts for the catalog.
+//
+// This module writes the initial `known_gaps.md` memory file at onboarding
+// completion. The coach reads and edits it each run (worker/prompts/coach.md,
+// "Filling known gaps"); syncBack persists those edits like any other memory
+// file, so no DB table or migration is involved.
+
+import { supabaseAdmin } from '@/lib/db';
+import { KNOWN_GAPS, type KnownGapKey } from '@/lib/known-gaps';
+import { formatFinishTime } from './parsing/durations';
+import type { Extracted } from './steps/05-enrichment';
+
+export const KNOWN_GAPS_FILE = 'known_gaps.md';
+
+// Listing order: the gaps the coach reaches for most come first.
+const GAP_ORDER: KnownGapKey[] = [
+  'strength_equipment',
+  'target_time',
+  'tune_up_races',
+  'schedule_constraints',
+  'age',
+  'recent_long_run',
+];
+
+// Gaps onboarding already captured, marked filled in the seed so the coach
+// doesn't re-ask. Stated only — inferred and unknown stay open for the coach to
+// confirm, mirroring the stated-only backfill in 05-enrichment.ts onComplete.
+function filledFromEnrichment(e: Extracted | null): Partial<Record<KnownGapKey, string>> {
+  const filled: Partial<Record<KnownGapKey, string>> = {};
+  if (!e) return filled;
+
+  if (e.age.provenance === 'stated' && typeof e.age.value === 'number') {
+    filled.age = String(e.age.value);
+  }
+  if (e.target_time_sec.provenance === 'stated' && typeof e.target_time_sec.value === 'number') {
+    filled.target_time = formatFinishTime(e.target_time_sec.value);
+  }
+  const statedTuneups = e.tuneup_races.filter((t) => t.provenance === 'stated');
+  if (statedTuneups.length > 0) {
+    filled.tune_up_races = statedTuneups
+      .map((t) => (t.date ? `${t.name} (${t.date})` : t.name))
+      .join('; ');
+  }
+  if (
+    e.schedule_notes.provenance === 'stated' &&
+    typeof e.schedule_notes.value === 'string' &&
+    e.schedule_notes.value.trim()
+  ) {
+    filled.schedule_constraints = e.schedule_notes.value.trim();
+  }
+  return filled;
+}
+
+const HEADER = [
+  '# Known gaps',
+  '',
+  'Facts onboarding left for the coach to fill later. Ask about ONE only when it',
+  "changes today's prescription. Not a questionnaire. When the athlete answers,",
+  'rewrite that line to `[filled YYYY-MM-DD] <key>: <value>` and stop asking.',
+  '',
+].join('\n');
+
+/** Pure renderer: builds the `known_gaps.md` body from the catalog + whatever
+ *  onboarding already captured. `today` is the ISO date stamped on filled gaps. */
+export function renderKnownGaps(e: Extracted | null, today: string): string {
+  const filled = filledFromEnrichment(e);
+  const lines = GAP_ORDER.map((key) => {
+    const def = KNOWN_GAPS[key];
+    const value = filled[key];
+    if (value != null) {
+      return `- [filled ${today}] ${key}: ${value}`;
+    }
+    const opts = def.options ? ` (${def.options.join(' / ')})` : '';
+    return `- [open] ${key}: ${def.what} Ask when: ${def.paysOffWhen}${opts}`;
+  });
+  return `${HEADER}${lines.join('\n')}\n`;
+}
+
+/** Writes the initial known_gaps.md memory file for an athlete who just finished
+ *  onboarding. Idempotent on (athlete_id, file_name). */
+export async function seedKnownGaps(athleteId: string, e: Extracted | null): Promise<void> {
+  const now = new Date();
+  const content = renderKnownGaps(e, now.toISOString().slice(0, 10));
+
+  const { error } = await supabaseAdmin().from('memory_files').upsert(
+    {
+      athlete_id: athleteId,
+      file_name: KNOWN_GAPS_FILE,
+      content_md: content,
+      updated_at: now.toISOString(),
+    },
+    { onConflict: 'athlete_id,file_name' },
+  );
+  if (error) throw new Error(`seedKnownGaps failed: ${error.message}`);
+}

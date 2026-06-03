@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/db';
 import { anthropicClient } from '@/lib/anthropic';
 import { sendDavidAlert } from '@/server/admin/alerts';
 import { upsertProfileSection } from '../memory';
+import { seedKnownGaps } from '../known-gaps-memory';
 import { formatFinishTime } from '../parsing/durations';
 import type { OnboardingStep, StepHandleResult } from '../types';
 
@@ -39,7 +40,7 @@ const EnrichmentSchema = z.object({
   motivation: Field,
 });
 
-type Extracted = z.infer<typeof EnrichmentSchema>;
+export type Extracted = z.infer<typeof EnrichmentSchema>;
 
 type EnrichmentPartial = {
   sub_step: 'awaiting_dump' | 'confirm';
@@ -238,6 +239,11 @@ async function onComplete(athleteId: string, partialRaw: Record<string, unknown>
 
   const p = partialRaw as EnrichmentPartial;
   const e = p.extracted;
+
+  // W5: seed the known-gaps tracker for the daily coach. Runs for every athlete
+  // who finishes onboarding — including skippers (no extraction → all gaps open).
+  await seedKnownGaps(athleteId, e ?? null);
+
   if (!e && !p.raw) return; // Skipped enrichment, but onboarding is still done.
 
   // Provenance-tagged memory prose for the daily coach + W5 gap-tracker.
