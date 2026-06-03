@@ -37,7 +37,7 @@ async function handleCallback(
     return {
       done: false,
       newPartial: { ...p, sub_step: 'capture_part' },
-      reply: "What's bothering you? (e.g. left knee, right achilles, lower back)",
+      reply: "Any injuries to know about? (e.g. left knee, right achilles, lower back)",
     };
   }
   return { done: false, newPartial: p };

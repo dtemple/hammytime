@@ -20,10 +20,10 @@ function asPartial(p: Record<string, unknown>): ShapePartial {
 }
 
 const TIERS: { key: ExperienceTier; label: string }[] = [
-  { key: 'beginner', label: 'Beginner — can finish a 3-mile run' },
-  { key: 'for_fun', label: 'Just for fun — run regularly, no structure' },
-  { key: 'some_training', label: 'Some training — 6+ mi regularly, intervals/tempo' },
-  { key: 'experienced', label: 'Experienced — race half+ regularly, structured' },
+  { key: 'beginner', label: 'Beginner (occasional < 5 mile runs)' },
+  { key: 'for_fun', label: 'Just for fun (run regularly, no structure)' },
+  { key: 'some_training', label: 'Some training (6+ mi regularly, some intervals/tempo)' },
+  { key: 'experienced', label: 'Experienced (race half+ regularly, structured)' },
 ];
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -105,7 +105,7 @@ async function handleCallback(
         suggested_days: suggestedDays,
         suggested_long_run: suggestedLr,
       },
-      reply: `Based on where you are, I'd train you ${suggestedDays} days a week. Sound right?`,
+      reply: `Based on where you are, I'd suggest ${suggestedDays} days a week. Sound right?`,
       replyMarkup: daysKeyboard(suggestedDays),
     };
   }
@@ -116,8 +116,8 @@ async function handleCallback(
     const dayName = suggestedLr != null ? WEEKDAYS[suggestedLr] : null;
     const prompt =
       dayName != null
-        ? `Which day's your long run? Looks like you usually go long on ${dayName}.`
-        : "Which day's your long run?";
+        ? `Which day for your long run? Looks like you usually go longer on ${dayName}.`
+        : "Which day for your long run?";
     return {
       done: false,
       newPartial: { ...p, days_per_week, sub_step: 'long_run' },

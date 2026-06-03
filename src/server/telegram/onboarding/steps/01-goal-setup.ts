@@ -41,17 +41,17 @@ function asPartial(p: Record<string, unknown>): GoalPartial {
   return Object.keys(p).length === 0 ? { sub_step: 'goal_choice' } : (p as GoalPartial);
 }
 
-const INITIAL_PROMPT = 'What do you want from me?';
+const INITIAL_PROMPT = 'What is your goal?';
 
 function goalKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
-    .text('Train me for a race', 'goal:race')
+    .text('Train for a race', 'goal:race')
     .row()
-    .text('Day-to-day coach — coming soon', 'goal:daytoday');
+    .text('Day-to-day running — coming soon', 'goal:daytoday');
 }
 
 function raceChoiceKeyboard(): InlineKeyboard {
-  return new InlineKeyboard().text("I'll name it", 'race:name').text('No race yet →', 'race:none');
+  return new InlineKeyboard().text("Enter race name", 'race:name').text('No race yet →', 'race:none');
 }
 
 function distanceKeyboard(): InlineKeyboard {
@@ -135,7 +135,7 @@ async function handleRaceName(name: string, athleteId: string, p: GoalPartial): 
   return {
     done: false,
     newPartial: { ...p, race_lookup: lookup, race_manual: { name: f.canonical_name }, sub_step: 'race_confirm' },
-    reply: `${qualifier}: ${f.canonical_name}${raceDetailsLine(f)}\n\nThat it? Reply yes / no.`,
+    reply: `${qualifier}: ${f.canonical_name}${raceDetailsLine(f)}\n\nIs this it? Reply yes / no.`,
   };
 }
 
@@ -262,7 +262,7 @@ async function handleCallback(
     return {
       done: false,
       newPartial: { ...p, sub_step: 'race_choice' },
-      reply: "Which race are you pointing at? Name's enough — I'll pull the date and details. Haven't picked one? That's fine too.",
+      reply: "What's the race? Write the name, location and/or date and it'll pull the rest. Haven't picked one? That's ok too.",
       replyMarkup: raceChoiceKeyboard(),
     };
   }
@@ -270,7 +270,7 @@ async function handleCallback(
     return {
       done: false,
       newPartial: p,
-      alertText: "Day-to-day coaching is coming soon — I'll ping you when it lands. For now, let's set up a race.",
+      alertText: "Day-to-day is coming soon. For now, you need to set up a race training plan.",
     };
   }
 
@@ -279,14 +279,14 @@ async function handleCallback(
     return {
       done: false,
       newPartial: { ...p, sub_step: 'race_name' },
-      reply: "What's the race? Just the name — like 'Boston Marathon'.",
+      reply: "What's the race? Write the name and any details, like 'Boston Marathon'.",
     };
   }
   if (data === 'race:none') {
     return {
       done: false,
       newPartial: { ...p, sub_step: 'goal_choice' }, // sub_step parked; distance_choice handled by data prefix below
-      reply: "No problem — we'll start training and lock a race in when you're ready. What are you building toward?",
+      reply: "No problem. We'll start training and lock a race in when you're ready. What are you building toward?",
       replyMarkup: distanceKeyboard(),
     };
   }

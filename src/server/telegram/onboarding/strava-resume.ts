@@ -84,14 +84,14 @@ export async function resumeAfterStrava(athleteId: string): Promise<boolean> {
     await sendWithKeyboard(
       athleteId,
       athlete.telegram_chat_id,
-      `Connected — read your last couple months. You're ${firstname}${where}. That you?`,
+      `Connected and read your last couple months. You're ${firstname}${where}. Is that right?`,
       new InlineKeyboard().text('Yep', 'profile:yep').text('I go by…', 'profile:rename'),
     );
   } else {
     await sendWithKeyboard(
       athleteId,
       athlete.telegram_chat_id,
-      "Connected — read your last couple months. What should I call you?",
+      "Connected and read your last couple months. What should I call you?",
     );
   }
   return true;

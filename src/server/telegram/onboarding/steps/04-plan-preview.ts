@@ -65,7 +65,7 @@ export function formatPreview(plan: Plan, params: RenderParams): string {
     );
     lines.push(
       "No time goal locked in yet, so I've set everything by feel — we can dial in paces once " +
-        "you've got a target. It's a starting point, not a contract; we'll adjust as we go.",
+        "you've got a target. It's a starting point; we'll adjust as we go.",
     );
   } else if (params.distance === 'keep_fit') {
     lines.push(
@@ -188,7 +188,7 @@ async function handleMessage(
   return {
     done: false,
     newPartial: partial,
-    reply: 'Tap a button above — Looks good if it works, or Adjust it and I’ll rework it with you.',
+    reply: 'Tap a button above — Looks good if it works, or Adjust it and we\'ll rework it.',
   };
 }
 
