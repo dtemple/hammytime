@@ -400,6 +400,114 @@ async function handleNextAction(
   await ctx.answerCallbackQuery();
 }
 
+// Loads the athlete for a command, or replies with the standard guard message
+// and returns null. Mirrors the athlete/onboarding guards used by /checkin and
+// /calendar. Used by the two on-demand coaching commands below.
+async function loadOnboardedAthlete(ctx: CommandContext<Context>): Promise<AthleteRow | null> {
+  const db = supabaseAdmin();
+  const { data: athlete } = await db
+    .from('athletes')
+    .select('*')
+    .eq('telegram_chat_id', String(ctx.chat.id))
+    .maybeSingle();
+  if (!athlete) {
+    await ctx.reply('Use your invite link to get started.');
+    return null;
+  }
+  const ob = athlete.onboarding_state as { step?: number } | null;
+  if ((typeof ob?.step === 'number' ? ob.step : 0) < onboardingSteps.length) {
+    await ctx.reply('Finish onboarding first.');
+    return null;
+  }
+  return athlete;
+}
+
+// A coaching run counts as in-flight if there's an uncompleted tg_message or
+// daily_checkin job for this athlete enqueued in the last few minutes. The time
+// box matters: a job that dies after MAX_ATTEMPTS keeps completed_at null
+// (failJob marks it DEAD rather than completing it), so anchoring on age lets a
+// dead or stuck run age out instead of locking the athlete out of new commands.
+// Every coaching job's key_unique embeds the athlete uuid (e.g. tg_fresh:<id>:…,
+// daily-<id>-<date>), so a substring match scopes to the athlete without a
+// jsonb-path filter. Fails open — a guard error must never block a real command.
+const INFLIGHT_WINDOW_MS = 10 * 60_000;
+
+async function hasInFlightCoachingRun(athleteId: string): Promise<boolean> {
+  const since = new Date(Date.now() - INFLIGHT_WINDOW_MS).toISOString();
+  const { data, error } = await supabaseAdmin()
+    .from('job_queue')
+    .select('id')
+    .in('kind', ['tg_message', 'daily_checkin'])
+    .like('key_unique', `%${athleteId}%`)
+    .is('completed_at', null)
+    .gte('created_at', since)
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.warn('[bot] in-flight coaching check failed:', error.message);
+    return false;
+  }
+  return Boolean(data);
+}
+
+// /fresh_update: refresh everything and send a fresh coaching update on demand.
+// Enqueues a tg_message; the worker's hydrate() re-fetches Strava and reloads
+// memory before the agent runs, so "refresh everything" comes for free.
+async function handleFreshUpdateCommand(ctx: CommandContext<Context>): Promise<void> {
+  const athlete = await loadOnboardedAthlete(ctx);
+  if (!athlete) return;
+  if (await hasInFlightCoachingRun(athlete.id)) {
+    await ctx.reply("I'm still working on your last one. Give me a moment and I'll be right with you.");
+    return;
+  }
+  const db = supabaseAdmin();
+  await db.from('messages').insert({
+    athlete_id: athlete.id,
+    channel: 'tg',
+    direction: 'in',
+    body: '/fresh_update',
+  });
+  await enqueueJob('tg_message', `tg_fresh:${athlete.id}:${ctx.message?.message_id}`, {
+    athlete_id: athlete.id,
+    text:
+      "Give me a fresh update. Pull my latest Strava and tell me where my training's at " +
+      "and what's coming up. You don't need to ask me anything right now, just give me the rundown.",
+  });
+  await sendAndLog(
+    athlete.id,
+    ctx.chat.id,
+    "On it. Pulling your latest data — I'll have an update in a moment.",
+  );
+}
+
+// /adjust_plan: open a conversation to change the training plan. Same handoff as
+// the post-onboarding [Adjust the plan] button; the athlete's free-text replies
+// then route through handleInboundText's active-plan branch.
+async function handleAdjustPlanCommand(ctx: CommandContext<Context>): Promise<void> {
+  const athlete = await loadOnboardedAthlete(ctx);
+  if (!athlete) return;
+  if (await hasInFlightCoachingRun(athlete.id)) {
+    await ctx.reply("I'm still working on your last one. Give me a moment and I'll be right with you.");
+    return;
+  }
+  const db = supabaseAdmin();
+  await db.from('messages').insert({
+    athlete_id: athlete.id,
+    channel: 'tg',
+    direction: 'in',
+    body: '/adjust_plan',
+  });
+  await enqueueJob('tg_message', `tg_adjust_cmd:${athlete.id}:${ctx.message?.message_id}`, {
+    athlete_id: athlete.id,
+    text: "I'd like to adjust my training plan. Take a look and let's talk through what to change.",
+  });
+  await sendAndLog(
+    athlete.id,
+    ctx.chat.id,
+    "On it. I'll take a look at your plan and message you in a moment.",
+  );
+}
+
 async function handleStravaStatusCommand(ctx: CommandContext<Context>): Promise<void> {
   const db = supabaseAdmin();
   const chatId = String(ctx.chat.id);
@@ -515,6 +623,8 @@ function getBot(): Bot {
     _bot.command('disconnect_strava', handleDisconnectStravaCommand);
     _bot.command('strava_status', handleStravaStatusCommand);
     _bot.command('calendar', handleCalendarCommand);
+    _bot.command('fresh_update', handleFreshUpdateCommand);
+    _bot.command('adjust_plan', handleAdjustPlanCommand);
     _bot.command('cancel', async (ctx) => {
       const db = supabaseAdmin();
       const { data: athlete } = await db
