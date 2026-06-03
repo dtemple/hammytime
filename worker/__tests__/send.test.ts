@@ -37,4 +37,20 @@ describe('renderTelegramHtml', () => {
       'nice work today, keep it easy',
     );
   });
+
+  it('converts **bold** to <b> tags', () => {
+    expect(renderTelegramHtml('**Friday 6/5** — easy 5')).toBe('<b>Friday 6/5</b> — easy 5');
+  });
+
+  it('nests a bolded link as <b><a>', () => {
+    expect(renderTelegramHtml('**[single-leg calf raises](single-leg-calf-raise)**')).toBe(
+      '<b><a href="https://e3rehab.com/calves/">single-leg calf raises</a></b>',
+    );
+  });
+
+  it('leaves single asterisks and snake_case filenames alone', () => {
+    expect(renderTelegramHtml('noted in race_calendar.md and *keep* easy')).toBe(
+      'noted in race_calendar.md and *keep* easy',
+    );
+  });
 });

@@ -17,21 +17,32 @@ function escapeHtml(s: string): string {
 // chars so arbitrary parens in prose can't be mistaken for a link.
 const LINK_TOKEN_RE = /\[([^\]]+)\]\(([a-z0-9-]+)\)/g;
 
+// Markdown bold the agent emits by habit. Telegram HTML mode doesn't render
+// markdown, so `**x**` would show as literal asterisks — convert it to <b>.
+// Only the double-asterisk form is converted: single `*`/`_` are unsafe (they
+// collide with snake_case filenames like `race_calendar.md` and with prose),
+// so those are left alone. `.+?` has no /s flag, so a `**` never spans a line.
+const BOLD_RE = /\*\*(.+?)\*\*/g;
+
 /**
  * Renders a coach message for Telegram HTML parse mode. The whole string is
- * HTML-escaped first, then the controlled `[text](slug)` tokens become `<a>`
- * tags resolved against the corpus — a matched slug links to its canonical
- * `source`, an unmatched one collapses to plain text (no link, no fabricated
- * URL). Escaping happens before substitution, so arbitrary agent prose can
- * never break parsing, and the only URLs that appear are corpus `source`s.
+ * HTML-escaped first, then `**bold**` becomes `<b>` and the controlled
+ * `[text](slug)` tokens become `<a>` tags resolved against the corpus — a
+ * matched slug links to its canonical `source`, an unmatched one collapses to
+ * plain text (no link, no fabricated URL). Escaping happens before any
+ * substitution, so arbitrary agent prose can never break parsing, and the only
+ * URLs that appear are corpus `source`s. Bold runs before links so a bolded
+ * link (`**[name](slug)**`) nests as `<b><a>…</a></b>`.
  */
 export function renderTelegramHtml(text: string): string {
-  return escapeHtml(text).replace(LINK_TOKEN_RE, (_m, label: string, slug: string) => {
-    const entry = resolveExercise({ slug });
-    if (!entry) return label;
-    const href = escapeHtml(entry.source).replace(/"/g, '&quot;');
-    return `<a href="${href}">${label}</a>`;
-  });
+  return escapeHtml(text)
+    .replace(BOLD_RE, '<b>$1</b>')
+    .replace(LINK_TOKEN_RE, (_m, label: string, slug: string) => {
+      const entry = resolveExercise({ slug });
+      if (!entry) return label;
+      const href = escapeHtml(entry.source).replace(/"/g, '&quot;');
+      return `<a href="${href}">${label}</a>`;
+    });
 }
 
 let _bot: Bot | null = null;
