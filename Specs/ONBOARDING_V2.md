@@ -214,13 +214,14 @@ Templates are the v1 plan mechanism. BYO returns later as an optional path, not 
 - `[Add to calendar]` → surface the existing subscribed-feed URL. Already built: `getOrCreateCalendarToken` (`src/lib/calendar-token.ts`), `renderPlanIcs` (`src/lib/calendar-render.ts`), and `/api/calendar/[token]/route.ts`; `bot.ts` already imports the token helper. Wiring only — no calendar build.
 - Next-actions buttons after preview and after enrichment.
 
-### W5 · Deferred-gap collection · M
-- "Known gaps" list in athlete memory (which deferred fields are still unknown).
-- Daily coach (`worker/prompts/coach.md` / `system-prompt.ts`) asks one gap when contextually valuable, writes the answer back, clears the gap. Tie the ask to the moment it pays off (target time ↔ first goal-pace workout).
+### W5 · Deferred-gap collection · M — **DONE (2026-06-03, SPEC v0.7.15)**
+- "Known gaps" list in athlete memory (which deferred fields are still unknown). ✅ `known_gaps.md` memory file, seeded at onboarding completion (`known-gaps-memory.ts` → enrichment `onComplete`).
+- Daily coach (`worker/prompts/coach.md` / `system-prompt.ts`) asks one gap when contextually valuable, writes the answer back, clears the gap. Tie the ask to the moment it pays off (target time ↔ first goal-pace workout). ✅ "Filling known gaps" section in `coach.md`; rides the existing `memory_files` hydrate/syncBack (no `system-prompt.ts` change needed).
+- Deferred by decision: late race-binding re-plan + `/setrace` fallback; wiring a filled `strength_equipment` into `renderPlan`.
 
-### W6 · Spec update + cleanup · S
-- Once shape is locked: draft the `SPEC.md` §3.9 rewrite + a change-log entry, and the plan-gen change-log entry (this is the one that touches a scope lock + anti-goal). David reviews before merge.
-- Migration housekeeping: the duplicate-row behavior W0 papers over should get a real fix if `/restart` survives for friends.
+### W6 · Spec update + cleanup · S — **DONE (2026-06-03)**
+- Once shape is locked: draft the `SPEC.md` §3.9 rewrite + a change-log entry, and the plan-gen change-log entry (this is the one that touches a scope lock + anti-goal). David reviews before merge. ✅ §3.4/§3.9 were rewritten as W3/W4 landed (v0.7.10, v0.7.12); v0.7.15 records W5 + adds the `known_gaps.md` mechanism to §3.3/§3.9.
+- Migration housekeeping: the duplicate-row behavior W0 papers over should get a real fix if `/restart` survives for friends. ✅ `reset_athlete_onboarding` RPC (migration `20260603000000`) makes `/restart` a transactional hard reset; the test-reset script shares it.
 
 ### Already built (not workstreams — reuse)
 - **Voice** — global transcription via `handleInboundVoice` + `src/lib/transcribe.ts`. The dump inherits it.
