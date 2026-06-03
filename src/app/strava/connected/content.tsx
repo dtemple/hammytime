@@ -40,7 +40,7 @@ export function StravaConnectedContent() {
             Strava connection incomplete.
           </p>
           <p style={{ color: '#666', marginBottom: '1rem' }}>
-            Activity access wasn&rsquo;t granted. The coaching agent needs permission to read your
+            Activity access wasn&rsquo;t granted. Daybreak needs permission to read your
             activities — that&rsquo;s the &ldquo;View data about your activities&rdquo; checkbox on
             the Strava consent screen.
           </p>

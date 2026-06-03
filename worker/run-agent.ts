@@ -22,7 +22,7 @@ const SOURCE_TO_KIND: Record<RunSource, RunKind> = {
 };
 
 const SOFT_FALLBACK =
-  "Hit a snag pulling your coaching together — I'll sort it out and follow up. Nothing on your end to do.";
+  "Hit a snag pulling your update together — I'll sort it out and follow up. Nothing on your end to do.";
 
 export async function runAgent(
   athleteId: string,

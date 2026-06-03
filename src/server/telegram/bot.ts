@@ -203,12 +203,12 @@ export async function handleInboundText(ctx: Context): Promise<void> {
 
   if (!version) {
     console.warn('[bot] athlete has a plan row but no plan_versions row', athlete.id);
-    await ctx.reply('Your onboarding is complete — daily coaching is coming soon.');
+    await ctx.reply('Your onboarding is complete — your daily updates start soon.');
     return;
   }
 
   if (version.status === 'awaiting_paste') {
-    await ctx.reply('Your plan is being set up. Daily coaching is coming soon.');
+    await ctx.reply('Your plan is being set up. Daily updates start soon.');
   } else if (version.status === 'active') {
     // Hand the message to the worker: persist it, enqueue a tg_message job, and
     // return fast (Telegram wants a quick 200). The worker runs the agent and
@@ -234,7 +234,7 @@ export async function handleInboundText(ctx: Context): Promise<void> {
       console.warn('[bot] react failed', err);
     }
   } else {
-    await ctx.reply('Your onboarding is complete — daily coaching is coming soon.');
+    await ctx.reply('Your onboarding is complete — your daily updates start soon.');
   }
 }
 

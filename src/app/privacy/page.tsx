@@ -36,7 +36,7 @@ export default function Privacy() {
           <section>
             <h2>Introduction</h2>
             <p>
-              Daybreak is a running coach you use over Telegram. This policy explains what it
+              Daybreak is a running partner you use over Telegram. This policy explains what it
               collects, how it uses that, and the choices you have.
             </p>
           </section>
@@ -45,7 +45,7 @@ export default function Privacy() {
             <h2>Information we collect</h2>
             <ul>
               <li>Your Telegram identity — the chat ID and name Telegram shares with the bot.</li>
-              <li>Your Strava activity data, read-only, so the coaching has something to stand on.</li>
+              <li>Your Strava activity data, read-only, so Daybreak has something to stand on.</li>
               <li>The training plan and onboarding answers you provide.</li>
               <li>The messages you send the bot.</li>
               <li>Your check-in responses — how ready and how sore you&apos;re feeling.</li>
@@ -56,7 +56,7 @@ export default function Privacy() {
           <section>
             <h2>How we use it</h2>
             <p>
-              We use this information to run the coaching service, generate your daily
+              We use this information to run Daybreak, generate your daily
               guidance, deliver it to you over Telegram, keep the service working, and meter
               billing once you&apos;re on pay-as-you-go.
             </p>
@@ -68,10 +68,10 @@ export default function Privacy() {
             <ul>
               <li>Telegram — to message you.</li>
               <li>Strava — for your activity data.</li>
-              <li>Anthropic (Claude) — to generate coaching guidance.</li>
+              <li>Anthropic (Claude) — to generate your guidance.</li>
               <li>Supabase — database and storage.</li>
               <li>Vercel — web hosting.</li>
-              <li>Fly.io — background compute that runs the coach.</li>
+              <li>Fly.io — background compute that runs Daybreak.</li>
             </ul>
           </section>
 

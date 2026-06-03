@@ -33,7 +33,7 @@ export default async function StravaConnectPage({
     <main className="min-h-screen flex items-center justify-center bg-white px-4">
       <div className="w-full max-w-sm text-center">
         <p className="text-sm text-zinc-500 mb-6">
-          Connect your Strava account so your coach can read your recent training and tailor each
+          Connect your Strava account so your running partner can read your recent training and tailor each
           day&apos;s advice.
         </p>
         <a href={authorizeUrl} className="inline-block">
@@ -47,7 +47,7 @@ export default async function StravaConnectPage({
           />
         </a>
         <p className="text-xs text-zinc-400 mt-6">
-          You&apos;ll be asked to allow access to your activities. Check that box — the coach needs
+          You&apos;ll be asked to allow access to your activities. Check that box — Daybreak needs
           it to see your runs.
         </p>
       </div>

@@ -56,7 +56,7 @@ export default function Support() {
           <dd>
             Your advice is built on what you&apos;ve actually been running. Connecting
             Strava is how Daybreak sees your training. Without it, there&apos;s nothing for
-            the coaching to stand on, so the connection is required.
+            Daybreak to stand on, so the connection is required.
           </dd>
 
           <dt>What Strava data does Daybreak use?</dt>

@@ -124,7 +124,7 @@ describe('handleInboundText — post-onboarding routing', () => {
     await handleInboundText(ctx as AnyMock);
 
     expect(ctx.reply).toHaveBeenCalledWith(
-      'Your plan is being set up. Daily coaching is coming soon.',
+      'Your plan is being set up. Daily updates start soon.',
     );
   });
 
