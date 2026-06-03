@@ -54,13 +54,13 @@ function asPartial(p: Record<string, unknown>): EnrichmentPartial {
 }
 
 const INITIAL_PROMPT = [
-  'Last thing — I coach better the more I know. Tell me a few things, however you want (type or voice):',
-  '• a time or distance goal, if you have one',
-  '• tune-up races you have your eye on',
-  '• your age',
-  '• schedule, gear, anything you would tell a coach',
+  'Last thing — the more I know, the more helpful I can be. Hit the mic (or type) and tell me about your running history, questions, and goals:',
+  "• how long you've been running",
+  '• any time or distance goals you have',
+  '• any hopes or fears',
+  "• age, schedule, diet, or anything you'd tell a running partner",
   '',
-  'Or tap Skip.',
+  'Shoot for a minute or more — this part helps a lot. (Not now? Type "skip".)',
 ].join('\n');
 
 const ENRICHMENT_TOOL = {
@@ -169,6 +169,15 @@ async function handleMessage(
   }
 
   // awaiting_dump
+  if (text.trim().toLowerCase() === 'skip') {
+    return {
+      done: true,
+      newPartial: { sub_step: 'awaiting_dump' },
+      reply: `Sounds good. You can share this context anytime. The more you share, the more helpful Daybreak will be.\n\n${DONE_MESSAGE}`,
+      replyMarkup: nextActionsKeyboard(),
+    };
+  }
+
   const extracted = await extract(text);
   const echo = extracted ? buildEcho(extracted) : [];
 
@@ -198,14 +207,6 @@ async function handleCallback(
 ): Promise<StepHandleResult> {
   const p = asPartial(partialRaw);
 
-  if (data === 'enrich:skip') {
-    return {
-      done: true,
-      newPartial: { sub_step: 'awaiting_dump' },
-      reply: DONE_MESSAGE,
-      replyMarkup: nextActionsKeyboard(),
-    };
-  }
   if (data === 'enrich:correct') {
     return { done: true, newPartial: p, reply: DONE_MESSAGE, replyMarkup: nextActionsKeyboard() };
   }
@@ -296,7 +297,8 @@ export const enrichmentStep: OnboardingStep = {
   id: 'enrichment',
   questions: [],
   initialPrompt: INITIAL_PROMPT,
-  initialKeyboard: new InlineKeyboard().text('Skip', 'enrich:skip'),
+  // No Skip button — skipping requires typing "skip", a small friction that nudges
+  // athletes toward actually doing the dump.
   handleMessage,
   handleCallback,
   onComplete,

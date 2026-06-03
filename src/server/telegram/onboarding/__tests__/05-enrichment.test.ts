@@ -69,10 +69,27 @@ describe('enrichment — dump extraction + echo', () => {
 });
 
 describe('enrichment — skip / confirm callbacks', () => {
-  it('Skip completes and offers the next-actions menu', async () => {
-    const r = await cb('enrich:skip', { sub_step: 'awaiting_dump' });
+  it('typing "skip" completes, acknowledges, and offers the next-actions menu', async () => {
+    const r = await msg('skip', { sub_step: 'awaiting_dump' });
     expect(r.done).toBe(true);
-    if (r.done) expect(r.replyMarkup).toBeDefined();
+    if (r.done) {
+      expect(r.reply).toContain('share this context anytime');
+      expect(r.replyMarkup).toBeDefined();
+    }
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it('"Skip" is matched case-insensitively and not sent to extraction', async () => {
+    const r = await msg('Skip', { sub_step: 'awaiting_dump' });
+    expect(r.done).toBe(true);
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it('a real note containing "skip" still goes to extraction', async () => {
+    createMock.mockResolvedValue(toolResult(FULL));
+    const r = await msg('I skip rest days and run before work', { sub_step: 'awaiting_dump' });
+    expect(createMock).toHaveBeenCalled();
+    expect(r.done).toBe(false);
   });
 
   it('All correct completes with the next-actions menu', async () => {
