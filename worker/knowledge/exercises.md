@@ -20,7 +20,8 @@ the cues, and use the canonical link.
   recommend it in a conversation. Don't paste the raw URL, and don't re-send the link every message —
   once per exercise per conversation is enough.
 - The `source` for each entry is the page that *demonstrates* the movement (video + written
-  technique). Most are E3 Rehab articles; two (front plank, dead bug) are curated YouTube videos.
+  technique). Most are E3 Rehab articles; three (front plank, dead bug, single-leg glute bridge) are
+  curated YouTube videos.
   Several E3 articles are named after an injury (e.g. Achilles tendinopathy) — that's where E3
   teaches that exercise, and it's fine to link it; it also explains the "why."
 
@@ -28,11 +29,11 @@ the cues, and use the canonical link.
 
 Primary source: **E3 Rehab** (e3rehab.com) — Doctors of Physical Therapy, evidence-based, free.
 Secondary (sanctioned) for runner-specific gaps: **Kinetic Revolution / James Dunne**
-(kinetic-revolution.com). Two entries use individually curated YouTube videos (front plank, dead
-bug). No other sources without sign-off.
+(kinetic-revolution.com). Three entries use individually curated YouTube videos (front plank, dead
+bug, single-leg glute bridge). No other sources without sign-off.
 
-All E3 links last verified live + content-matched: **2026-06-02**. The two YouTube links were
-provided/curated by David.
+All E3 links last verified live + content-matched: **2026-06-02**. The YouTube links were
+provided/curated by David (single-leg glute bridge swapped from the E3 glutes article 2026-06-03).
 
 ## Deferred
 
@@ -132,7 +133,7 @@ provided/curated by David.
 - region: hip / glute
 - targets: gluteus maximus, posterior chain
 - cues: drive through one heel, squeeze the glute hard at the top, knee ~90°; keep the low back neutral — don't arch to get higher.
-- source: https://e3rehab.com/how-to-grow-your-glutes/
+- source: https://www.youtube.com/watch?v=m3E3CXcLSgw
 
 ### 13. Side-lying hip abduction
 - id: side-lying-hip-abduction
