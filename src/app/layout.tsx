@@ -18,23 +18,23 @@ export const metadata: Metadata = {
   title: 'Daybreak',
   description: "A dynamic training calendar, to make sure you don't get injured.",
   icons: {
-    icon: '/daybreak-icon.png',
-    shortcut: '/daybreak-icon.png',
-    apple: '/daybreak-icon.png',
+    icon: '/daybreak-icon-v2.png',
+    shortcut: '/daybreak-icon-v2.png',
+    apple: '/daybreak-icon-v2.png',
   },
   openGraph: {
     title: 'Daybreak',
     description: "A dynamic training calendar, to make sure you don't get injured.",
     url: 'https://daybreak.run',
     siteName: 'Daybreak',
-    images: [{ url: '/daybreak-icon.png' }],
+    images: [{ url: '/daybreak-icon-v2.png' }],
     type: 'website',
   },
   twitter: {
     card: 'summary',
     title: 'Daybreak',
     description: "A dynamic training calendar, to make sure you don't get injured.",
-    images: ['/daybreak-icon.png'],
+    images: ['/daybreak-icon-v2.png'],
   },
 };
 

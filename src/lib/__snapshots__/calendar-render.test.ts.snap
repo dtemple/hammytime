@@ -4,8 +4,8 @@ exports[`renderPlanIcs > snapshot of the rendered calendar 1`] = `
 "BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//sebbo.net//ical-generator//EN
-NAME:David — Training
-X-WR-CALNAME:David — Training
+NAME:Daybreak running — David
+X-WR-CALNAME:Daybreak running — David
 X-WR-CALDESC:Trail Marathon · 2026-08-30
 TIMEZONE-ID:America/Los_Angeles
 X-WR-TIMEZONE:America/Los_Angeles

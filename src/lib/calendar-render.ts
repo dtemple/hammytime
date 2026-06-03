@@ -130,8 +130,7 @@ function descriptionFor(day: Day, plan: Plan): string {
 }
 
 function applyCalendarMeta(cal: ICalCalendar, input: RenderInput): void {
-  const namePrefix = input.athleteName || 'Training';
-  cal.name(`${namePrefix} — Training`);
+  cal.name(input.athleteName ? `Daybreak running — ${input.athleteName}` : 'Daybreak running');
   cal.timezone(input.timezone);
   cal.ttl(60 * 60); // PT1H refresh hint
   if (input.plan) {
