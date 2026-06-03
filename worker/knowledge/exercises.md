@@ -20,8 +20,8 @@ the cues, and use the canonical link.
   recommend it in a conversation. Don't paste the raw URL, and don't re-send the link every message —
   once per exercise per conversation is enough.
 - The `source` for each entry is the page that *demonstrates* the movement (video + written
-  technique). Most are E3 Rehab articles; three (front plank, dead bug, single-leg glute bridge) are
-  curated YouTube videos.
+  technique). Most are E3 Rehab articles; four (front plank, dead bug, single-leg glute bridge,
+  eccentric heel drop) are curated YouTube videos.
   Several E3 articles are named after an injury (e.g. Achilles tendinopathy) — that's where E3
   teaches that exercise, and it's fine to link it; it also explains the "why."
 
@@ -29,11 +29,12 @@ the cues, and use the canonical link.
 
 Primary source: **E3 Rehab** (e3rehab.com) — Doctors of Physical Therapy, evidence-based, free.
 Secondary (sanctioned) for runner-specific gaps: **Kinetic Revolution / James Dunne**
-(kinetic-revolution.com). Three entries use individually curated YouTube videos (front plank, dead
-bug, single-leg glute bridge). No other sources without sign-off.
+(kinetic-revolution.com). Four entries use individually curated YouTube videos (front plank, dead
+bug, single-leg glute bridge, eccentric heel drop). No other sources without sign-off.
 
 All E3 links last verified live + content-matched: **2026-06-02**. The YouTube links were
-provided/curated by David (single-leg glute bridge swapped from the E3 glutes article 2026-06-03).
+provided/curated by David (single-leg glute bridge + eccentric heel drop swapped from E3 articles
+2026-06-03).
 
 ## Deferred
 
@@ -64,7 +65,7 @@ provided/curated by David (single-leg glute bridge swapped from the E3 glutes ar
 - region: Achilles
 - targets: Achilles tendon load tolerance
 - cues: single leg off a step, lower slowly into dorsiflexion (heavy-slow resistance); a little tolerable pain is OK — judge by the next-day response, not pain during. Back off if symptoms are clearly worse the next morning.
-- source: https://e3rehab.com/achilles-tendinopathy/
+- source: https://www.youtube.com/watch?v=difh8uVDwSs
 
 ### 4. Single-leg calf raise
 - id: single-leg-calf-raise
