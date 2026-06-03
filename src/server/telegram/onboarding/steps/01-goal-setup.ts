@@ -51,7 +51,10 @@ function goalKeyboard(): InlineKeyboard {
 }
 
 function raceChoiceKeyboard(): InlineKeyboard {
-  return new InlineKeyboard().text("Enter race name", 'race:name').text('No race yet →', 'race:none');
+  return new InlineKeyboard()
+    .text('Enter race name', 'race:name')
+    .row()
+    .text('No race yet →', 'race:none');
 }
 
 function distanceKeyboard(): InlineKeyboard {
@@ -61,6 +64,7 @@ function distanceKeyboard(): InlineKeyboard {
     .text('Half', 'dist:half')
     .row()
     .text('Marathon', 'dist:marathon')
+    .row()
     .text('Just keep me fit', 'dist:keep_fit');
 }
 

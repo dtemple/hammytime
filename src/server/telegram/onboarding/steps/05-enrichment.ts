@@ -23,6 +23,7 @@ const DONE_MESSAGE =
 function nextActionsKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
     .text('Add to calendar', 'next:calendar')
+    .row()
     .text('Adjust the plan', 'next:adjust')
     .row()
     .text("That's it for today", 'next:done');
@@ -197,6 +198,7 @@ async function handleMessage(
     reply: `Got it — ${echo.join(', ')}. Anything off?`,
     replyMarkup: new InlineKeyboard()
       .text('All correct', 'enrich:correct')
+      .row()
       .text('Let me fix something', 'enrich:fix'),
   };
 }

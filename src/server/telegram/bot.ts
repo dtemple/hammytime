@@ -654,6 +654,13 @@ function getBot(): Bot {
     });
     _bot.on('callback_query:data', async (ctx) => {
       const data = ctx.callbackQuery.data;
+
+      // Inert marker on a collapsed "you picked X" button — a re-tap is a no-op.
+      if (data === 'noop') {
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
       const db = supabaseAdmin();
       // Key on the CHAT the button lives in, not the user who tapped. In a private
       // chat these are equal; in a group (test harness) the user id is positive and

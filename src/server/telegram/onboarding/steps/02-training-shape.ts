@@ -1,11 +1,13 @@
 import { InlineKeyboard } from 'grammy';
-import { getFitnessSnapshot, type StravaFitnessSnapshot } from '@/server/strava/activities';
+import { getFitnessSnapshot } from '@/server/strava/activities';
 import { upsertProfileSection } from '../memory';
 import { upsertTrainingProfile, type ExperienceTier } from '../athlete-training-profile';
 import type { OnboardingStep, StepHandleResult } from '../types';
 
-// Beats A3 (experience tier) + A5 (days/week) + A6 (long-run day), each pre-picked
-// from the Strava fitness snapshot and overridable. One step, three button screens.
+// Beats A3 (experience tier) + A5 (days/week) + A6 (long-run day). One step, three
+// button screens. Days/week and long-run day are pre-suggested from the Strava
+// fitness snapshot and overridable. Experience tier is a plain choice; Strava
+// volume is a poor proxy for how someone describes their own training level.
 
 type ShapePartial = {
   sub_step: 'experience' | 'days' | 'long_run';
@@ -20,33 +22,22 @@ function asPartial(p: Record<string, unknown>): ShapePartial {
 }
 
 const TIERS: { key: ExperienceTier; label: string }[] = [
-  { key: 'beginner', label: 'Beginner (occasional < 5 mile runs)' },
-  { key: 'for_fun', label: 'Just for fun (run regularly, no structure)' },
-  { key: 'some_training', label: 'Some training (6+ mi regularly, some intervals/tempo)' },
-  { key: 'experienced', label: 'Experienced (race half+ regularly, structured)' },
+  { key: 'beginner', label: 'Beginner' },
+  { key: 'for_fun', label: 'Just for fun' },
+  { key: 'some_training', label: 'Some training' },
+  { key: 'experienced', label: 'Experienced' },
 ];
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-// Rough tier suggestion from training volume. The athlete confirms or overrides;
-// this only pre-highlights, so an imperfect guess is fine.
-function suggestTier(s: StravaFitnessSnapshot | null): ExperienceTier | null {
-  if (!s || s.run_count === 0) return null;
-  const wk = s.avg_weekly_mileage_mi;
-  if (s.longest_run_mi < 4 || wk < 8) return 'beginner';
-  if (wk < 18) return 'for_fun';
-  if (wk < 35) return 'some_training';
-  return 'experienced';
-}
 
 function check(active: boolean): string {
   return active ? '✅ ' : '';
 }
 
-function experienceKeyboard(suggested: ExperienceTier | null): InlineKeyboard {
+function experienceKeyboard(): InlineKeyboard {
   const kb = new InlineKeyboard();
   for (const t of TIERS) {
-    kb.text(`${check(t.key === suggested)}${t.label}`, `exp:${t.key}`).row();
+    kb.text(t.label, `exp:${t.key}`).row();
   }
   return kb;
 }
@@ -68,11 +59,6 @@ function longRunKeyboard(suggested: number | null): InlineKeyboard {
     if (i === 3) kb.row();
   });
   return kb;
-}
-
-async function buildExperienceKeyboard(athleteId: string): Promise<InlineKeyboard> {
-  const snapshot = await getFitnessSnapshot(athleteId).catch(() => null);
-  return experienceKeyboard(suggestTier(snapshot));
 }
 
 // Button-only step: a typed message must not fall through to the empty-questions
@@ -154,8 +140,13 @@ async function onComplete(athleteId: string, partialRaw: Record<string, unknown>
 export const trainingShapeStep: OnboardingStep = {
   id: 'training-shape',
   questions: [],
-  initialPrompt: "Where are you right now? I've pre-picked based on your Strava — change it if it's off.",
-  initialKeyboard: buildExperienceKeyboard,
+  initialPrompt:
+    "What's your level?\n\n" +
+    'Beginner: occasional runs under 5 miles\n' +
+    'Just for fun: run regularly, no structure\n' +
+    'Some training: 6+ mi weeks with some intervals or tempo\n' +
+    'Experienced: racing half-marathons or more, structured training',
+  initialKeyboard: experienceKeyboard(),
   handleMessage,
   handleCallback,
   onComplete,

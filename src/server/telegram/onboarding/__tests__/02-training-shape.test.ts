@@ -57,15 +57,13 @@ describe('training-shape — A3 → A5 → A6 chain', () => {
     expect((r.newPartial as { long_run_day: number }).long_run_day).toBe(6);
   });
 
-  it('builds a pre-highlighted experience keyboard from the snapshot', async () => {
-    const builder = trainingShapeStep.initialKeyboard;
-    expect(typeof builder).toBe('function');
-    if (typeof builder === 'function') {
-      const kb = await builder('a1');
-      // experienced-ish snapshot (28 mi/wk) → 'some_training' tier pre-checked
-      const serialized = JSON.stringify(kb.inline_keyboard);
-      expect(serialized).toContain('✅');
-      expect(serialized).toContain('some_training');
-    }
+  it('exposes a static experience keyboard with no Strava pre-highlight', () => {
+    const kb = trainingShapeStep.initialKeyboard;
+    expect(typeof kb).not.toBe('function');
+    // Experience tier is a plain choice now — no ✅ pre-pick from the snapshot.
+    const serialized = JSON.stringify((kb as { inline_keyboard: unknown }).inline_keyboard);
+    expect(serialized).not.toContain('✅');
+    expect(serialized).toContain('exp:beginner');
+    expect(serialized).toContain('exp:some_training');
   });
 });

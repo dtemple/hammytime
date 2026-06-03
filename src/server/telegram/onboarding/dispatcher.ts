@@ -1,5 +1,4 @@
-import type { Context } from 'grammy';
-import type { InlineKeyboard } from 'grammy';
+import { InlineKeyboard, type Context } from 'grammy';
 import { supabaseAdmin } from '@/lib/db';
 import type { Database } from '@/lib/db-types';
 import { sendAndLog, telegramBot } from '../bot';
@@ -7,6 +6,50 @@ import { sendDavidAlert } from '@/server/admin/alerts';
 import { advanceQuestion, loadOnboardingState } from './state';
 import type { OnboardingState, OnboardingStep, Question } from './types';
 import { onboardingSteps } from './index';
+
+// Tidy a tapped button's label for the "you picked X" record: drop a leading
+// suggestion check (days/long-run prepend ✅ to the Strava-suggested option) so we
+// don't double it, and a trailing arrow affordance (e.g. "Something's bothering me →").
+function cleanLabel(text: string): string {
+  return text
+    .replace(/^[✅✓]\s*/u, '')
+    .replace(/\s*→\s*$/u, '')
+    .trim();
+}
+
+// Collapse a tapped inline keyboard to a single inert button showing the choice.
+// The label is read straight off the message's existing keyboard, so this works for
+// every onboarding keyboard with no per-step wiring. Returns null when the tapped
+// button isn't a callback button we can resolve (e.g. a .url() button), so the
+// caller can fall back to simply stripping the keyboard.
+export function selectionKeyboardFromTap(
+  rows: ReadonlyArray<ReadonlyArray<{ text: string; callback_data?: string }>> | undefined,
+  data: string,
+): InlineKeyboard | null {
+  if (!rows) return null;
+  for (const row of rows) {
+    for (const btn of row) {
+      if (btn.callback_data === data) {
+        return new InlineKeyboard().text(`✅ ${cleanLabel(btn.text)}`, 'noop');
+      }
+    }
+  }
+  return null;
+}
+
+// Edit the just-tapped message so its buttons collapse to a single "✅ <choice>"
+// record. One Telegram call, instant, no "edited" tag (reply_markup edits aren't
+// flagged). Falls back to stripping the keyboard if the choice can't be resolved.
+async function recordSelection(ctx: Context, data: string): Promise<void> {
+  const msg = ctx.callbackQuery?.message;
+  const rows = msg && 'reply_markup' in msg ? msg.reply_markup?.inline_keyboard : undefined;
+  const collapsed = selectionKeyboardFromTap(rows, data);
+  if (collapsed) {
+    await ctx.editMessageReplyMarkup({ reply_markup: collapsed }).catch(() => undefined);
+  } else {
+    await ctx.editMessageReplyMarkup().catch(() => undefined);
+  }
+}
 
 // Resolve a step's initialKeyboard, which may be a static keyboard or a
 // per-athlete builder (e.g. pre-highlighting Strava-derived defaults).
@@ -288,6 +331,8 @@ export async function handleOnboardingCallback(
   }
 
   if (result.done) {
+    // Leave a record of the tapped choice before moving on.
+    await recordSelection(ctx, data);
     if (result.reply && result.replyMarkup) {
       await sendWithKeyboard(athleteId, chatId, result.reply, result.replyMarkup);
     } else if (result.reply) {
@@ -305,14 +350,18 @@ export async function handleOnboardingCallback(
   });
 
   if (result.replyMarkup && result.reply) {
-    // Multi-screen advance (e.g. goal → race-choice → distance): retire the old
-    // keyboard so it can't be re-tapped, then send a fresh keyboarded message.
-    await ctx.editMessageReplyMarkup().catch(() => undefined);
+    // Multi-screen advance (e.g. goal → race-choice → distance): collapse the old
+    // keyboard to a "✅ <choice>" record so it can't be re-tapped, then send a
+    // fresh keyboarded message.
+    await recordSelection(ctx, data);
     await sendWithKeyboard(athleteId, chatId, result.reply, result.replyMarkup);
   } else if (result.replyMarkup) {
     // In-place re-render of the same screen (e.g. a toggle).
     await ctx.editMessageReplyMarkup({ reply_markup: result.replyMarkup });
   } else if (result.reply) {
+    // Advancing to a text-entry prompt (e.g. injury "Something's bothering me"):
+    // collapse the tapped keyboard to a record, then send the prompt.
+    await recordSelection(ctx, data);
     await sendAndLog(athleteId, chatId, result.reply);
   }
 }

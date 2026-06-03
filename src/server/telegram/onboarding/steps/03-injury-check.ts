@@ -21,7 +21,15 @@ function asPartial(p: Record<string, unknown>): InjuryPartial {
 function askKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
     .text('All good', 'injury:none')
+    .row()
     .text("Something's bothering me →", 'injury:some');
+}
+
+function statusKeyboard(): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('Still bugging me', 'injury:active')
+    .row()
+    .text('Just keeping an eye on it', 'injury:watch');
 }
 
 async function handleCallback(
@@ -37,7 +45,13 @@ async function handleCallback(
     return {
       done: false,
       newPartial: { ...p, sub_step: 'capture_part' },
-      reply: "Any injuries to know about? (e.g. left knee, right achilles, lower back)",
+      reply: "What injuries should I know about? (e.g. left knee, right achilles, lower back)",
+    };
+  }
+  if (data === 'injury:active' || data === 'injury:watch') {
+    return {
+      done: true,
+      newPartial: { ...p, status: data === 'injury:active' ? 'active' : 'monitoring' },
     };
   }
   return { done: false, newPartial: p };
@@ -57,7 +71,8 @@ async function handleMessage(
     return {
       done: false,
       newPartial: { ...p, body_part, sub_step: 'capture_status' },
-      reply: "Is it still bugging you, or just something to keep an eye on? Reply 'bugging' or 'watch'.",
+      reply: 'Is it still bugging you, or just something to keep an eye on?',
+      replyMarkup: statusKeyboard(),
     };
   }
 
@@ -66,7 +81,12 @@ async function handleMessage(
     const active = v.includes('bug') || v.includes('hurt') || v.includes('pain') || v.includes('active');
     const watch = v.includes('watch') || v.includes('eye') || v.includes('monitor') || v.includes('fine');
     if (!active && !watch) {
-      return { done: false, newPartial: p, reply: "Reply 'bugging' (still hurts) or 'watch' (keeping an eye on it)." };
+      return {
+        done: false,
+        newPartial: p,
+        reply: 'Tap one of the buttons above.',
+        replyMarkup: statusKeyboard(),
+      };
     }
     return { done: true, newPartial: { ...p, status: active ? 'active' : 'monitoring' } };
   }
