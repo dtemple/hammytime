@@ -1,6 +1,7 @@
 import { randomBytes } from 'crypto';
 import { sign } from '@/lib/state-sign';
 import { getAuthorizeUrl } from '@/server/strava/client';
+import { SiteShell } from '@/components/SiteShell';
 
 export default async function StravaConnectPage({
   searchParams,
@@ -11,15 +12,14 @@ export default async function StravaConnectPage({
 
   if (!athleteId) {
     return (
-      <main className="min-h-screen flex items-center justify-center bg-white px-4">
-        <div className="w-full max-w-sm text-center">
-          <p className="text-sm text-zinc-800 mb-2">This link is missing its athlete ID.</p>
-          <p className="text-sm text-zinc-500">
-            Head back to Telegram and run <span className="font-medium">/connect_strava</span> to
-            get a fresh link.
-          </p>
-        </div>
-      </main>
+      <SiteShell nav={false} footer={false}>
+        <div className="sg-badge sg-badge-info">Missing link</div>
+        <h1 className="sg-title">This link is missing its athlete ID.</h1>
+        <p className="sg-lede">
+          Head back to Telegram and run <span className="sg-em">/connect_strava</span>{' '}
+          to get a fresh link.
+        </p>
+      </SiteShell>
     );
   }
 
@@ -30,27 +30,29 @@ export default async function StravaConnectPage({
   const authorizeUrl = getAuthorizeUrl(state);
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-white px-4">
-      <div className="w-full max-w-sm text-center">
-        <p className="text-sm text-zinc-500 mb-6">
-          Connect your Strava account so your running partner can read your recent training and tailor each
-          day&apos;s advice.
-        </p>
-        <a href={authorizeUrl} className="inline-block">
-          {/* Official Strava asset — do not modify, recolor, or resize below 48px height. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/strava/btn_strava_connect_with_orange.svg"
-            alt="Connect with Strava"
-            width={237}
-            height={48}
-          />
-        </a>
-        <p className="text-xs text-zinc-400 mt-6">
-          You&apos;ll be asked to allow access to your activities. Check that box — Daybreak needs
-          it to see your runs.
-        </p>
-      </div>
-    </main>
+    <SiteShell nav={false} footer={false}>
+      <div className="sg-eyebrow">Connect Strava</div>
+      <h1 className="sg-title">
+        Hook up your <span className="sg-accent">Strava</span>.
+      </h1>
+      <p className="sg-lede">
+        Daybreak reads your recent training from Strava to tailor each day&apos;s advice. Connect
+        once — you can disconnect anytime.
+      </p>
+      <a href={authorizeUrl} className="sg-strava-link">
+        {/* Official Strava asset — do not modify, recolor, or resize below 48px height. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/strava/btn_strava_connect_with_orange.svg"
+          alt="Connect with Strava"
+          width={237}
+          height={48}
+        />
+      </a>
+      <p className="sg-hint">
+        You&apos;ll be asked to allow access to your activities. Check that box — Daybreak needs it
+        to see your runs.
+      </p>
+    </SiteShell>
   );
 }

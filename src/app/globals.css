@@ -517,3 +517,270 @@ body {
     transition: none !important;
   }
 }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   SIGNUP + STRAVA card flow (.sg-*)
+
+   The header/footer chrome is the landing's .ht-* classes (rendered by
+   SiteShell). Below is only the centered-card layout and the card content
+   (type, badges, form, buttons, QR). All tokens already exist in :root.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.sg-main {
+  flex: 1;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 40px 24px 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sg-card {
+  width: 100%;
+  max-width: 392px;
+}
+
+/* type */
+.sg-eyebrow {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-3);
+  margin-bottom: 16px;
+}
+.sg-title {
+  font-size: 30px;
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+  margin: 0 0 12px;
+  text-wrap: balance;
+}
+.sg-accent {
+  color: var(--accent);
+}
+.sg-lede {
+  font-size: 16px;
+  color: var(--ink-2);
+  margin: 0 0 26px;
+  text-wrap: pretty;
+}
+.sg-em {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* badges */
+.sg-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 5px 12px 5px 10px;
+  border-radius: 999px;
+  border: 1px solid;
+  margin-bottom: 18px;
+}
+.sg-badge svg {
+  width: 13px;
+  height: 13px;
+}
+.sg-badge-ok {
+  color: var(--accent);
+  border-color: rgba(45, 90, 61, 0.32);
+  background: var(--accent-soft);
+}
+.sg-badge-info {
+  color: #8a5a18;
+  border-color: #e7b471;
+  background: #fbe9cf;
+}
+
+/* form */
+.sg-field {
+  margin-bottom: 14px;
+}
+.sg-label {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+  margin-bottom: 7px;
+  display: block;
+}
+.sg-input {
+  width: 100%;
+  font-family: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--hair);
+  border-radius: 10px;
+  padding: 12px 14px;
+  outline: none;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.sg-input::placeholder {
+  color: var(--ink-3);
+}
+.sg-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(45, 90, 61, 0.12);
+}
+.sg-textarea {
+  resize: none;
+  min-height: 92px;
+  line-height: 1.5;
+}
+.sg-hint {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin: 7px 2px 0;
+}
+
+/* buttons — pill, matches .ht-btn */
+.sg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 13px 18px;
+  font-size: 14.5px;
+  font-weight: 500;
+  font-family: inherit;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+  box-sizing: border-box;
+}
+.sg-btn-primary {
+  background: var(--ink);
+  color: var(--bg);
+}
+.sg-btn-primary:hover {
+  background: #000;
+  transform: translateY(-1px);
+}
+.sg-arrow {
+  display: inline-block;
+  transition: transform 0.2s ease;
+}
+.sg-btn-primary:hover .sg-arrow {
+  transform: translateX(3px);
+}
+.sg-btn-ghost {
+  background: transparent;
+  color: var(--ink-2);
+  margin-top: 10px;
+  font-size: 13.5px;
+  padding: 8px;
+}
+.sg-btn-ghost:hover {
+  color: var(--ink);
+}
+.sg-btn-tg {
+  background: #2481cc;
+  color: #fff;
+}
+.sg-btn-tg:hover {
+  background: #1e6fb0;
+  transform: translateY(-1px);
+}
+
+/* official Strava marks — wrappers only, assets untouched */
+.sg-strava-link {
+  display: inline-block;
+  margin: 4px 0 14px;
+}
+.sg-strava-link img {
+  display: block;
+}
+.sg-strava-mark {
+  margin-top: 28px;
+}
+.sg-strava-mark img {
+  display: block;
+}
+
+/* success / QR */
+.sg-qr-block {
+  margin-top: 26px;
+  padding-top: 22px;
+  border-top: 1px solid var(--hair);
+}
+.sg-qr-label {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin-bottom: 12px;
+}
+.sg-qr-wrap {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.sg-qr {
+  width: 104px;
+  height: 104px;
+  flex-shrink: 0;
+  background: #fff;
+  border: 1px solid var(--hair);
+  border-radius: 12px;
+  padding: 9px;
+  box-shadow: var(--bubble-shadow);
+}
+.sg-qr-side {
+  font-size: 13px;
+  color: var(--ink-2);
+  margin: 0;
+  text-wrap: pretty;
+}
+.sg-expire {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-top: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.sg-expire .sg-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.sg-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-3);
+  text-decoration: none;
+  margin-top: 26px;
+}
+.sg-back:hover {
+  color: var(--ink);
+}
+
+@media (max-width: 520px) {
+  .sg-main {
+    padding: 28px 20px 56px;
+  }
+  .sg-title {
+    font-size: 26px;
+  }
+}
