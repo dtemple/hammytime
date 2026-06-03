@@ -116,6 +116,9 @@ export async function sendReply(athleteId: string, text: string, runId?: string)
     // original `[text](slug)` token text — readable, no URL spam in the log.
     await bot().api.sendMessage(athlete.telegram_chat_id, renderTelegramHtml(part), {
       parse_mode: 'HTML',
+      // Exercise links are inline references, not shared articles — suppress
+      // Telegram's auto-generated preview card for the last URL in the message.
+      link_preview_options: { is_disabled: true },
     });
     await db.from('messages').insert({
       athlete_id: athleteId,
