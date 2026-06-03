@@ -5,7 +5,7 @@ vi.mock('./onboarding/index', () => ({
   handleOnboardingMessage: vi.fn().mockResolvedValue(undefined),
   handleOnboardingCallback: vi.fn().mockResolvedValue(undefined),
   onboardingSteps: new Array(7),
-  resetOnboarding: vi.fn().mockResolvedValue(undefined),
+  hardResetOnboarding: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./checkin/dispatcher', () => ({
   handleCheckinCommand: vi.fn().mockResolvedValue(undefined),

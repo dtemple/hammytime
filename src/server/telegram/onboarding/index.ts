@@ -19,6 +19,6 @@ export const onboardingSteps: OnboardingStep[] = [
 ];
 
 export { handleOnboardingCallback, handleOnboardingMessage } from './dispatcher';
-export { advanceQuestion, resetOnboarding } from './state';
+export { advanceQuestion, resetOnboarding, hardResetOnboarding } from './state';
 export { resumeAfterStrava } from './strava-resume';
 export type { OnboardingState, OnboardingStep, ParseResult, Question } from './types';

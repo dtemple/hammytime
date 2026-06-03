@@ -7,7 +7,7 @@ import {
   handleOnboardingCallback,
   handleOnboardingMessage,
   onboardingSteps,
-  resetOnboarding,
+  hardResetOnboarding,
 } from './onboarding/index';
 import { handleCheckinCommand, handleWellnessMessage } from './checkin/dispatcher';
 import { fetchRecentActivities, hasStravaConnection } from '@/server/strava/activities';
@@ -68,15 +68,15 @@ async function sendWelcomeAndConnect(athleteId: string, chatId: number | string)
   const keyboard = new InlineKeyboard().url('Connect Strava', stravaConnectUrl(athleteId));
   await getBot().api.sendMessage(
     chatId,
-    "You're in. I'm Daybreak — I'll build your training and check in with you most mornings. " +
-      'First thing: connect Strava so I can read your running instead of interrogating you about it.',
+    "Welcome! Daybreak needs a Strava connection to work. " +
+      'Connect your Strava account here to begin.',
     { reply_markup: keyboard },
   );
   await supabaseAdmin().from('messages').insert({
     athlete_id: athleteId,
     channel: 'tg',
     direction: 'out',
-    body: 'Welcome — connect Strava to get started.',
+    body: 'Welcome. Connect Strava to get started.',
   });
 }
 
@@ -84,7 +84,7 @@ async function handleStart(ctx: CommandContext<Context>): Promise<void> {
   const token = ctx.match?.trim();
 
   if (!token) {
-    await ctx.reply('To get started, grab your invite link from the signup page.');
+    await ctx.reply('To get started, get an invite link from the daybreak.run signup page.');
     return;
   }
 
@@ -138,7 +138,7 @@ async function handleRestart(ctx: CommandContext<Context>): Promise<void> {
     return;
   }
 
-  await resetOnboarding(athlete.id);
+  await hardResetOnboarding(athlete.id);
 
   await ctx.reply('Starting over from the beginning.');
 

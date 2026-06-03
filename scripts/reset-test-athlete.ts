@@ -23,8 +23,6 @@ config({ path: '.env.local' });
 
 import { supabaseAdmin } from '../src/lib/db';
 
-const FRESH_ONBOARDING = { step: 0, partial: {} };
-
 async function main() {
   const email = process.argv[2]?.trim().toLowerCase();
   if (!email) {
@@ -75,37 +73,20 @@ async function main() {
 
   console.log(`Resetting test athlete: ${athlete.name} (${athlete.id}), chat_id ${chatId}`);
 
-  // plan_versions (via the athlete's plan ids), then plans
-  const { data: plans } = await db.from('plans').select('id').eq('athlete_id', athlete.id);
-  const planIds = (plans ?? []).map((p) => p.id);
-  let deletedVersions = 0;
-  if (planIds.length > 0) {
-    const { count, error } = await db
-      .from('plan_versions')
-      .delete({ count: 'exact' })
-      .in('plan_id', planIds);
-    if (error) {
-      console.error('Error deleting plan_versions:', error.message);
-      process.exit(1);
-    }
-    deletedVersions = count ?? 0;
+  // Same transactional clear-set that /restart uses, so there's one source of
+  // truth: plan_versions, plans, races, injuries, memory_files,
+  // athlete_training_profile, pending job_queue rows; onboarding/checkin state
+  // reset. (Strava, messages, agent_runs preserved.)
+  const { error: resetErr } = await db.rpc('reset_athlete_onboarding', {
+    p_athlete_id: athlete.id,
+  });
+  if (resetErr) {
+    console.error('Error in reset_athlete_onboarding:', resetErr.message);
+    process.exit(1);
   }
 
-  const counts: Record<string, number> = { plan_versions: deletedVersions };
-
-  for (const table of ['plans', 'races', 'injuries', 'memory_files'] as const) {
-    const { count, error } = await db
-      .from(table)
-      .delete({ count: 'exact' })
-      .eq('athlete_id', athlete.id);
-    if (error) {
-      console.error(`Error deleting ${table}:`, error.message);
-      process.exit(1);
-    }
-    counts[table] = count ?? 0;
-  }
-
-  // Mark any outstanding link_tokens for this athlete used
+  // link_tokens aren't onboarding-derived data, so the RPC leaves them alone —
+  // mark any outstanding ones used here so a stale token can't be reused.
   const { count: tokensMarked, error: tokensErr } = await db
     .from('link_tokens')
     .update({ used_at: new Date().toISOString() }, { count: 'exact' })
@@ -116,21 +97,7 @@ async function main() {
     process.exit(1);
   }
 
-  // Reset onboarding + check-in state on the athlete row
-  const { error: stateErr } = await db
-    .from('athletes')
-    .update({
-      onboarding_state: FRESH_ONBOARDING,
-      checkin_state: {},
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', athlete.id);
-  if (stateErr) {
-    console.error('Error resetting athlete state:', stateErr.message);
-    process.exit(1);
-  }
-
-  console.log('Deleted:', counts);
+  console.log('Cleared plans, races, injuries, memory_files, training profile, and pending jobs.');
   console.log(`Marked ${tokensMarked ?? 0} link_token(s) used`);
   console.log('Reset onboarding_state to step 0 and cleared checkin_state.');
   console.log('Strava connection, messages, and agent_runs left untouched.');

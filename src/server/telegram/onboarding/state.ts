@@ -57,3 +57,17 @@ export async function resetOnboarding(athleteId: string): Promise<void> {
   });
   if (error) throw new Error(`resetOnboarding failed: ${error.message}`);
 }
+
+/**
+ * Full re-onboarding reset. Clears the athlete's onboarding-derived rows (plans,
+ * races, injuries, memory files, training profile, pending jobs) and resets
+ * onboarding/check-in state in one transaction, so /restart re-runs onboarding
+ * from a clean slate instead of duplicating races/injuries. See the
+ * reset_athlete_onboarding migration for the exact clear-set.
+ */
+export async function hardResetOnboarding(athleteId: string): Promise<void> {
+  const { error } = await supabaseAdmin().rpc('reset_athlete_onboarding', {
+    p_athlete_id: athleteId,
+  });
+  if (error) throw new Error(`hardResetOnboarding failed: ${error.message}`);
+}

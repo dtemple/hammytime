@@ -902,6 +902,10 @@ export type Database = {
         }
         Returns: string
       }
+      reset_athlete_onboarding: {
+        Args: { p_athlete_id: string }
+        Returns: undefined
+      }
       set_onboarding_state: {
         Args: { p_athlete_id: string; p_new_state: Json }
         Returns: undefined
