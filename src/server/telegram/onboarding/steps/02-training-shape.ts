@@ -2,6 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { getFitnessSnapshot } from '@/server/strava/activities';
 import { upsertProfileSection } from '../memory';
 import { upsertTrainingProfile, type ExperienceTier } from '../athlete-training-profile';
+import { withBack } from '../back';
 import type { OnboardingStep, StepHandleResult } from '../types';
 
 // Beats A3 (experience tier) + A5 (days/week) + A6 (long-run day). One step, three
@@ -29,6 +30,13 @@ const TIERS: { key: ExperienceTier; label: string }[] = [
 ];
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const EXPERIENCE_PROMPT =
+  "What's your level?\n\n" +
+  'Beginner: occasional runs under 5 miles\n' +
+  'Just for fun: run regularly, no structure\n' +
+  'Some training: 6+ mi weeks with some intervals or tempo\n' +
+  'Experienced: racing half-marathons or more, structured training';
 
 function check(active: boolean): string {
   return active ? '✅ ' : '';
@@ -61,13 +69,53 @@ function longRunKeyboard(suggested: number | null): InlineKeyboard {
   return kb;
 }
 
+// The screen (prompt + keyboard) for the given sub_step, rendered from the Strava
+// suggestions already stored in partial. Used by forward transitions and
+// handleBack so each screen is defined once. 'experience' (first) carries no Back.
+function screenFor(p: ShapePartial): { prompt: string; keyboard: InlineKeyboard } {
+  if (p.sub_step === 'long_run') {
+    const suggestedLr = p.suggested_long_run ?? null;
+    const dayName = suggestedLr != null ? WEEKDAYS[suggestedLr] : null;
+    const prompt =
+      dayName != null
+        ? `Which day for your long run? Looks like you usually go longer on ${dayName}.`
+        : 'Which day for your long run?';
+    return { prompt, keyboard: withBack(longRunKeyboard(suggestedLr)) };
+  }
+  if (p.sub_step === 'days') {
+    const suggestedDays = p.suggested_days ?? 4;
+    return {
+      prompt: `Based on where you are, I'd suggest ${suggestedDays} days a week. Sound right?`,
+      keyboard: withBack(daysKeyboard(suggestedDays)),
+    };
+  }
+  return { prompt: EXPERIENCE_PROMPT, keyboard: experienceKeyboard() };
+}
+
+// Step one screen back. long_run → days (re-pick days); days → experience (drop
+// the tier + Strava suggestions so re-tapping recomputes them).
+async function handleBack(partialRaw: Record<string, unknown>): Promise<StepHandleResult> {
+  const p = asPartial(partialRaw);
+  const back: ShapePartial =
+    p.sub_step === 'long_run'
+      ? { ...p, sub_step: 'days', days_per_week: undefined }
+      : { sub_step: 'experience' };
+  const screen = screenFor(back);
+  return { done: false, newPartial: back, reply: screen.prompt, replyMarkup: screen.keyboard };
+}
+
 // Button-only step: a typed message must not fall through to the empty-questions
-// branch (which would complete the step early). Nudge the athlete to tap instead.
+// branch (which would complete the step early). Nudge the athlete to tap instead
+// (the Back button is on the keyboard already).
 async function handleMessage(
   _text: string,
   partialRaw: Record<string, unknown>,
 ): Promise<StepHandleResult> {
-  return { done: false, newPartial: partialRaw, reply: 'Tap one of the buttons above to continue.' };
+  return {
+    done: false,
+    newPartial: partialRaw,
+    reply: 'Tap one of the buttons above to continue.',
+  };
 }
 
 async function handleCallback(
@@ -82,39 +130,30 @@ async function handleCallback(
     const snapshot = await getFitnessSnapshot(athleteId).catch(() => null);
     const suggestedDays = snapshot?.suggested_days_per_week ?? 4;
     const suggestedLr = snapshot?.dominant_long_run_weekday ?? null;
-    return {
-      done: false,
-      newPartial: {
-        ...p,
-        experience_tier,
-        sub_step: 'days',
-        suggested_days: suggestedDays,
-        suggested_long_run: suggestedLr,
-      },
-      reply: `Based on where you are, I'd suggest ${suggestedDays} days a week. Sound right?`,
-      replyMarkup: daysKeyboard(suggestedDays),
+    const next: ShapePartial = {
+      ...p,
+      experience_tier,
+      sub_step: 'days',
+      suggested_days: suggestedDays,
+      suggested_long_run: suggestedLr,
     };
+    const screen = screenFor(next);
+    return { done: false, newPartial: next, reply: screen.prompt, replyMarkup: screen.keyboard };
   }
 
   if (data.startsWith('days:')) {
     const days_per_week = parseInt(data.slice('days:'.length), 10);
-    const suggestedLr = p.suggested_long_run ?? null;
-    const dayName = suggestedLr != null ? WEEKDAYS[suggestedLr] : null;
-    const prompt =
-      dayName != null
-        ? `Which day for your long run? Looks like you usually go longer on ${dayName}.`
-        : "Which day for your long run?";
-    return {
-      done: false,
-      newPartial: { ...p, days_per_week, sub_step: 'long_run' },
-      reply: prompt,
-      replyMarkup: longRunKeyboard(suggestedLr),
-    };
+    const next: ShapePartial = { ...p, days_per_week, sub_step: 'long_run' };
+    const screen = screenFor(next);
+    return { done: false, newPartial: next, reply: screen.prompt, replyMarkup: screen.keyboard };
   }
 
   if (data.startsWith('lr:')) {
     const long_run_day = parseInt(data.slice('lr:'.length), 10);
-    return { done: true, newPartial: { ...p, long_run_day } as Record<string, unknown> & { long_run_day: number } };
+    return {
+      done: true,
+      newPartial: { ...p, long_run_day } as Record<string, unknown> & { long_run_day: number },
+    };
   }
 
   return { done: false, newPartial: p };
@@ -140,14 +179,10 @@ async function onComplete(athleteId: string, partialRaw: Record<string, unknown>
 export const trainingShapeStep: OnboardingStep = {
   id: 'training-shape',
   questions: [],
-  initialPrompt:
-    "What's your level?\n\n" +
-    'Beginner: occasional runs under 5 miles\n' +
-    'Just for fun: run regularly, no structure\n' +
-    'Some training: 6+ mi weeks with some intervals or tempo\n' +
-    'Experienced: racing half-marathons or more, structured training',
+  initialPrompt: EXPERIENCE_PROMPT,
   initialKeyboard: experienceKeyboard(),
   handleMessage,
   handleCallback,
+  handleBack,
   onComplete,
 };

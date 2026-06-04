@@ -55,6 +55,11 @@ export interface OnboardingStep {
     partial: Record<string, unknown>,
     athleteId: string,
   ) => Promise<StepHandleResult>;
+  // If defined, the dispatcher routes the reserved "← Back" callback (BACK_DATA)
+  // here instead of handleCallback, to step one screen back within this section.
+  // Returns the prior screen as a not-done result (reply + optional replyMarkup);
+  // the same shape a cancel-phrase ("never mind") typed on a text screen produces.
+  handleBack?: (partial: Record<string, unknown>, athleteId: string) => Promise<StepHandleResult>;
   // Sent when the dispatcher first transitions into this step. Used by steps
   // with handleMessage to fire the opening question without needing a dummy Question entry.
   initialPrompt?: string;

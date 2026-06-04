@@ -4,6 +4,7 @@ import { lookupRace, type FoundRace, type RaceLookupResult } from '@/server/agen
 import { parseDateFlexible } from '../parsing/dates';
 import { parseDistanceMiles } from '../parsing/distance';
 import { upsertTrainingProfile, type GoalDistance } from '../athlete-training-profile';
+import { backOnlyKeyboard, isCancelPhrase, withBack } from '../back';
 import type { OnboardingStep, StepHandleResult } from '../types';
 
 // Beats A2 (goal type) + A4 (named race) + A4b (no race yet — distance + timeframe).
@@ -22,14 +23,18 @@ type ConfirmedRace = {
   source_url: string | null;
 };
 
+type GoalSubStep =
+  | 'goal_choice'
+  | 'race_choice'
+  | 'race_name'
+  | 'race_confirm'
+  | 'race_manual_date'
+  | 'race_manual_distance'
+  | 'distance'
+  | 'timeframe';
+
 type GoalPartial = {
-  sub_step:
-    | 'goal_choice'
-    | 'race_choice'
-    | 'race_name'
-    | 'race_confirm'
-    | 'race_manual_date'
-    | 'race_manual_distance';
+  sub_step: GoalSubStep;
   race_lookup?: RaceLookupResult;
   race_manual?: { name: string; date?: string | null; distance_mi?: number | null };
   goal_race?: ConfirmedRace;
@@ -42,6 +47,13 @@ function asPartial(p: Record<string, unknown>): GoalPartial {
 }
 
 const INITIAL_PROMPT = 'What is your goal?';
+const RACE_CHOICE_PROMPT =
+  "What's the race? Write the name, location and/or date and it'll pull the rest. Haven't picked one? That's ok too.";
+const RACE_NAME_PROMPT = "What's the race? Write the name and any details, like 'Boston Marathon'.";
+const MANUAL_DATE_PROMPT = "What's the race date? (e.g. Oct 4 2026, or 'skip')";
+const MANUAL_DISTANCE_PROMPT = "What's the distance? (e.g. marathon, half, 10k, or 26.2 mi)";
+const DISTANCE_PROMPT = 'What are you building toward?';
+const TIMEFRAME_PROMPT = 'Roughly when?';
 
 function goalKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
@@ -112,14 +124,76 @@ function todayPlusWeeks(weeks: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-async function handleRaceName(name: string, athleteId: string, p: GoalPartial): Promise<StepHandleResult> {
+// The screen (prompt + keyboard) for a back-target sub_step. race_confirm is never
+// a back target (its prompt is built from the live lookup), so it's omitted.
+function screenFor(p: GoalPartial): { prompt: string; keyboard: InlineKeyboard } {
+  switch (p.sub_step) {
+    case 'race_choice':
+      return { prompt: RACE_CHOICE_PROMPT, keyboard: withBack(raceChoiceKeyboard()) };
+    case 'race_name':
+      return { prompt: RACE_NAME_PROMPT, keyboard: backOnlyKeyboard() };
+    case 'race_manual_date':
+      return { prompt: MANUAL_DATE_PROMPT, keyboard: backOnlyKeyboard() };
+    case 'race_manual_distance':
+      return { prompt: MANUAL_DISTANCE_PROMPT, keyboard: backOnlyKeyboard() };
+    case 'distance':
+      return { prompt: DISTANCE_PROMPT, keyboard: withBack(distanceKeyboard()) };
+    case 'timeframe':
+      return { prompt: TIMEFRAME_PROMPT, keyboard: withBack(timeframeKeyboard()) };
+    default:
+      return { prompt: INITIAL_PROMPT, keyboard: goalKeyboard() };
+  }
+}
+
+// One screen back, in the linear chain through this section. race_confirm and the
+// manual-date/distance text screens collapse back toward the name; the distance/
+// timeframe branch collapses back toward race_choice.
+const BACK_MAP: Record<GoalSubStep, GoalSubStep> = {
+  goal_choice: 'goal_choice',
+  race_choice: 'goal_choice',
+  race_name: 'race_choice',
+  race_confirm: 'race_name',
+  race_manual_date: 'race_name',
+  race_manual_distance: 'race_manual_date',
+  distance: 'race_choice',
+  timeframe: 'distance',
+};
+
+async function handleBack(partialRaw: Record<string, unknown>): Promise<StepHandleResult> {
+  const p = asPartial(partialRaw);
+  const target = BACK_MAP[p.sub_step] ?? 'goal_choice';
+  const next: GoalPartial = { ...p, sub_step: target };
+  // Drop transient lookup/branch state when returning to a fork, so re-entry is clean.
+  if (target === 'goal_choice' || target === 'race_choice') {
+    delete next.race_lookup;
+    delete next.race_manual;
+    delete next.goal_distance;
+  } else if (target === 'race_name') {
+    delete next.race_lookup;
+    delete next.race_manual;
+  }
+  const screen = screenFor(next);
+  return { done: false, newPartial: next, reply: screen.prompt, replyMarkup: screen.keyboard };
+}
+
+async function handleRaceName(
+  name: string,
+  athleteId: string,
+  p: GoalPartial,
+): Promise<StepHandleResult> {
   const lookup = await lookupRace(name, athleteId);
 
   if (!lookup.ok) {
     return {
       done: false,
-      newPartial: { ...p, race_lookup: lookup, race_manual: { name }, sub_step: 'race_manual_date' },
+      newPartial: {
+        ...p,
+        race_lookup: lookup,
+        race_manual: { name },
+        sub_step: 'race_manual_date',
+      },
       reply: `Couldn't find "${name}". What's the race date? (e.g. Oct 4 2026, or 'skip')`,
+      replyMarkup: backOnlyKeyboard(),
     };
   }
 
@@ -131,6 +205,7 @@ async function handleRaceName(name: string, athleteId: string, p: GoalPartial): 
       done: false,
       newPartial: { ...p, race_lookup: lookup, race_manual: { name }, sub_step: 'race_confirm' },
       reply: `Found a few:\n\n${list}\n\nWhich one? Reply 1, 2, 3 — or "none" to enter it manually.`,
+      replyMarkup: backOnlyKeyboard(),
     };
   }
 
@@ -138,8 +213,14 @@ async function handleRaceName(name: string, athleteId: string, p: GoalPartial): 
   const qualifier = f.confidence === 'high' ? 'Found it' : 'Possible match';
   return {
     done: false,
-    newPartial: { ...p, race_lookup: lookup, race_manual: { name: f.canonical_name }, sub_step: 'race_confirm' },
+    newPartial: {
+      ...p,
+      race_lookup: lookup,
+      race_manual: { name: f.canonical_name },
+      sub_step: 'race_confirm',
+    },
     reply: `${qualifier}: ${f.canonical_name}${raceDetailsLine(f)}\n\nIs this it? Reply yes / no.`,
+    replyMarkup: backOnlyKeyboard(),
   };
 }
 
@@ -155,6 +236,7 @@ function handleRaceConfirm(text: string, p: GoalPartial): StepHandleResult {
       done: false,
       newPartial: { ...p, sub_step: 'race_manual_date' },
       reply: "What's the race date? (e.g. Oct 4 2026, or 'skip')",
+      replyMarkup: backOnlyKeyboard(),
     };
   }
 
@@ -168,6 +250,7 @@ function handleRaceConfirm(text: string, p: GoalPartial): StepHandleResult {
       done: false,
       newPartial: p,
       reply: `Pick a number between 1 and ${lookup.ambiguous.length}, or "none" to enter it manually.`,
+      replyMarkup: backOnlyKeyboard(),
     };
   }
 
@@ -176,10 +259,16 @@ function handleRaceConfirm(text: string, p: GoalPartial): StepHandleResult {
       done: false,
       newPartial: { ...p, sub_step: 'race_manual_date' },
       reply: "No problem. What's the race date? (e.g. Oct 4 2026, or 'skip')",
+      replyMarkup: backOnlyKeyboard(),
     };
   }
 
-  return { done: false, newPartial: p, reply: 'Reply yes / no, or a number to pick from the list.' };
+  return {
+    done: false,
+    newPartial: p,
+    reply: 'Reply yes / no, or a number to pick from the list.',
+    replyMarkup: backOnlyKeyboard(),
+  };
 }
 
 function handleManualDate(text: string, p: GoalPartial): StepHandleResult {
@@ -189,20 +278,35 @@ function handleManualDate(text: string, p: GoalPartial): StepHandleResult {
   if (v === 'skip' || v === 'unknown' || v === 'tbd') {
     return {
       done: false,
-      newPartial: { ...p, race_manual: { ...manual, date: null }, sub_step: 'race_manual_distance' },
+      newPartial: {
+        ...p,
+        race_manual: { ...manual, date: null },
+        sub_step: 'race_manual_distance',
+      },
       reply: "What's the distance? (e.g. marathon, half, 10k, or 26.2 mi)",
+      replyMarkup: backOnlyKeyboard(),
     };
   }
 
   const result = parseDateFlexible(text);
   if (!result.ok) {
-    return { done: false, newPartial: p, reply: `${result.error} Send the date (or 'skip'):` };
+    return {
+      done: false,
+      newPartial: p,
+      reply: `${result.error} Send the date (or 'skip'):`,
+      replyMarkup: backOnlyKeyboard(),
+    };
   }
 
   return {
     done: false,
-    newPartial: { ...p, race_manual: { ...manual, date: result.value }, sub_step: 'race_manual_distance' },
+    newPartial: {
+      ...p,
+      race_manual: { ...manual, date: result.value },
+      sub_step: 'race_manual_distance',
+    },
     reply: "What's the distance? (e.g. marathon, half, 10k, or 26.2 mi)",
+    replyMarkup: backOnlyKeyboard(),
   };
 }
 
@@ -213,7 +317,13 @@ function handleManualDistance(text: string, p: GoalPartial): StepHandleResult {
   let distance: number | null = null;
   if (v !== 'skip' && v !== 'unknown' && v !== 'tbd') {
     const result = parseDistanceMiles(text);
-    if (!result.ok) return { done: false, newPartial: p, reply: `${result.error}` };
+    if (!result.ok)
+      return {
+        done: false,
+        newPartial: p,
+        reply: `${result.error}`,
+        replyMarkup: backOnlyKeyboard(),
+      };
     distance = result.value;
   }
 
@@ -228,6 +338,13 @@ function handleManualDistance(text: string, p: GoalPartial): StepHandleResult {
   return { done: true, newPartial: { ...p, goal_race } };
 }
 
+const TEXT_SCREENS: GoalSubStep[] = [
+  'race_name',
+  'race_confirm',
+  'race_manual_date',
+  'race_manual_distance',
+];
+
 async function handleMessage(
   text: string,
   partialRaw: Record<string, unknown>,
@@ -235,11 +352,22 @@ async function handleMessage(
 ): Promise<StepHandleResult> {
   const p = asPartial(partialRaw);
 
+  // On a text-entry screen, a cancel phrase ("never mind") steps back one screen
+  // instead of being read as the answer.
+  if (TEXT_SCREENS.includes(p.sub_step) && isCancelPhrase(text)) {
+    return handleBack(p);
+  }
+
   switch (p.sub_step) {
     case 'race_name': {
       const name = text.trim();
       if (name.length < 2 || name.length > 120) {
-        return { done: false, newPartial: p, reply: 'Send the race name (2–120 characters).' };
+        return {
+          done: false,
+          newPartial: p,
+          reply: 'Send the race name (2–120 characters).',
+          replyMarkup: backOnlyKeyboard(),
+        };
       }
       return handleRaceName(name, athleteId, p);
     }
@@ -266,15 +394,15 @@ async function handleCallback(
     return {
       done: false,
       newPartial: { ...p, sub_step: 'race_choice' },
-      reply: "What's the race? Write the name, location and/or date and it'll pull the rest. Haven't picked one? That's ok too.",
-      replyMarkup: raceChoiceKeyboard(),
+      reply: RACE_CHOICE_PROMPT,
+      replyMarkup: withBack(raceChoiceKeyboard()),
     };
   }
   if (data === 'goal:daytoday') {
     return {
       done: false,
       newPartial: p,
-      alertText: "Day-to-day is coming soon. For now, you need to set up a race training plan.",
+      alertText: 'Day-to-day is coming soon. For now, you need to set up a race training plan.',
     };
   }
 
@@ -283,15 +411,17 @@ async function handleCallback(
     return {
       done: false,
       newPartial: { ...p, sub_step: 'race_name' },
-      reply: "What's the race? Write the name and any details, like 'Boston Marathon'.",
+      reply: RACE_NAME_PROMPT,
+      replyMarkup: backOnlyKeyboard(),
     };
   }
   if (data === 'race:none') {
     return {
       done: false,
-      newPartial: { ...p, sub_step: 'goal_choice' }, // sub_step parked; distance_choice handled by data prefix below
-      reply: "No problem. We'll start training and lock a race in when you're ready. What are you building toward?",
-      replyMarkup: distanceKeyboard(),
+      newPartial: { ...p, sub_step: 'distance' },
+      reply:
+        "No problem. We'll start training and lock a race in when you're ready. What are you building toward?",
+      replyMarkup: withBack(distanceKeyboard()),
     };
   }
 
@@ -300,9 +430,9 @@ async function handleCallback(
     const goal_distance = data.slice('dist:'.length) as GoalDistance;
     return {
       done: false,
-      newPartial: { ...p, goal_distance },
-      reply: 'Roughly when?',
-      replyMarkup: timeframeKeyboard(),
+      newPartial: { ...p, goal_distance, sub_step: 'timeframe' },
+      reply: TIMEFRAME_PROMPT,
+      replyMarkup: withBack(timeframeKeyboard()),
     };
   }
 
@@ -377,5 +507,6 @@ export const goalSetupStep: OnboardingStep = {
   initialKeyboard: goalKeyboard(),
   handleMessage,
   handleCallback,
+  handleBack,
   onComplete,
 };

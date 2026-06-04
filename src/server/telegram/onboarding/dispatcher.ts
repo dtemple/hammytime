@@ -6,6 +6,7 @@ import { sendDavidAlert } from '@/server/admin/alerts';
 import { advanceQuestion, loadOnboardingState } from './state';
 import type { OnboardingState, OnboardingStep, Question } from './types';
 import { onboardingSteps } from './index';
+import { BACK_DATA } from './back';
 
 // Tidy a tapped button's label for the "you picked X" record: drop a leading
 // suggestion check (days/long-run prepend ✅ to the Strava-suggested option) so we
@@ -316,7 +317,31 @@ export async function handleOnboardingCallback(
   const state = await loadOnboardingState(athleteId);
 
   const step = onboardingSteps[state.step];
-  if (!step?.handleCallback) {
+  if (!step) {
+    await ctx.answerCallbackQuery();
+    return;
+  }
+
+  // Reserved "← Back": step one screen back within this section. Intercepted here
+  // so individual steps don't each special-case it. Strip the tapped message's
+  // keyboard (not recordSelection, which would collapse it to "✅ ← Back") and send
+  // a fresh prior-screen message — we don't track outbound message_ids to re-edit.
+  if (data === BACK_DATA) {
+    await ctx.answerCallbackQuery();
+    if (step.handleBack) {
+      const back = await step.handleBack(state.partial, athleteId);
+      await ctx.editMessageReplyMarkup().catch(() => undefined);
+      await advanceQuestion(athleteId, { step: state.step, question: 0, partial: back.newPartial });
+      if (back.reply && back.replyMarkup) {
+        await sendWithKeyboard(athleteId, chatId, back.reply, back.replyMarkup);
+      } else if (back.reply) {
+        await sendAndLog(athleteId, chatId, back.reply);
+      }
+    }
+    return;
+  }
+
+  if (!step.handleCallback) {
     await ctx.answerCallbackQuery();
     return;
   }

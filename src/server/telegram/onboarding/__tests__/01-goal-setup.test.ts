@@ -13,6 +13,7 @@ const cb = (data: string, partial: Record<string, unknown> = {}) =>
   goalSetupStep.handleCallback!(data, partial, 'a1');
 const msg = (text: string, partial: Record<string, unknown> = {}) =>
   goalSetupStep.handleMessage!(text, partial, 'a1');
+const back = (partial: Record<string, unknown>) => goalSetupStep.handleBack!(partial, 'a1');
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -73,7 +74,8 @@ describe('goal-setup — A4 named race (committed)', () => {
 
     const done = await msg('yes', afterName.newPartial);
     expect(done.done).toBe(true);
-    const race = (done.newPartial as { goal_race: { name: string; distance_mi: number } }).goal_race;
+    const race = (done.newPartial as { goal_race: { name: string; distance_mi: number } })
+      .goal_race;
     expect(race.name).toBe('CIM');
     expect(race.distance_mi).toBe(26.2);
   });
@@ -89,7 +91,8 @@ describe('goal-setup — A4 named race (committed)', () => {
 
     const done = await msg('10k', afterDate.newPartial);
     expect(done.done).toBe(true);
-    const race = (done.newPartial as { goal_race: { date: string; distance_mi: number } }).goal_race;
+    const race = (done.newPartial as { goal_race: { date: string; distance_mi: number } })
+      .goal_race;
     expect(race.date).toBe('2026-10-04');
     expect(race.distance_mi).toBeCloseTo(6.21, 1);
   });
@@ -100,5 +103,54 @@ describe('goal-setup — typed message on a button screen', () => {
     const r = await msg('hello', { sub_step: 'goal_choice' });
     expect(r.done).toBe(false);
     if (!r.done) expect(r.reply).toContain('button');
+  });
+});
+
+describe('goal-setup — in-section back', () => {
+  it('the no-race branch now uses explicit distance / timeframe sub_steps', async () => {
+    const afterNone = await cb('race:none', { sub_step: 'race_choice' });
+    expect((afterNone.newPartial as { sub_step: string }).sub_step).toBe('distance');
+    const afterDist = await cb('dist:half', afterNone.newPartial);
+    expect((afterDist.newPartial as { sub_step: string }).sub_step).toBe('timeframe');
+  });
+
+  it('Back from timeframe returns to distance', async () => {
+    const r = await back({ sub_step: 'timeframe', goal_distance: 'half' });
+    expect((r.newPartial as { sub_step: string }).sub_step).toBe('distance');
+  });
+
+  it('Back from distance returns to race_choice and clears the picked distance', async () => {
+    const r = await back({ sub_step: 'distance', goal_distance: 'half' });
+    const p = r.newPartial as { sub_step: string; goal_distance?: string };
+    expect(p.sub_step).toBe('race_choice');
+    expect(p.goal_distance).toBeUndefined();
+  });
+
+  it('Back from race_confirm returns to race_name and clears the lookup', async () => {
+    const r = await back({
+      sub_step: 'race_confirm',
+      race_lookup: { ok: true },
+      race_manual: { name: 'CIM' },
+    });
+    const p = r.newPartial as { sub_step: string; race_lookup?: unknown; race_manual?: unknown };
+    expect(p.sub_step).toBe('race_name');
+    expect(p.race_lookup).toBeUndefined();
+    expect(p.race_manual).toBeUndefined();
+  });
+
+  it('back collapses the manual chain: distance → date → name', async () => {
+    const a = await back({
+      sub_step: 'race_manual_distance',
+      race_manual: { name: 'X', date: '2026-10-04' },
+    });
+    expect((a.newPartial as { sub_step: string }).sub_step).toBe('race_manual_date');
+    const b = await back(a.newPartial);
+    expect((b.newPartial as { sub_step: string }).sub_step).toBe('race_name');
+  });
+
+  it('typing "never mind" on a text screen backs out instead of being read as input', async () => {
+    const r = await msg('never mind', { sub_step: 'race_name' });
+    expect(r.done).toBe(false);
+    expect((r.newPartial as { sub_step: string }).sub_step).toBe('race_choice');
   });
 });

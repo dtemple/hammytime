@@ -13,6 +13,7 @@ type AnyMock = any;
 
 const cb = (data: string, partial: Record<string, unknown> = {}) =>
   trainingShapeStep.handleCallback!(data, partial, 'a1');
+const back = (partial: Record<string, unknown>) => trainingShapeStep.handleBack!(partial, 'a1');
 
 const SNAPSHOT = {
   window_days: 56,
@@ -65,5 +66,28 @@ describe('training-shape — A3 → A5 → A6 chain', () => {
     expect(serialized).not.toContain('✅');
     expect(serialized).toContain('exp:beginner');
     expect(serialized).toContain('exp:some_training');
+  });
+});
+
+describe('training-shape — in-section back', () => {
+  it('Back from days returns to experience and drops the tier', async () => {
+    const r = await back({ sub_step: 'days', experience_tier: 'some_training', suggested_days: 5 });
+    const p = r.newPartial as { sub_step: string; experience_tier?: string };
+    expect(p.sub_step).toBe('experience');
+    expect(p.experience_tier).toBeUndefined();
+  });
+
+  it('Back from long_run returns to days, clears the pick, and keeps the Strava suggestion', async () => {
+    const r = await back({
+      sub_step: 'long_run',
+      days_per_week: 4,
+      suggested_days: 5,
+      suggested_long_run: 0,
+    });
+    const p = r.newPartial as { sub_step: string; days_per_week?: number; suggested_days?: number };
+    expect(p.sub_step).toBe('days');
+    expect(p.days_per_week).toBeUndefined();
+    expect(p.suggested_days).toBe(5);
+    if (!r.done) expect(r.reply).toContain('5 days');
   });
 });
