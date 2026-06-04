@@ -2,7 +2,7 @@
 
 **Author:** dtemple (drafted with Claude)
 **Date:** 2026-05-28 (rewritten for the v0.7 container model)
-**Status:** ready to hand to a Claude Code session
+**Status:** Shipped 2026-05-29 (worker built #11, deployed + draining #13). This is now the **as-built reference for `worker/`**, not an active plan — the worker source files cite it by section number. Remaining open items (prepaid metering #12, the Strava-aware quality test) are tracked in `claude-status.md`, not here.
 **Source of truth:** `Specs/SPEC.md` (v0.7) > `CLAUDE.md` > this doc. The governing spec sections are §3.1 (agent runtime), §3.3 (storage), §3.7 (daily loop), §3.8 (ad-hoc loop), §3.11 (billing), and risk #15 (isolation).
 
 > **Why this doc was rewritten.** The earlier M1 plan migrated the daily check-in to the Agent SDK *inside a Vercel serverless function* with a hand-written custom-tool catalog. The prerequisite check killed that approach: the SDK spawns a ~240 MB native `claude` binary, and Vercel's per-function uncompressed limit is 250 MB, so it can't run there. v0.7 moves agent execution to a **Fly.io worker container** running the SDK with its **built-in tools** over a per-athlete folder of files — a near-1:1 port of the personal coach in `~/projects/health-agent`. This doc is the plan for that.
