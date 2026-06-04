@@ -3,15 +3,9 @@ import { supabaseAdmin } from '@/lib/db';
 import { botApiForChat } from '../bot';
 import { fetchRecentActivities, getLoggedInAthlete, deriveTimezone } from '@/server/strava/activities';
 import { advanceIfSubstep, loadOnboardingState } from './state';
+import { tzLabel } from './timezones';
 import type { ProfileConfirmPartial } from './steps/00-profile-confirm';
 import type { OnboardingState } from './types';
-
-// "America/Los_Angeles" -> "Los Angeles"; "America/Argentina/Buenos_Aires" -> "Buenos Aires".
-function ianaCity(tz: string | null): string | null {
-  if (!tz) return null;
-  const last = tz.split('/').pop();
-  return last ? last.replace(/_/g, ' ') : null;
-}
 
 async function sendWithKeyboard(
   athleteId: string,
@@ -79,13 +73,13 @@ export async function resumeAfterStrava(athleteId: string): Promise<boolean> {
   if (!won) return false;
 
   if (hasName) {
-    const city = ianaCity(timezone);
-    const where = city ? `, running out of ${city}` : '';
+    const label = tzLabel(timezone);
+    const where = label ? `, on ${label}` : '';
     await sendWithKeyboard(
       athleteId,
       athlete.telegram_chat_id,
       `Connected and read your last couple months. You're ${firstname}${where}. Is that right?`,
-      new InlineKeyboard().text('Yep', 'profile:yep').text('I go by…', 'profile:rename'),
+      new InlineKeyboard().text('Yep', 'profile:yep').text('Not quite', 'profile:fix'),
     );
   } else {
     await sendWithKeyboard(
