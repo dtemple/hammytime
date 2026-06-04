@@ -6,6 +6,14 @@ vi.mock('./onboarding/index', () => ({
   handleOnboardingCallback: vi.fn().mockResolvedValue(undefined),
   onboardingSteps: new Array(7),
   hardResetOnboarding: vi.fn().mockResolvedValue(undefined),
+  // Mirror the real label recovery: match the tapped button by callback_data.
+  labelForTap: vi.fn(
+    (
+      rows: { text: string; callback_data?: string }[][] | undefined,
+      data: string,
+    ): string | null =>
+      rows?.flat().find((b) => b.callback_data === data)?.text ?? null,
+  ),
 }));
 vi.mock('./checkin/dispatcher', () => ({
   handleCheckinCommand: vi.fn().mockResolvedValue(undefined),
@@ -25,6 +33,7 @@ import {
   handleInboundText,
   handleConnectStravaCommand,
   handleDisconnectStravaCommand,
+  handleNextAction,
   _resetBotForTest,
 } from './bot';
 
@@ -408,5 +417,57 @@ describe('/disconnect_strava command', () => {
     expect(disconnectStrava).toHaveBeenCalledWith(ATHLETE_ID, { revokeOnStrava: true });
     const [, sentText] = (sendMessageMock as AnyMock).mock.calls[0] as [unknown, string];
     expect(sentText).toContain("don't have a Strava connection");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase D next-actions — inbound logging (V3-W0)
+// ---------------------------------------------------------------------------
+
+describe('handleNextAction — inbound logging', () => {
+  beforeEach(() => {
+    _resetBotForTest();
+    vi.clearAllMocks();
+    process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+  });
+
+  afterEach(() => {
+    delete process.env.TELEGRAM_BOT_TOKEN;
+  });
+
+  it('logs the tapped next-action as an inbound message with its label', async () => {
+    const sendMessageMock = vi.fn().mockResolvedValue(undefined);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (Bot as AnyMock).mockImplementation(function (this: any) {
+      return { api: { sendMessage: sendMessageMock }, command: vi.fn(), on: vi.fn(), catch: vi.fn() };
+    });
+
+    const messagesInserts: Array<{ direction: string; body: string }> = [];
+    (supabaseAdmin as AnyMock).mockReturnValue({
+      from: vi.fn().mockImplementation((table: string) => {
+        if (table === 'messages') {
+          return {
+            insert: vi.fn().mockImplementation((row: { direction: string; body: string }) => {
+              messagesInserts.push(row);
+              return Promise.resolve({ error: null });
+            }),
+          };
+        }
+        return {};
+      }),
+    });
+
+    const ctx = makeCtx({
+      answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+      callbackQuery: {
+        message: { reply_markup: { inline_keyboard: [[{ text: "That's it for today", callback_data: 'next:done' }]] } },
+      },
+    });
+
+    await handleNextAction(ctx as AnyMock, { id: ATHLETE_ID } as AnyMock, 'next:done');
+
+    const inbound = messagesInserts.find((r) => r.direction === 'in');
+    expect(inbound).toBeDefined();
+    expect(inbound!.body).toBe("That's it for today");
   });
 });

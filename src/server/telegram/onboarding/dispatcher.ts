@@ -18,6 +18,24 @@ function cleanLabel(text: string): string {
     .trim();
 }
 
+// Recover the human-readable label of a tapped button by matching its callback_data
+// against the message's existing keyboard. Returns null when the tapped button isn't
+// a resolvable callback button (e.g. a .url() button) or there's no keyboard. Used
+// both to collapse the keyboard to a "✅ <choice>" record and to log the tap as an
+// inbound message in the athlete's voice.
+export function labelForTap(
+  rows: ReadonlyArray<ReadonlyArray<{ text: string; callback_data?: string }>> | undefined,
+  data: string,
+): string | null {
+  if (!rows) return null;
+  for (const row of rows) {
+    for (const btn of row) {
+      if (btn.callback_data === data) return cleanLabel(btn.text);
+    }
+  }
+  return null;
+}
+
 // Collapse a tapped inline keyboard to a single inert button showing the choice.
 // The label is read straight off the message's existing keyboard, so this works for
 // every onboarding keyboard with no per-step wiring. Returns null when the tapped
@@ -27,15 +45,9 @@ export function selectionKeyboardFromTap(
   rows: ReadonlyArray<ReadonlyArray<{ text: string; callback_data?: string }>> | undefined,
   data: string,
 ): InlineKeyboard | null {
-  if (!rows) return null;
-  for (const row of rows) {
-    for (const btn of row) {
-      if (btn.callback_data === data) {
-        return new InlineKeyboard().text(`✅ ${cleanLabel(btn.text)}`, 'noop');
-      }
-    }
-  }
-  return null;
+  const label = labelForTap(rows, data);
+  if (label === null) return null;
+  return new InlineKeyboard().text(`✅ ${label}`, 'noop');
 }
 
 // Edit the just-tapped message so its buttons collapse to a single "✅ <choice>"
@@ -100,6 +112,16 @@ async function logInbound(athleteId: string, body: string): Promise<void> {
     direction: 'in',
     body,
   });
+}
+
+// Log a button tap as an inbound message so onboarding transcripts read as a real
+// conversation (the typed-text path already logs via logInbound; callbacks didn't).
+// Records the human-readable label off the still-intact keyboard, falling back to the
+// raw callback data (e.g. the "← Back" tap, or a message without a resolvable button).
+export async function logInboundTap(ctx: Context, athleteId: string, data: string): Promise<void> {
+  const msg = ctx.callbackQuery?.message;
+  const rows = msg && 'reply_markup' in msg ? msg.reply_markup?.inline_keyboard : undefined;
+  await logInbound(athleteId, labelForTap(rows, data) ?? data);
 }
 
 async function askQuestion(
@@ -314,6 +336,11 @@ export async function handleOnboardingCallback(
 ): Promise<void> {
   const athleteId = athlete.id;
   const chatId = ctx.chat!.id;
+
+  // Record the tap before anything mutates the keyboard (recordSelection collapses it
+  // to "✅ <choice>") so the logged label is what the athlete actually saw and tapped.
+  await logInboundTap(ctx, athleteId, data);
+
   const state = await loadOnboardingState(athleteId);
 
   const step = onboardingSteps[state.step];

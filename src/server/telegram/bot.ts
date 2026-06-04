@@ -6,6 +6,7 @@ import {
   advanceQuestion,
   handleOnboardingCallback,
   handleOnboardingMessage,
+  labelForTap,
   onboardingSteps,
   hardResetOnboarding,
 } from './onboarding/index';
@@ -366,12 +367,23 @@ function calendarSubscribeText(url: string): string {
 // Phase D next-actions, tapped after onboarding is terminal (so they can't route
 // through the onboarding dispatcher). Mirrors the [Adjust it] handoff: [Adjust]
 // enqueues a coach tg_message; [Add to calendar] surfaces the subscribe URL.
-async function handleNextAction(
+export async function handleNextAction(
   ctx: Context,
   athlete: AthleteRow,
   data: string,
 ): Promise<void> {
   const chatId = ctx.chat?.id ?? ctx.from!.id;
+
+  // Log the tap as an inbound message so the terminal onboarding beat shows in the
+  // transcript (these next-actions bypass the onboarding dispatcher's tap logging).
+  const msg = ctx.callbackQuery?.message;
+  const rows = msg && 'reply_markup' in msg ? msg.reply_markup?.inline_keyboard : undefined;
+  await supabaseAdmin().from('messages').insert({
+    athlete_id: athlete.id,
+    channel: 'tg',
+    direction: 'in',
+    body: labelForTap(rows, data) ?? data,
+  });
 
   if (data === 'next:calendar') {
     const { url } = await getOrCreateCalendarToken(athlete.id);

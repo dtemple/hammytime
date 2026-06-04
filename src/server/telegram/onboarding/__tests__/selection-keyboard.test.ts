@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { selectionKeyboardFromTap } from '../dispatcher';
+import { labelForTap, selectionKeyboardFromTap } from '../dispatcher';
 
 // Shape of grammy's inline_keyboard rows we read from the tapped message.
 const rows = (
@@ -55,5 +55,28 @@ describe('selectionKeyboardFromTap', () => {
 
   it('returns null when the message had no keyboard', () => {
     expect(selectionKeyboardFromTap(undefined, 'lr:6')).toBeNull();
+  });
+});
+
+describe('labelForTap', () => {
+  it('recovers the cleaned label of the tapped button', () => {
+    expect(labelForTap(rows({ text: 'Beginner', callback_data: 'exp:beginner' }), 'exp:beginner')).toBe(
+      'Beginner',
+    );
+  });
+
+  it('strips a leading suggestion check and a trailing arrow', () => {
+    expect(labelForTap(rows({ text: '✅ 4', callback_data: 'days:4' }), 'days:4')).toBe('4');
+    expect(
+      labelForTap(rows({ text: "Something's bothering me →", callback_data: 'injury:some' }), 'injury:some'),
+    ).toBe("Something's bothering me");
+  });
+
+  it('returns null when no button matches the tapped data', () => {
+    expect(labelForTap(rows({ text: 'Sat', callback_data: 'lr:6' }), 'lr:0')).toBeNull();
+  });
+
+  it('returns null when the message had no keyboard', () => {
+    expect(labelForTap(undefined, 'next:done')).toBeNull();
   });
 });

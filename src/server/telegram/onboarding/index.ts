@@ -18,7 +18,7 @@ export const onboardingSteps: OnboardingStep[] = [
   enrichmentStep, // C1 — optional freeform/voice dump (terminal + next-actions)
 ];
 
-export { handleOnboardingCallback, handleOnboardingMessage } from './dispatcher';
+export { handleOnboardingCallback, handleOnboardingMessage, labelForTap } from './dispatcher';
 export { advanceQuestion, resetOnboarding, hardResetOnboarding } from './state';
 export { resumeAfterStrava } from './strava-resume';
 export type { OnboardingState, OnboardingStep, ParseResult, Question } from './types';
