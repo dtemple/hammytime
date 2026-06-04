@@ -1,11 +1,32 @@
 import { InlineKeyboard } from 'grammy';
 import { supabaseAdmin } from '@/lib/db';
 import { botApiForChat } from '../bot';
-import { fetchRecentActivities, getLoggedInAthlete, deriveTimezone } from '@/server/strava/activities';
+import {
+  fetchRecentActivities,
+  getLoggedInAthlete,
+  deriveTimezone,
+  getFitnessSnapshot,
+} from '@/server/strava/activities';
 import { advanceIfSubstep, loadOnboardingState } from './state';
 import { tzLabel } from './timezones';
+import { slotValue } from './slots/provenance';
+import { initialV3State, isV3Enabled, seedV3IfAwaitingStrava } from './slots/slot-state';
 import type { ProfileConfirmPartial } from './steps/00-profile-confirm';
 import type { OnboardingState } from './types';
+
+// Onboarding v3 (V3-W2): the A1→v3 handoff. The orientation sets expectations
+// before the conversational flow's slower (Sonnet) turns — without it, the
+// thinking pauses read as a stuck bot.
+function orientationMessage(firstname: string | null): string {
+  const opener = firstname
+    ? `Okay ${firstname}, let's get you set up.`
+    : "Okay, let's get you set up.";
+  return [
+    `${opener} I'll ask about three things: your running goals, where your training's at right now, and any injuries to keep an eye on.`,
+    'Talk to me normally — hit the mic and ramble if it helps, the more context the better. Takes a few minutes, and I might pause a second to think. Step away whenever; you can pick right back up.',
+    'Ready?',
+  ].join('\n\n');
+}
 
 async function sendWithKeyboard(
   athleteId: string,
@@ -59,6 +80,27 @@ export async function resumeAfterStrava(athleteId: string): Promise<boolean> {
   const timezone = deriveTimezone(activities, profile);
   const sex = profile?.sex ?? null;
 
+  // --- v3 handoff: seed the slot state with the Strava-derived identity + cached
+  // fitness snapshot and open with the orientation, skipping v2's profile-confirm. ---
+  if (isV3Enabled()) {
+    const snapshot = await getFitnessSnapshot(athleteId).catch(() => null);
+    const v3 = initialV3State(snapshot);
+    if (firstname) v3.slots.name = slotValue(firstname, 'inferred', true);
+    if (timezone) v3.slots.timezone = slotValue(timezone, 'inferred', true);
+    if (sex) v3.slots.sex = slotValue(sex, 'inferred', true);
+
+    const won = await seedV3IfAwaitingStrava(athleteId, v3);
+    if (!won) return false;
+
+    await sendWithKeyboard(
+      athleteId,
+      athlete.telegram_chat_id,
+      orientationMessage(firstname),
+      new InlineKeyboard().text("Let's go", "v3:let's go"),
+    );
+    return true;
+  }
+
   const hasName = Boolean(firstname);
   const partial: ProfileConfirmPartial = {
     sub_step: hasName ? 'confirm_name' : 'ask_name',
@@ -85,7 +127,7 @@ export async function resumeAfterStrava(athleteId: string): Promise<boolean> {
     await sendWithKeyboard(
       athleteId,
       athlete.telegram_chat_id,
-      "Connected and read your last couple months. What should I call you?",
+      'Connected and read your last couple months. What should I call you?',
     );
   }
   return true;

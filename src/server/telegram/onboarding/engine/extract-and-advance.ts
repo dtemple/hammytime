@@ -1,0 +1,353 @@
+// Onboarding v3 (V3-W2): the combined `extract_and_advance` Sonnet tool + caller.
+//
+// One round-trip per inbound message (ONBOARDING_V3 §5). The model reads the
+// current slot state + recent conversation and returns, in a single tool call:
+//   - a DELTA of slot fills (only what this message touched), each provenance-tagged;
+//   - the next action (ask / confirm / recap / generate);
+//   - the athlete-facing message to send, plus any chips;
+//   - routing signals the deterministic layer acts on (race lookup, a flagged
+//     contradiction, an unresolved numeric).
+//
+// The model proposes; the guardrails (guardrails.ts) dispose. next_action and any
+// safety/plan-driving fill are re-checked in code before anything is sent or
+// committed — the model is never trusted with the invariants (§5.4).
+
+import { z } from 'zod';
+import { anthropicClient } from '@/lib/anthropic';
+import { supabaseAdmin } from '@/lib/db';
+import { ProvenanceSchema } from '../slots/provenance';
+import { SLOTS, SLOT_KEYS, requiredCoreSlots, type SlotKey } from '../slots/schema';
+import type { V3OnboardingState } from '../slots/slot-state';
+import { formatFinishTime } from '../parsing/durations';
+import type { HistoryTurn } from './history';
+
+export const ONBOARDING_MODEL = 'claude-sonnet-4-6';
+const MAX_TOKENS = 1500;
+// Sonnet 4.6 pricing, USD per million tokens (matches race-lookup.ts).
+const COST_PER_M_INPUT = 3.0;
+const COST_PER_M_OUTPUT = 15.0;
+
+// ---------------------------------------------------------------------------
+// Output shape
+// ---------------------------------------------------------------------------
+
+export type NextAction = 'ask' | 'confirm' | 'recap' | 'generate';
+
+const SlotKeyEnum = z.enum(SLOT_KEYS as [SlotKey, ...SlotKey[]]);
+
+const FillSchema = z.object({
+  slot: SlotKeyEnum,
+  // Value typing is slot-dependent (string / number-of-seconds / {body_part,status}
+  // / array); validated and coerced per-slot in guardrails.mergeFills.
+  value: z.unknown(),
+  provenance: ProvenanceSchema,
+});
+export type SlotFill = z.infer<typeof FillSchema>;
+
+const ChipSchema = z.object({ label: z.string(), value: z.string() });
+export type Chip = z.infer<typeof ChipSchema>;
+
+export const ExtractAdvanceSchema = z.object({
+  fills: z.array(FillSchema).default([]),
+  next_action: z.enum(['ask', 'confirm', 'recap', 'generate']),
+  message: z.string(),
+  chips: z.array(ChipSchema).default([]),
+  // The slot this turn is asking about (when next_action='ask') — lets the budget
+  // counter know an optional question was spent.
+  asked_slot: SlotKeyEnum.nullish().transform((v) => v ?? null),
+  // A race name to resolve with lookupRace before confirming.
+  race_lookup_query: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? null),
+  // A safety-relevant cross-slot conflict to surface before plan-gen (§5.1).
+  contradiction: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? null),
+  // A numeric the model couldn't pin to a unit — the deterministic layer disambiguates.
+  numeric_unresolved: z
+    .object({ slot: SlotKeyEnum, raw: z.string() })
+    .nullish()
+    .transform((v) => v ?? null),
+});
+export type ExtractAdvanceOutput = z.infer<typeof ExtractAdvanceSchema>;
+
+// ---------------------------------------------------------------------------
+// Tool schema (Anthropic JSON Schema)
+// ---------------------------------------------------------------------------
+
+const EXTRACT_TOOL = {
+  name: 'extract_and_advance',
+  description:
+    'Record what the athlete just told you (as slot fills) and decide the next move in the onboarding conversation. Always call this — never reply in plain text.',
+  input_schema: {
+    type: 'object' as const,
+    required: ['fills', 'next_action', 'message'],
+    properties: {
+      fills: {
+        type: 'array',
+        description:
+          'ONLY the slots this latest message changed. Omit slots that did not change. Never restate the whole profile.',
+        items: {
+          type: 'object',
+          required: ['slot', 'value', 'provenance'],
+          properties: {
+            slot: { type: 'string', enum: SLOT_KEYS },
+            value: {
+              description:
+                'The value. Text/enum slots → string; target_time → integer seconds; age/days_per_week/long_run_day → integer; injury_detail → {body_part, status}; tune_up_races → array of {name, date}. null if clearing.',
+            },
+            provenance: {
+              type: 'string',
+              enum: ['stated', 'inferred', 'unknown'],
+              description:
+                '"stated" ONLY when the athlete said it explicitly; "inferred" for a reasonable deduction; never invent.',
+            },
+          },
+        },
+      },
+      next_action: {
+        type: 'string',
+        enum: ['ask', 'confirm', 'recap', 'generate'],
+        description:
+          "'ask' for an open slot; 'confirm' to echo a safety/plan-driving fill for a yes/no; 'recap' for the full pre-plan summary; 'generate' only when every required slot is filled and the injury beat is answered.",
+      },
+      message: { type: 'string', description: 'The message to send the athlete. Daybreak voice.' },
+      chips: {
+        type: 'array',
+        description:
+          'Tap options for answers with ≤3 discrete choices (yes/no, a confirm, a day). Empty for open questions.',
+        items: {
+          type: 'object',
+          required: ['label', 'value'],
+          properties: {
+            label: { type: 'string', description: 'Button text' },
+            value: { type: 'string', description: 'The answer this chip stands for' },
+          },
+        },
+      },
+      asked_slot: {
+        type: 'string',
+        enum: SLOT_KEYS,
+        description: "When next_action='ask', the slot you're asking about.",
+      },
+      race_lookup_query: {
+        type: 'string',
+        description: 'If the athlete named a race, the race name to look up before confirming.',
+      },
+      contradiction: {
+        type: 'string',
+        description:
+          'A safety-relevant conflict between slots (e.g. five weeks running + a first marathon in twelve weeks). Surface it for confirmation before generating.',
+      },
+      numeric_unresolved: {
+        type: 'object',
+        properties: { slot: { type: 'string', enum: SLOT_KEYS }, raw: { type: 'string' } },
+        description: "A number whose unit you couldn't resolve — let the app disambiguate.",
+      },
+    },
+  },
+} as const;
+
+// ---------------------------------------------------------------------------
+// System prompt
+// ---------------------------------------------------------------------------
+
+const VOICE_RULES = [
+  'Voice: you are Daybreak, a sharp, warm running coach texting a friend. Real, plain, direct.',
+  'Never sound like an AI. No "Great question", no "I\'d be happy to", no praising the athlete for answering.',
+  'Avoid the words "genuinely", "honestly", "straightforward". Avoid rule-of-three lists and inflated phrasing.',
+  'One idea per message. Short. You can end on a question.',
+].join(' ');
+
+const NUMERIC_RULES = [
+  'Numbers: never accept a bare number. A time goal is a finish time OR a pace — resolve which.',
+  '"10 minute miles" is a pace; compute the implied finish for the distance. "4:25" for a marathon is hours, not minutes.',
+  'Always state the unit back when you echo a time ("a 4:25 finish — four hours twenty-five").',
+  'If a number is genuinely ambiguous, set numeric_unresolved and let the app offer the two readings.',
+].join(' ');
+
+const INJURY_RULES = [
+  'Injuries are safety-critical. Always ask the injury beat. Mark injury_status "none" ONLY if the athlete explicitly says nothing is bothering them.',
+  'Silence or a skip is NOT "no injury" — leave it unknown. Capture history (active / monitoring / past), not just today.',
+].join(' ');
+
+const FLOW_RULES = [
+  'Fill slots from natural conversation — any message can fill any slot. Never re-ask something already answered.',
+  'Confirm safety and plan-driving slots inline (a quick yes/no). Let nice-to-haves ride.',
+  'When a value you inferred (e.g. from Strava) drives the plan, confirm it before relying on it — state it back, do not ask cold.',
+  'Generate the plan only once every required slot is filled and the injury beat is answered; recap the whole picture first.',
+].join(' ');
+
+export function buildSystemPrompt(): string {
+  return [
+    'You are running the onboarding conversation for a marathon coaching app over Telegram.',
+    VOICE_RULES,
+    FLOW_RULES,
+    NUMERIC_RULES,
+    INJURY_RULES,
+    'Each turn, call extract_and_advance with ONLY the slots that changed plus your next move. Never reply in plain text.',
+  ].join('\n\n');
+}
+
+// Render the current slot state for the model: what's filled (value + provenance
+// + confirmed) and what's still open, by class, plus the optional-question budget.
+export function summarizeState(state: V3OnboardingState): string {
+  const goalType = (state.slots.goal_type?.value as 'race' | 'general_fitness' | null) ?? null;
+  const required = new Set(requiredCoreSlots(goalType));
+
+  const lines: string[] = [];
+  for (const key of SLOT_KEYS) {
+    const def = SLOTS[key];
+    const slot = state.slots[key];
+    if (slot && slot.value != null) {
+      const v =
+        key === 'target_time' && typeof slot.value === 'number'
+          ? formatFinishTime(slot.value)
+          : JSON.stringify(slot.value);
+      const conf = slot.confirmed ? 'confirmed' : 'unconfirmed';
+      lines.push(`- ${key}: ${v} (${slot.provenance}, ${conf})`);
+    } else {
+      const tags = [def.class, required.has(key) ? 'REQUIRED-now' : null]
+        .filter(Boolean)
+        .join(', ');
+      lines.push(`- ${key}: open [${tags}]`);
+    }
+  }
+
+  return [
+    `Goal type: ${goalType ?? 'unknown'}. Optional-question budget remaining: ${state.optional_budget_remaining}.`,
+    'Slots:',
+    lines.join('\n'),
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Caller
+// ---------------------------------------------------------------------------
+
+export interface ExtractAdvanceInput {
+  state: V3OnboardingState;
+  history: HistoryTurn[];
+  latest: string;
+  athleteId: string;
+}
+
+export interface ExtractAdvanceResult {
+  output: ExtractAdvanceOutput;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+function formatHistory(history: HistoryTurn[]): string {
+  return history.map((m) => `${m.direction === 'in' ? 'Athlete' : 'Coach'}: ${m.body}`).join('\n');
+}
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+// The cached Strava snapshot, for Opener 2 ("looks like you run ~4×/week…").
+// The model proposes experience_tier / days_per_week / long_run_day as INFERRED
+// fills the athlete then confirms — never as cold questions.
+function formatSnapshot(state: V3OnboardingState): string {
+  const s = state.strava_snapshot;
+  if (!s || s.run_count === 0)
+    return 'Strava: no recent running signal — ask, do not infer training shape.';
+  const longDay =
+    s.dominant_long_run_weekday != null ? WEEKDAYS[s.dominant_long_run_weekday] : 'unclear';
+  return [
+    'Strava snapshot (infer training shape from this, then confirm — do not ask cold):',
+    `- ~${Math.round(s.recent_weekly_mileage_mi)} mi/wk recently (${s.runs_per_week.toFixed(1)} runs/wk)`,
+    `- longest recent run ~${Math.round(s.longest_run_mi)} mi; long runs tend to land on ${longDay}`,
+    `- suggested days/week: ${s.suggested_days_per_week}`,
+  ].join('\n');
+}
+
+/**
+ * Run one extract_and_advance turn. Forces the tool, Zod-validates, retries once
+ * on a malformed call (race-lookup pattern). Throws if the model never returns a
+ * valid tool call — the router catches and sends a soft fallback.
+ */
+export async function callExtractAndAdvance(
+  input: ExtractAdvanceInput,
+): Promise<ExtractAdvanceResult> {
+  const client = anthropicClient();
+  const userContent = [
+    'Current onboarding state:',
+    summarizeState(input.state),
+    '',
+    formatSnapshot(input.state),
+    '',
+    input.history.length
+      ? `Recent conversation (oldest first):\n${formatHistory(input.history)}`
+      : '',
+    '',
+    `The athlete just said:\n${input.latest}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const messages: any[] = [{ role: 'user', content: userContent }];
+  let inputTokens = 0;
+  let outputTokens = 0;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const response = await (client.messages as any).create({
+      model: ONBOARDING_MODEL,
+      max_tokens: MAX_TOKENS,
+      system: buildSystemPrompt(),
+      tools: [EXTRACT_TOOL],
+      tool_choice: { type: 'tool', name: 'extract_and_advance' },
+      messages,
+    });
+
+    inputTokens += response.usage?.input_tokens ?? 0;
+    outputTokens += response.usage?.output_tokens ?? 0;
+
+    const toolUse = (response.content as unknown[]).find(
+      (b: unknown) => (b as { type?: string }).type === 'tool_use',
+    ) as { input?: unknown } | undefined;
+
+    const parsed = ExtractAdvanceSchema.safeParse(toolUse?.input);
+    if (parsed.success) {
+      return { output: parsed.data, inputTokens, outputTokens };
+    }
+
+    // Malformed — one corrective retry.
+    messages.push({ role: 'assistant', content: response.content });
+    messages.push({
+      role: 'user',
+      content: 'That tool call was malformed. Call extract_and_advance again with valid fields.',
+    });
+  }
+
+  throw new Error('extract_and_advance returned no valid tool call after retry');
+}
+
+/** Best-effort cost ledger insert for one onboarding turn (kind 'onboarding'). */
+export async function logOnboardingRun(
+  athleteId: string,
+  startedAt: string,
+  inputTokens: number,
+  outputTokens: number,
+): Promise<void> {
+  const costUsd =
+    (inputTokens / 1_000_000) * COST_PER_M_INPUT + (outputTokens / 1_000_000) * COST_PER_M_OUTPUT;
+  await supabaseAdmin()
+    .from('agent_runs')
+    .insert({
+      athlete_id: athleteId,
+      kind: 'onboarding',
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+      model: ONBOARDING_MODEL,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      cost_usd: costUsd,
+    })
+    .then(undefined, () => {
+      /* non-fatal */
+    });
+}

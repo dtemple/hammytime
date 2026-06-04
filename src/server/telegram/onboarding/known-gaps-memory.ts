@@ -65,10 +65,12 @@ const HEADER = [
   '',
 ].join('\n');
 
-/** Pure renderer: builds the `known_gaps.md` body from the catalog + whatever
- *  onboarding already captured. `today` is the ISO date stamped on filled gaps. */
-export function renderKnownGaps(e: Extracted | null, today: string): string {
-  const filled = filledFromEnrichment(e);
+/** Pure renderer from a pre-computed filled-gap map. The v3 engine builds the map
+ *  with `slotsToGaps` (slots/schema.ts); v2 builds it from enrichment. */
+export function renderKnownGapsFromFilled(
+  filled: Partial<Record<KnownGapKey, string>>,
+  today: string,
+): string {
   const lines = GAP_ORDER.map((key) => {
     const def = KNOWN_GAPS[key];
     const value = filled[key];
@@ -81,11 +83,20 @@ export function renderKnownGaps(e: Extracted | null, today: string): string {
   return `${HEADER}${lines.join('\n')}\n`;
 }
 
-/** Writes the initial known_gaps.md memory file for an athlete who just finished
- *  onboarding. Idempotent on (athlete_id, file_name). */
-export async function seedKnownGaps(athleteId: string, e: Extracted | null): Promise<void> {
+/** Pure renderer: builds the `known_gaps.md` body from the catalog + whatever
+ *  onboarding already captured. `today` is the ISO date stamped on filled gaps. */
+export function renderKnownGaps(e: Extracted | null, today: string): string {
+  return renderKnownGapsFromFilled(filledFromEnrichment(e), today);
+}
+
+/** Writes the initial known_gaps.md memory file from a pre-computed filled-gap
+ *  map. Idempotent on (athlete_id, file_name). */
+export async function seedKnownGapsFromFilled(
+  athleteId: string,
+  filled: Partial<Record<KnownGapKey, string>>,
+): Promise<void> {
   const now = new Date();
-  const content = renderKnownGaps(e, now.toISOString().slice(0, 10));
+  const content = renderKnownGapsFromFilled(filled, now.toISOString().slice(0, 10));
 
   const { error } = await supabaseAdmin().from('memory_files').upsert(
     {
@@ -97,4 +108,10 @@ export async function seedKnownGaps(athleteId: string, e: Extracted | null): Pro
     { onConflict: 'athlete_id,file_name' },
   );
   if (error) throw new Error(`seedKnownGaps failed: ${error.message}`);
+}
+
+/** Writes the initial known_gaps.md memory file for an athlete who just finished
+ *  onboarding. Idempotent on (athlete_id, file_name). */
+export async function seedKnownGaps(athleteId: string, e: Extracted | null): Promise<void> {
+  await seedKnownGapsFromFilled(athleteId, filledFromEnrichment(e));
 }

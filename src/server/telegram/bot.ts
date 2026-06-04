@@ -11,6 +11,7 @@ import {
   hardResetOnboarding,
 } from './onboarding/index';
 import { handleCheckinCommand, handleWellnessMessage } from './checkin/dispatcher';
+import { handleV3Message, handleV3Callback } from './onboarding/engine/router';
 import { fetchRecentActivities, hasStravaConnection } from '@/server/strava/activities';
 import { disconnectStrava } from '@/server/strava/disconnect';
 import { getOrCreateCalendarToken } from '@/lib/calendar-token';
@@ -69,7 +70,7 @@ async function sendWelcomeAndConnect(athleteId: string, chatId: number | string)
   const keyboard = new InlineKeyboard().url('Connect Strava', stravaConnectUrl(athleteId));
   await getBot().api.sendMessage(
     chatId,
-    "Welcome! Daybreak needs a Strava connection to work. " +
+    'Welcome! Daybreak needs a Strava connection to work. ' +
       'Connect your Strava account here to begin.',
     { reply_markup: keyboard },
   );
@@ -171,12 +172,21 @@ export async function handleInboundText(ctx: Context): Promise<void> {
     return;
   }
 
-  const state = athlete.onboarding_state as { step?: number } | null;
-  const step = typeof state?.step === 'number' ? state.step : 0;
+  const ob = athlete.onboarding_state as { flow?: string; phase?: string; step?: number } | null;
 
-  if (step < onboardingSteps.length) {
-    await handleOnboardingMessage(ctx, athlete);
-    return;
+  // Onboarding v3: the engine drives every turn until the plan is generated
+  // (phase 'complete'), after which we fall through to the coaching path below.
+  if (ob?.flow === 'v3') {
+    if (ob.phase !== 'complete') {
+      await handleV3Message(ctx, athlete);
+      return;
+    }
+  } else {
+    const step = typeof ob?.step === 'number' ? ob.step : 0;
+    if (step < onboardingSteps.length) {
+      await handleOnboardingMessage(ctx, athlete);
+      return;
+    }
   }
 
   // Post-onboarding: route based on plan state
@@ -262,7 +272,7 @@ export async function handleInboundVoice(ctx: Context): Promise<void> {
     transcript = await transcribeOgg(buf);
   } catch (err) {
     console.error('[bot] voice transcription failed', err);
-    await ctx.reply("Voice transcription is having trouble right now — mind typing it for now?");
+    await ctx.reply('Voice transcription is having trouble right now — mind typing it for now?');
     return;
   }
 
@@ -378,12 +388,14 @@ export async function handleNextAction(
   // transcript (these next-actions bypass the onboarding dispatcher's tap logging).
   const msg = ctx.callbackQuery?.message;
   const rows = msg && 'reply_markup' in msg ? msg.reply_markup?.inline_keyboard : undefined;
-  await supabaseAdmin().from('messages').insert({
-    athlete_id: athlete.id,
-    channel: 'tg',
-    direction: 'in',
-    body: labelForTap(rows, data) ?? data,
-  });
+  await supabaseAdmin()
+    .from('messages')
+    .insert({
+      athlete_id: athlete.id,
+      channel: 'tg',
+      direction: 'in',
+      body: labelForTap(rows, data) ?? data,
+    });
 
   if (data === 'next:calendar') {
     const { url } = await getOrCreateCalendarToken(athlete.id);
@@ -405,7 +417,11 @@ export async function handleNextAction(
 
   if (data === 'next:done') {
     await ctx.answerCallbackQuery();
-    await sendAndLog(athlete.id, chatId, "Sounds good. I'll check in with you in the morning — talk then.");
+    await sendAndLog(
+      athlete.id,
+      chatId,
+      "Sounds good. I'll check in with you in the morning — talk then.",
+    );
     return;
   }
 
@@ -469,7 +485,9 @@ async function handleFreshUpdateCommand(ctx: CommandContext<Context>): Promise<v
   const athlete = await loadOnboardedAthlete(ctx);
   if (!athlete) return;
   if (await hasInFlightCoachingRun(athlete.id)) {
-    await ctx.reply("I'm still working on your last one. Give me a moment and I'll be right with you.");
+    await ctx.reply(
+      "I'm still working on your last one. Give me a moment and I'll be right with you.",
+    );
     return;
   }
   const db = supabaseAdmin();
@@ -499,7 +517,9 @@ async function handleAdjustPlanCommand(ctx: CommandContext<Context>): Promise<vo
   const athlete = await loadOnboardedAthlete(ctx);
   if (!athlete) return;
   if (await hasInFlightCoachingRun(athlete.id)) {
-    await ctx.reply("I'm still working on your last one. Give me a moment and I'll be right with you.");
+    await ctx.reply(
+      "I'm still working on your last one. Give me a moment and I'll be right with you.",
+    );
     return;
   }
   const db = supabaseAdmin();
@@ -567,9 +587,7 @@ async function handleStravaStatusCommand(ctx: CommandContext<Context>): Promise<
   await ctx.reply(lines.join('\n'));
 }
 
-export async function handleDisconnectStravaCommand(
-  ctx: CommandContext<Context>,
-): Promise<void> {
+export async function handleDisconnectStravaCommand(ctx: CommandContext<Context>): Promise<void> {
   const db = supabaseAdmin();
   const chatId = String(ctx.chat.id);
 
@@ -694,6 +712,19 @@ function getBot(): Bot {
       // dismisses every callback once onboarding is complete).
       if (data.startsWith('next:')) {
         await handleNextAction(ctx, athlete, data);
+        return;
+      }
+
+      // Onboarding v3 chips ('v3:<value>') route to the engine. A v3 athlete
+      // never has v2 step callbacks, so dismiss any other tap rather than fall
+      // through to the v2 dispatcher.
+      const obState = athlete.onboarding_state as { flow?: string } | null;
+      if (obState?.flow === 'v3') {
+        if (data.startsWith('v3:')) {
+          await handleV3Callback(ctx, athlete, data);
+        } else {
+          await ctx.answerCallbackQuery();
+        }
         return;
       }
 
