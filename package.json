@@ -21,6 +21,7 @@
     "worker:dev": "tsx watch worker/index.ts",
     "worker:start": "tsx worker/index.ts",
     "clear:plans": "tsx scripts/clear-athlete-plans.ts",
+    "transcript": "tsx scripts/export-transcript.ts",
     "token:mint": "tsx scripts/mint-link-token.ts",
     "test:reset": "tsx scripts/reset-test-athlete.ts",
     "plan:verify": "tsx scripts/verify-plan.ts",

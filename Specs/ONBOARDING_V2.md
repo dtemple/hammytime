@@ -1,6 +1,8 @@
 # Onboarding v2 — flow sketch + execution plan
 
-_Status: proposal. Not yet reflected in `SPEC.md`. Two pieces here reverse locked v1 decisions (Strava-forward ordering revises §3.9; template plan-gen reverses a scope lock + an anti-goal). `SPEC.md` and `CLAUDE.md` stay untouched until David signs off — see "Spec governance" at the end._
+> **⚠️ SUPERSEDED (2026-06-04) for the flow shape.** The Phase-A button beats and the Phase-C enrichment dump described here are replaced by the slot-filling conversational intake in `Specs/ONBOARDING_V3.md` (approved SPEC v0.7.20). What stays load-bearing is the **plumbing v3 reuses** — the Strava-forward derivation (W1), `lookupRace`, the template plan-gen engine (W3), the `known_gaps` mechanism (W5), the calendar feed, and voice. Read this doc for that execution history; read v3 for the current flow.
+
+_Status: built (the v2 flow shipped — SPEC v0.7.12). This doc was the original proposal; kept for execution history. Two pieces here reversed locked v1 decisions (Strava-forward ordering revised §3.9; template plan-gen reversed a scope lock + an anti-goal)._
 
 _Author context: replaces the 7-step, ~15-fixed-question deterministic flow in `src/server/telegram/onboarding/`. Goal is to cut a 30+-message onboarding to roughly a minute of taps plus one optional freeform answer, and to move the plan payoff as early as possible._
 
