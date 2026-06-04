@@ -8,9 +8,9 @@ Hammytime is a multi-tenant Telegram-based marathon coaching bot for a friends-o
 
 ## 2. Source-of-truth rule
 
-**Read `Specs/SPEC.md` before any non-trivial change.**
+**Read the relevant section of `Specs/SPEC.md` before any non-trivial change.** The spec is structured by section (§1–§8, and §3.1–§3.11 within the implementation plan); read the section(s) your change touches rather than the whole file. Then check `Specs/CHANGELOG.md` for a newer entry that supersedes that section — several in-flight features are recorded there as the authoritative record until their §3.x body is rewritten.
 
-Priority order: `Specs/SPEC.md` > `CLAUDE.md` > your prior assumptions.
+Priority order: `Specs/SPEC.md` (+ `Specs/CHANGELOG.md`) > `CLAUDE.md` > your prior assumptions.
 
 If you find a conflict between `CLAUDE.md` and `Specs/SPEC.md`, the spec wins. Flag the drift in your reply so the CLAUDE.md can be corrected.
 
@@ -178,10 +178,11 @@ npm run token:mint -- <email> [ttl]  # mint a start token; prints a paste-ready 
 
 ## 8. Session status
 
-`claude-status.md` in the repo root is the running project snapshot. It records: where we are, what has been done, what is left, the end goal, important milestones, deferred problems, and the likely next task.
+`claude-status.md` in the repo root is the running project snapshot. It records: where we are, what has been done, what is left, the end goal, important milestones, deferred problems, and the likely next task. It is a **snapshot, not a log** — older session-by-session history lives in `Specs/archive/session-log.md` and git, not here.
 
 - Read `claude-status.md` at the start of every session to orient yourself.
 - Update it at the end of every session — even if the only change is marking a task complete or adding a new deferred item.
+- Keep it a snapshot. Add a brief entry under "Last sessions" at the top, and when you do, move the oldest of the inline sessions (keep ~2) into `Specs/archive/session-log.md`. Refresh "Current status" and "Likely next task" to present reality rather than appending another dated block — do not let this file grow back into an append-only log.
 - If a session ends with open threads, capture them in the "deferred / open questions" section rather than leaving them in conversation context.
 
 ---
