@@ -28,9 +28,12 @@ import {
   loadV3State,
   saveV3State,
   isV3OnboardingComplete,
+  inferExperienceTier,
+  seedStravaInferences,
   DEFAULT_OPTIONAL_BUDGET,
   V3_SCHEMA_VERSION,
 } from '../slot-state';
+import type { StravaFitnessSnapshot } from '@/server/strava/activities';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyDB = any;
@@ -300,5 +303,89 @@ describe('initialV3State', () => {
     expect(DEFAULT_OPTIONAL_BUDGET).toBe(8);
     expect(s.slots).toEqual({});
     expect(s.asked).toEqual([]);
+  });
+});
+
+// --- W3: Strava-inference pre-seed + experience-tier heuristic ---
+
+function snapshot(overrides: Partial<StravaFitnessSnapshot> = {}): StravaFitnessSnapshot {
+  return {
+    window_days: 56,
+    activity_count: 20,
+    run_count: 20,
+    weeks_observed: 8,
+    recent_weekly_mileage_mi: 20,
+    avg_weekly_mileage_mi: 18,
+    longest_run_mi: 9,
+    runs_per_week: 4,
+    suggested_days_per_week: 4,
+    dominant_long_run_weekday: 0,
+    road_trail_mix: { road: 1, trail: 0 },
+    ...overrides,
+  };
+}
+
+describe('inferExperienceTier', () => {
+  it('reads clear high volume as experienced', () => {
+    expect(
+      inferExperienceTier(snapshot({ recent_weekly_mileage_mi: 35, longest_run_mi: 15 })),
+    ).toBe('experienced');
+  });
+
+  it('reads clear low volume as beginner', () => {
+    expect(inferExperienceTier(snapshot({ recent_weekly_mileage_mi: 6, longest_run_mi: 3 }))).toBe(
+      'beginner',
+    );
+  });
+
+  it('returns null through the ambiguous middle (for_fun / some_training is intent, not volume)', () => {
+    expect(inferExperienceTier(snapshot({ recent_weekly_mileage_mi: 18, longest_run_mi: 9 }))).toBe(
+      null,
+    );
+  });
+
+  it('returns null when the signal is too thin to read', () => {
+    expect(inferExperienceTier(snapshot({ run_count: 2, weeks_observed: 1 }))).toBe(null);
+  });
+});
+
+describe('seedStravaInferences', () => {
+  it('seeds days/week + long-run day as inferred/unconfirmed', () => {
+    const slots = seedStravaInferences(
+      {},
+      snapshot({ suggested_days_per_week: 5, dominant_long_run_weekday: 6 }),
+    );
+    expect(slots.days_per_week).toEqual({ value: 5, provenance: 'inferred', confirmed: false });
+    expect(slots.long_run_day).toEqual({ value: 6, provenance: 'inferred', confirmed: false });
+  });
+
+  it('omits long-run day when Strava has no dominant weekday', () => {
+    const slots = seedStravaInferences({}, snapshot({ dominant_long_run_weekday: null }));
+    expect(slots.long_run_day).toBeUndefined();
+    expect(slots.days_per_week).toBeDefined();
+  });
+
+  it('seeds an experience tier only at the confident extremes', () => {
+    const exp = seedStravaInferences(
+      {},
+      snapshot({ recent_weekly_mileage_mi: 35, longest_run_mi: 15 }),
+    );
+    expect(exp.experience_tier?.value).toBe('experienced');
+    const mid = seedStravaInferences(
+      {},
+      snapshot({ recent_weekly_mileage_mi: 18, longest_run_mi: 9 }),
+    );
+    expect(mid.experience_tier).toBeUndefined();
+  });
+
+  it('seeds nothing when there is no running signal', () => {
+    expect(seedStravaInferences({}, snapshot({ run_count: 0 }))).toEqual({});
+    expect(seedStravaInferences({}, null)).toEqual({});
+  });
+
+  it('preserves identity slots already on the map', () => {
+    const slots = seedStravaInferences({ name: sv('Sam') }, snapshot());
+    expect(slots.name?.value).toBe('Sam');
+    expect(slots.days_per_week).toBeDefined();
   });
 });

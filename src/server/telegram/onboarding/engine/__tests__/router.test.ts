@@ -58,7 +58,20 @@ vi.mock('../../slots/slot-state', async (orig) => ({
   saveV3State,
 }));
 
-import { handleV3Message } from '../router';
+// Partial-mock known-gaps-memory: keep the real pure parseKnownGaps/render, stub
+// the DB read + write so the gap-walk turn can be driven without Supabase.
+const { loadKnownGapsContent, seedKnownGapsFromFilled } = vi.hoisted(() => ({
+  loadKnownGapsContent: vi.fn().mockResolvedValue(''),
+  seedKnownGapsFromFilled: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('../../known-gaps-memory', async (orig) => ({
+  ...(await orig<typeof import('../../known-gaps-memory')>()),
+  loadKnownGapsContent,
+  seedKnownGapsFromFilled,
+}));
+
+import { handleV3Message, handleV3Callback } from '../router';
+import { KNOWN_GAPS } from '@/lib/known-gaps';
 import { initialV3State, type V3OnboardingState } from '../../slots/slot-state';
 import type { SlotState } from '../../slots/schema';
 import type { Provenance, SlotValue } from '../../slots/provenance';
@@ -192,6 +205,129 @@ describe('router — generate handoff', () => {
     expect(sendMessage).toHaveBeenCalledWith(
       99,
       expect.stringMatching(/days per week/),
+      expect.anything(),
+    );
+  });
+});
+
+// --- W3: /edit_profile fork + the "Finish my profile" gap-walk ---
+
+function cbCtx(id = 'cb1') {
+  return {
+    chat: { id: 99 },
+    from: { id: 99 },
+    answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+    editMessageReplyMarkup: vi.fn().mockResolvedValue(undefined),
+    callbackQuery: { id, message: { reply_markup: { inline_keyboard: [] } } },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
+}
+
+const OPEN_GAPS_MD = ['# Known gaps', '', '- [open] strength_equipment: x', '- [open] age: y'].join(
+  '\n',
+);
+
+describe('edit_profile — fork', () => {
+  it('"Update something" opens the floor without changing state', async () => {
+    await handleV3Callback(cbCtx(), athlete, 'v3:edit:update');
+    expect(sendMessage).toHaveBeenCalledWith(
+      99,
+      expect.stringMatching(/tell me what/i),
+      expect.anything(),
+    );
+    expect(saveV3State).not.toHaveBeenCalled();
+  });
+
+  it('"Finish my profile" queues the open gaps and asks the first', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'complete',
+    } as V3OnboardingState);
+    loadKnownGapsContent.mockResolvedValue(OPEN_GAPS_MD);
+
+    await handleV3Callback(cbCtx(), athlete, 'v3:edit:finish');
+
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.edit_mode).toEqual({
+      kind: 'finish_gaps',
+      current_gap: 'strength_equipment',
+      remaining: ['age'],
+    });
+    expect(sendMessage).toHaveBeenCalledWith(
+      99,
+      KNOWN_GAPS.strength_equipment.question,
+      expect.anything(),
+    );
+  });
+
+  it('"Finish my profile" wraps up when there are no open gaps', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'complete',
+    } as V3OnboardingState);
+    loadKnownGapsContent.mockResolvedValue('# Known gaps\n');
+
+    await handleV3Callback(cbCtx(), athlete, 'v3:edit:finish');
+
+    expect(saveV3State).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith(
+      99,
+      expect.stringMatching(/all filled in/i),
+      expect.anything(),
+    );
+  });
+});
+
+describe('edit_profile — gap-walk turn', () => {
+  it('fills the asked gap, writes known_gaps.md, and asks the next', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'complete',
+      slots: completeSlots(),
+      edit_mode: { kind: 'finish_gaps', current_gap: 'age', remaining: ['target_time'] },
+    } as V3OnboardingState);
+    loadKnownGapsContent.mockResolvedValue(OPEN_GAPS_MD);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({ fills: [{ slot: 'age', value: 42, provenance: 'stated' }] }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(10, "I'm 42"), athlete);
+
+    expect(seedKnownGapsFromFilled).toHaveBeenCalledWith(
+      'ath-1',
+      expect.objectContaining({ age: '42' }),
+    );
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.edit_mode?.current_gap).toBe('target_time');
+    expect(sendMessage).toHaveBeenCalledWith(
+      99,
+      KNOWN_GAPS.target_time.question,
+      expect.anything(),
+    );
+  });
+
+  it('clears edit_mode and wraps up after the last gap', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'complete',
+      slots: completeSlots(),
+      edit_mode: { kind: 'finish_gaps', current_gap: 'age', remaining: [] },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({ fills: [{ slot: 'age', value: 40, provenance: 'stated' }] }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(11, '40'), athlete);
+
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.edit_mode).toBeUndefined();
+    expect(sendMessage).toHaveBeenCalledWith(
+      99,
+      expect.stringMatching(/that's everything/i),
       expect.anything(),
     );
   });

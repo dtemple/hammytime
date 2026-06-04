@@ -172,12 +172,19 @@ export async function handleInboundText(ctx: Context): Promise<void> {
     return;
   }
 
-  const ob = athlete.onboarding_state as { flow?: string; phase?: string; step?: number } | null;
+  const ob = athlete.onboarding_state as {
+    flow?: string;
+    phase?: string;
+    step?: number;
+    edit_mode?: unknown;
+  } | null;
 
   // Onboarding v3: the engine drives every turn until the plan is generated
   // (phase 'complete'), after which we fall through to the coaching path below.
+  // A completed athlete re-enters the engine while an /edit_profile gap-walk is
+  // active (edit_mode set), so their answers route to the walk, not the coach.
   if (ob?.flow === 'v3') {
-    if (ob.phase !== 'complete') {
+    if (ob.phase !== 'complete' || ob.edit_mode) {
       await handleV3Message(ctx, athlete);
       return;
     }
@@ -428,9 +435,17 @@ export async function handleNextAction(
   await ctx.answerCallbackQuery();
 }
 
+// Whether an athlete has finished onboarding, across both flows. v3 stores
+// { flow:'v3', phase } with no `step` (so a step-only check wrongly reports a
+// completed v3 athlete as still onboarding); v2 stores { step }.
+function isOnboarded(ob: { flow?: string; phase?: string; step?: number } | null): boolean {
+  if (ob?.flow === 'v3') return ob.phase === 'complete';
+  return (typeof ob?.step === 'number' ? ob.step : 0) >= onboardingSteps.length;
+}
+
 // Loads the athlete for a command, or replies with the standard guard message
 // and returns null. Mirrors the athlete/onboarding guards used by /checkin and
-// /calendar. Used by the two on-demand coaching commands below.
+// /calendar. Used by the on-demand coaching commands below.
 async function loadOnboardedAthlete(ctx: CommandContext<Context>): Promise<AthleteRow | null> {
   const db = supabaseAdmin();
   const { data: athlete } = await db
@@ -442,8 +457,11 @@ async function loadOnboardedAthlete(ctx: CommandContext<Context>): Promise<Athle
     await ctx.reply('Use your invite link to get started.');
     return null;
   }
-  const ob = athlete.onboarding_state as { step?: number } | null;
-  if ((typeof ob?.step === 'number' ? ob.step : 0) < onboardingSteps.length) {
+  if (
+    !isOnboarded(
+      athlete.onboarding_state as { flow?: string; phase?: string; step?: number } | null,
+    )
+  ) {
     await ctx.reply('Finish onboarding first.');
     return null;
   }
@@ -537,6 +555,48 @@ async function handleAdjustPlanCommand(ctx: CommandContext<Context>): Promise<vo
     athlete.id,
     ctx.chat.id,
     "On it. I'll take a look at your plan and message you in a moment.",
+  );
+}
+
+// /edit_profile: the persistent affordance the v3 orientation promises ("you can
+// always edit your profile in the menu later"). A v3 athlete gets a fork —
+// "Update something" (say anything; it's folded in mid-onboarding by the engine,
+// or handled by the coach once onboarding's done) or "Finish my profile" (walk
+// the open known-gaps, W3.2). Works during and after onboarding. A v2 athlete has
+// no slot engine, so it degrades to a plain "just tell me" prompt.
+async function handleEditProfileCommand(ctx: CommandContext<Context>): Promise<void> {
+  const db = supabaseAdmin();
+  const { data: athlete } = await db
+    .from('athletes')
+    .select('*')
+    .eq('telegram_chat_id', String(ctx.chat.id))
+    .maybeSingle();
+  if (!athlete) {
+    await ctx.reply('Use your invite link to get started.');
+    return;
+  }
+  await db
+    .from('messages')
+    .insert({ athlete_id: athlete.id, channel: 'tg', direction: 'in', body: '/edit_profile' });
+
+  const ob = athlete.onboarding_state as { flow?: string } | null;
+  if (ob?.flow === 'v3') {
+    const prompt = 'What would you like to do?';
+    const kb = new InlineKeyboard()
+      .text('Update something', 'v3:edit:update')
+      .row()
+      .text('Finish my profile', 'v3:edit:finish');
+    await ctx.reply(prompt, { reply_markup: kb });
+    await db
+      .from('messages')
+      .insert({ athlete_id: athlete.id, channel: 'tg', direction: 'out', body: prompt });
+    return;
+  }
+
+  await sendAndLog(
+    athlete.id,
+    ctx.chat.id,
+    "Tell me what you'd like to change and I'll take care of it.",
   );
 }
 
@@ -642,8 +702,12 @@ function getBot(): Bot {
         await ctx.reply('Use your invite link to get started.');
         return;
       }
-      const obState = athlete.onboarding_state as { step?: number } | null;
-      if ((typeof obState?.step === 'number' ? obState.step : 0) < onboardingSteps.length) {
+      const obState = athlete.onboarding_state as {
+        flow?: string;
+        phase?: string;
+        step?: number;
+      } | null;
+      if (!isOnboarded(obState)) {
         await ctx.reply('Finish onboarding first.');
         return;
       }
@@ -655,6 +719,7 @@ function getBot(): Bot {
     _bot.command('calendar', handleCalendarCommand);
     _bot.command('fresh_update', handleFreshUpdateCommand);
     _bot.command('adjust_plan', handleAdjustPlanCommand);
+    _bot.command('edit_profile', handleEditProfileCommand);
     _bot.command('cancel', async (ctx) => {
       const db = supabaseAdmin();
       const { data: athlete } = await db

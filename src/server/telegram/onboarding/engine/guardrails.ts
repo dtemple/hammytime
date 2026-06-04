@@ -171,24 +171,71 @@ function buildAskMessage(slot: SlotKey): string {
   return `Before I build your plan I still need your ${slotLabel(slot)}.`;
 }
 
+const DISTANCE_LABELS: Record<string, string> = {
+  '5k': '5K',
+  '10k': '10K',
+  half: 'half marathon',
+  marathon: 'marathon',
+  keep_fit: 'general fitness',
+};
+
+const TIER_LABELS: Record<string, string> = {
+  beginner: 'beginner',
+  for_fun: 'running for fun',
+  some_training: 'some structured training',
+  experienced: 'experienced',
+};
+
+/** The goal line: a committed race (name + date), an intended distance with a
+ *  rough timeframe, a no-race base, or just the distance. */
+function recapGoalLine(s: SlotState): string {
+  const distance = s.goal_distance?.value as string | undefined;
+  if (distance === 'keep_fit') return '• Goal: staying fit, no race on the calendar';
+
+  const distLabel = distance ? (DISTANCE_LABELS[distance] ?? distance) : 'race';
+  const race = s.goal_race?.value as string | undefined;
+  const date = s.goal_date?.value as string | undefined;
+
+  if (race && date) return `• Race: ${race} — ${date} (${distLabel})`;
+  if (date) return `• Goal: ${distLabel}, around ${date}`;
+  return `• Goal: ${distLabel}`;
+}
+
+/** The injury line, from the described detail if there is one, else the status. */
+function recapInjuryLine(s: SlotState): string | null {
+  const detail = s.injury_detail?.value as { body_part: string; status: string } | undefined;
+  if (detail?.body_part) return `• Injuries: ${detail.body_part} (${detail.status})`;
+  const status = s.injury_status?.value as string | undefined;
+  if (status === 'none') return '• Injuries: nothing bothering you';
+  if (status === 'unknown' || status == null) return null;
+  return `• Injuries: ${status}`;
+}
+
 export function buildRecapMessage(state: V3OnboardingState): string {
   const s = state.slots;
-  const line = (slot: SlotKey) => {
-    const v = s[slot];
-    return v && v.value != null ? `• ${slotLabel(slot)}: ${formatSlotValue(slot, v.value)}` : null;
-  };
-  const order: SlotKey[] = [
-    'goal_distance',
-    'goal_race',
-    'goal_date',
-    'experience_tier',
-    'days_per_week',
-    'long_run_day',
-    'injury_status',
-    'target_time',
-  ];
-  const bits = order.map(line).filter(Boolean);
-  return ["Here's what I've got:", ...bits, '', 'Look right?'].join('\n');
+
+  const lines: string[] = [recapGoalLine(s)];
+
+  const tier = s.experience_tier?.value as string | undefined;
+  if (tier) lines.push(`• Experience: ${TIER_LABELS[tier] ?? tier}`);
+
+  const days = s.days_per_week?.value;
+  const longDay = s.long_run_day?.value;
+  if (typeof days === 'number') {
+    const lr = typeof longDay === 'number' ? `, long run ${WEEKDAYS[longDay]}` : '';
+    lines.push(`• ${days} days a week${lr}`);
+  }
+
+  const injury = recapInjuryLine(s);
+  if (injury) lines.push(injury);
+
+  if (typeof s.target_time?.value === 'number') {
+    lines.push(`• Goal time: ${formatSlotValue('target_time', s.target_time.value)}`);
+  }
+
+  const name = s.name?.value as string | undefined;
+  const intro = name ? `Here's what I've got for you, ${name}:` : "Here's what I've got:";
+  return [intro, ...lines, '', 'Look right?'].join('\n');
 }
 
 // ---------------------------------------------------------------------------

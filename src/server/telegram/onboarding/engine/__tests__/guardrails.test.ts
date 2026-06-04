@@ -5,6 +5,7 @@ import {
   firstOpenRequired,
   firstUnconfirmedInferred,
   enforceGuardrails,
+  buildRecapMessage,
 } from '../guardrails';
 import { initialV3State, type V3OnboardingState } from '../../slots/slot-state';
 import type { SlotState } from '../../slots/schema';
@@ -195,5 +196,82 @@ describe('enforceGuardrails — passthrough + asked tracking', () => {
       out({ next_action: 'ask', asked_slot: 'goal_type' }),
     );
     expect(r.state.phase).toBe('intake');
+  });
+});
+
+// --- W3: field-targeted correction (a fix re-opens one slot, rest intact) ---
+
+describe('mergeFills — field-targeted correction', () => {
+  it('updates only the named slot and leaves the rest untouched', () => {
+    const slots = coreSlots('race');
+    const before = slots.long_run_day;
+    const merged = mergeFills(slots, [{ slot: 'days_per_week', value: 5, provenance: 'stated' }]);
+    expect(merged.days_per_week?.value).toBe(5);
+    // every other slot is the same object reference — nothing else was rewritten
+    expect(merged.long_run_day).toBe(before);
+    expect(merged.goal_distance).toBe(slots.goal_distance);
+    expect(merged.experience_tier).toBe(slots.experience_tier);
+  });
+});
+
+// --- W3: a pre-seeded inferred plan-driving slot forces a confirm before gen ---
+
+describe('pre-seeded Strava inference → forced confirm', () => {
+  it('blocks generate on an unconfirmed inferred days_per_week with a confirm turn', () => {
+    const slots = coreSlots('race');
+    // simulate the strava-resume seed: inferred, unconfirmed
+    slots.days_per_week = sv(4, 'inferred', false);
+    const r = enforceGuardrails(stateWith(slots), out({ next_action: 'generate' }));
+    expect(r.action).toBe('confirm');
+    expect(r.overridden).toBe(true);
+  });
+
+  it('firstUnconfirmedInferred flags the seeded slot, and a confirm clears it', () => {
+    const slots = coreSlots('race');
+    slots.long_run_day = sv(0, 'inferred', false);
+    expect(firstUnconfirmedInferred(slots)).toBe('long_run_day');
+    // athlete confirms → flips to confirmed; no longer blocks
+    const confirmed = mergeFills(slots, [{ slot: 'long_run_day', value: 0, provenance: 'stated' }]);
+    expect(firstUnconfirmedInferred(confirmed)).toBe(null);
+  });
+});
+
+// --- W3: the full-picture recap copy ---
+
+describe('buildRecapMessage', () => {
+  it('echoes a committed race, schedule, injuries, and goal time in the athlete voice', () => {
+    const slots: SlotState = {
+      ...coreSlots('race'),
+      name: sv('Sam'),
+      goal_race: sv('CIM'),
+      goal_date: sv('2026-12-06'),
+      target_time: sv(13500), // 3:45:00
+      injury_status: sv('none'),
+    };
+    const msg = buildRecapMessage(stateWith(slots));
+    expect(msg).toContain('Sam'); // personal greeting
+    expect(msg).toContain('CIM');
+    expect(msg).toContain('2026-12-06');
+    expect(msg).toContain('marathon');
+    expect(msg).toContain('nothing bothering you'); // injury_status none
+    expect(msg).toContain('3:45:00'); // goal time rendered
+    expect(msg).toContain('Look right?');
+  });
+
+  it('renders a general-fitness goal without a race', () => {
+    const slots: SlotState = { ...coreSlots('general_fitness'), goal_distance: sv('keep_fit') };
+    const msg = buildRecapMessage(stateWith(slots));
+    expect(msg).toContain('no race');
+    expect(msg).not.toContain('Race:');
+  });
+
+  it('surfaces a described injury over the bare status', () => {
+    const slots: SlotState = {
+      ...coreSlots('race'),
+      injury_status: sv('monitoring'),
+      injury_detail: sv({ body_part: 'left knee', status: 'monitoring' }),
+    };
+    const msg = buildRecapMessage(stateWith(slots));
+    expect(msg).toContain('left knee');
   });
 });

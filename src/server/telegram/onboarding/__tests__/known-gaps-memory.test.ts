@@ -3,7 +3,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
 
 import { supabaseAdmin } from '@/lib/db';
-import { renderKnownGaps, seedKnownGaps, KNOWN_GAPS_FILE } from '../known-gaps-memory';
+import {
+  renderKnownGaps,
+  renderKnownGapsFromFilled,
+  parseKnownGaps,
+  seedKnownGaps,
+  KNOWN_GAPS_FILE,
+} from '../known-gaps-memory';
 import type { Extracted } from '../steps/05-enrichment';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -48,7 +54,9 @@ describe('renderKnownGaps', () => {
       extraction({
         age: prov(38, 'stated'),
         target_time_sec: prov(14400, 'stated'),
-        tuneup_races: [{ name: 'Berkeley Half', date: '2026-10-18', provenance: 'stated' }] as never,
+        tuneup_races: [
+          { name: 'Berkeley Half', date: '2026-10-18', provenance: 'stated' },
+        ] as never,
         schedule_notes: prov('early mornings', 'stated'),
       }),
       TODAY,
@@ -97,5 +105,43 @@ describe('seedKnownGaps', () => {
     const upsert = vi.fn().mockResolvedValue({ error: { message: 'boom' } });
     (supabaseAdmin as AnyMock).mockReturnValue({ from: vi.fn().mockReturnValue({ upsert }) });
     await expect(seedKnownGaps('a1', null)).rejects.toThrow('seedKnownGaps failed: boom');
+  });
+});
+
+describe('parseKnownGaps', () => {
+  it('extracts open gap keys in file order (the inverse of the renderer)', () => {
+    const md = renderKnownGapsFromFilled({}, TODAY); // everything open
+    const { open, filled } = parseKnownGaps(md);
+    // GAP_ORDER: strength_equipment, target_time, tune_up_races, schedule_constraints, age, recent_long_run
+    expect(open).toEqual([
+      'strength_equipment',
+      'target_time',
+      'tune_up_races',
+      'schedule_constraints',
+      'age',
+      'recent_long_run',
+    ]);
+    expect(filled).toEqual({});
+  });
+
+  it('separates filled gaps from open ones and recovers their values', () => {
+    const md = renderKnownGapsFromFilled({ age: '42', strength_equipment: 'gym' }, TODAY);
+    const { open, filled } = parseKnownGaps(md);
+    expect(filled).toEqual({ age: '42', strength_equipment: 'gym' });
+    expect(open).not.toContain('age');
+    expect(open).not.toContain('strength_equipment');
+    expect(open).toContain('target_time');
+  });
+
+  it('round-trips: render → parse → re-render is stable', () => {
+    const filledIn = { target_time: '3:45:00', schedule_constraints: 'no Mondays' };
+    const md1 = renderKnownGapsFromFilled(filledIn, TODAY);
+    const { filled } = parseKnownGaps(md1);
+    expect(renderKnownGapsFromFilled(filled, TODAY)).toBe(md1);
+  });
+
+  it('ignores non-gap lines and bogus keys', () => {
+    const md = ['# Known gaps', '', '- [open] not_a_real_gap: junk', 'random text'].join('\n');
+    expect(parseKnownGaps(md)).toEqual({ open: [], filled: {} });
   });
 });

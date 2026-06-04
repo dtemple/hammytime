@@ -65,6 +65,39 @@ const HEADER = [
   '',
 ].join('\n');
 
+export interface ParsedGaps {
+  /** Open gap keys, in file order (which is GAP_ORDER). */
+  open: KnownGapKey[];
+  /** Already-filled gaps and their values. */
+  filled: Partial<Record<KnownGapKey, string>>;
+}
+
+const VALID_GAP_KEYS = new Set<string>(Object.keys(KNOWN_GAPS));
+
+/** Parse a `known_gaps.md` body back into its open keys and filled values — the
+ *  inverse of `renderKnownGapsFromFilled`. The /edit_profile "Finish my profile"
+ *  walk (onboarding v3 W3) uses `open` to build its ask-queue and `filled` to
+ *  preserve already-answered gaps when it re-renders the file. Tolerant of
+ *  whitespace; ignores lines that aren't gap entries. */
+export function parseKnownGaps(md: string): ParsedGaps {
+  const open: KnownGapKey[] = [];
+  const filled: Partial<Record<KnownGapKey, string>> = {};
+  for (const raw of md.split('\n')) {
+    const line = raw.trim();
+    const openKey = line.match(/^- \[open\]\s+([a-z_]+):/)?.[1];
+    if (openKey && VALID_GAP_KEYS.has(openKey)) {
+      open.push(openKey as KnownGapKey);
+      continue;
+    }
+    const filledM = line.match(/^- \[filled[^\]]*\]\s+([a-z_]+):\s*(.*)$/);
+    const filledKey = filledM?.[1];
+    if (filledKey && VALID_GAP_KEYS.has(filledKey)) {
+      filled[filledKey as KnownGapKey] = (filledM?.[2] ?? '').trim();
+    }
+  }
+  return { open, filled };
+}
+
 /** Pure renderer from a pre-computed filled-gap map. The v3 engine builds the map
  *  with `slotsToGaps` (slots/schema.ts); v2 builds it from enrichment. */
 export function renderKnownGapsFromFilled(
@@ -114,4 +147,17 @@ export async function seedKnownGapsFromFilled(
  *  onboarding. Idempotent on (athlete_id, file_name). */
 export async function seedKnownGaps(athleteId: string, e: Extracted | null): Promise<void> {
   await seedKnownGapsFromFilled(athleteId, filledFromEnrichment(e));
+}
+
+/** Read an athlete's known_gaps.md body, or '' if there isn't one yet. Used by
+ *  the /edit_profile "Finish my profile" walk (onboarding v3 W3) to find the
+ *  open gaps. */
+export async function loadKnownGapsContent(athleteId: string): Promise<string> {
+  const { data } = await supabaseAdmin()
+    .from('memory_files')
+    .select('content_md')
+    .eq('athlete_id', athleteId)
+    .eq('file_name', KNOWN_GAPS_FILE)
+    .maybeSingle();
+  return data?.content_md ?? '';
 }

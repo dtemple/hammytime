@@ -10,7 +10,12 @@ import {
 import { advanceIfSubstep, loadOnboardingState } from './state';
 import { tzLabel } from './timezones';
 import { slotValue } from './slots/provenance';
-import { initialV3State, isV3Enabled, seedV3IfAwaitingStrava } from './slots/slot-state';
+import {
+  initialV3State,
+  isV3Enabled,
+  seedStravaInferences,
+  seedV3IfAwaitingStrava,
+} from './slots/slot-state';
 import type { ProfileConfirmPartial } from './steps/00-profile-confirm';
 import type { OnboardingState } from './types';
 
@@ -88,6 +93,9 @@ export async function resumeAfterStrava(athleteId: string): Promise<boolean> {
     if (firstname) v3.slots.name = slotValue(firstname, 'inferred', true);
     if (timezone) v3.slots.timezone = slotValue(timezone, 'inferred', true);
     if (sex) v3.slots.sex = slotValue(sex, 'inferred', true);
+    // Seed the Strava-inferable training-shape slots as inferred/unconfirmed so
+    // Opener 2 states them back for confirmation (W3) rather than asking cold.
+    v3.slots = seedStravaInferences(v3.slots, snapshot);
 
     const won = await seedV3IfAwaitingStrava(athleteId, v3);
     if (!won) return false;

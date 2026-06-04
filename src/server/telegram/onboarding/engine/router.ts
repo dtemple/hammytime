@@ -17,11 +17,17 @@ import { sendDavidAlert } from '@/server/admin/alerts';
 import { botApiForChat } from '../../bot';
 import { selectionKeyboardFromTap, labelForTap } from '../dispatcher';
 import { lookupRace } from '@/server/agent/race-lookup';
+import { KNOWN_GAPS, type KnownGapKey } from '@/lib/known-gaps';
 import { loadV3State, saveV3State, type V3OnboardingState } from '../slots/slot-state';
-import type { GoalDistanceValue, SlotState } from '../slots/schema';
+import { slotsToGaps, type GoalDistanceValue, type SlotState } from '../slots/schema';
 import { slotValue } from '../slots/provenance';
+import {
+  loadKnownGapsContent,
+  parseKnownGaps,
+  seedKnownGapsFromFilled,
+} from '../known-gaps-memory';
 import { callExtractAndAdvance, logOnboardingRun, type Chip } from './extract-and-advance';
-import { enforceGuardrails } from './guardrails';
+import { enforceGuardrails, mergeFills } from './guardrails';
 import { loadRecentHistory } from './history';
 import { resolveFinishTime } from './numeric';
 import { withTyping } from './typing';
@@ -91,6 +97,12 @@ async function runTurn({ athlete, chatId, text, dedupKey, logBody }: TurnInput):
   const athleteId = athlete.id;
   const state = await loadV3State(athleteId);
   if (!state) return; // not a v3 athlete (gated upstream)
+
+  // /edit_profile "Finish my profile" walk owns the turn while active (W3).
+  if (state.edit_mode?.kind === 'finish_gaps') {
+    await runGapWalkTurn({ athlete, chatId, text, dedupKey, logBody }, state);
+    return;
+  }
 
   if (dedupKey && state.last_processed_key === dedupKey) return; // Telegram retry
 
@@ -323,6 +335,133 @@ async function alertComplete(athleteId: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// /edit_profile (W3): the fork + the "Finish my profile" known-gaps walk
+// ---------------------------------------------------------------------------
+
+function gapQuestion(key: KnownGapKey): string {
+  return KNOWN_GAPS[key].question;
+}
+
+/** Dispatch an /edit_profile fork tap. "Update something" just opens the floor —
+ *  the athlete's next message is folded in by the engine (mid-onboarding) or the
+ *  coach (after). "Finish my profile" starts the gap-walk. */
+async function handleEditFork(
+  athlete: AthleteRow,
+  chatId: number | string,
+  value: 'edit:update' | 'edit:finish',
+  label: string | null,
+): Promise<void> {
+  await logInbound(athlete.id, label ?? value);
+  if (value === 'edit:update') {
+    await sendV3(athlete.id, chatId, 'Go ahead — tell me what to add or change.');
+    return;
+  }
+  await startGapWalk(athlete, chatId);
+}
+
+/** Begin the "Finish my profile" walk: queue the open known-gaps and ask the
+ *  first. No-op-ish with a friendly note if there's nothing to fill or the
+ *  athlete is still mid-onboarding (gaps aren't seeded until completion). */
+async function startGapWalk(athlete: AthleteRow, chatId: number | string): Promise<void> {
+  const state = await loadV3State(athlete.id);
+  if (!state) return;
+
+  if (state.phase !== 'complete') {
+    await sendV3(
+      athlete.id,
+      chatId,
+      "We're still going through it — keep chatting with me and I'll cover everything.",
+    );
+    return;
+  }
+
+  const { open } = parseKnownGaps(await loadKnownGapsContent(athlete.id));
+  if (open.length === 0) {
+    await sendV3(
+      athlete.id,
+      chatId,
+      "Your profile's all filled in — nothing left for me to ask. Anything you want to change, just tell me.",
+    );
+    return;
+  }
+
+  const first = open[0]!; // length > 0 checked above
+  await saveV3State(athlete.id, {
+    ...state,
+    edit_mode: { kind: 'finish_gaps', current_gap: first, remaining: open.slice(1) },
+  });
+  await sendV3(athlete.id, chatId, gapQuestion(first));
+}
+
+/** One turn of the gap-walk: extract the answer to the current gap, write it
+ *  into known_gaps.md if it landed, then ask the next gap or wrap up. The queue
+ *  (`remaining`) guarantees each gap is asked once and the walk terminates even
+ *  when an answer doesn't parse. Writes only known_gaps.md — no DB re-commit
+ *  (the coach reads the filled gap from there). */
+async function runGapWalkTurn(
+  { athlete, chatId, text, dedupKey, logBody }: TurnInput,
+  state: V3OnboardingState,
+): Promise<void> {
+  const athleteId = athlete.id;
+  const em = state.edit_mode;
+  if (em?.kind !== 'finish_gaps') return;
+  if (dedupKey && state.last_processed_key === dedupKey) return; // Telegram retry
+
+  await logInbound(athleteId, logBody ?? text);
+
+  await withTyping(chatId, async () => {
+    // Reuse the engine's extraction to parse the freeform answer into slots; we
+    // ignore its message/next_action — the walk owns the conversation.
+    let slots = state.slots;
+    try {
+      const history = await loadRecentHistory(athleteId, 8);
+      const startedAt = new Date().toISOString();
+      const result = await callExtractAndAdvance({ state, history, latest: text, athleteId });
+      void logOnboardingRun(athleteId, startedAt, result.inputTokens, result.outputTokens);
+      slots = mergeFills(state.slots, result.output.fills);
+    } catch (err) {
+      console.error('[v3] gap-walk extract failed', err);
+      // Fall through — still advance so a parse failure can't strand the walk.
+    }
+
+    // Persist every gap the answer just filled (stated only) — not only the one
+    // asked: "I'm 42, and I run before work" fills age AND schedule_constraints,
+    // and both are worth capturing while the athlete is volunteering them.
+    const gapValues = slotsToGaps(slots);
+    const { filled } = parseKnownGaps(await loadKnownGapsContent(athleteId));
+    const merged = { ...filled, ...gapValues };
+    if (Object.keys(merged).some((k) => merged[k as KnownGapKey] !== filled[k as KnownGapKey])) {
+      await seedKnownGapsFromFilled(athleteId, merged).catch((e) =>
+        console.error('[v3] gap-walk write failed', e),
+      );
+    }
+
+    const [nextGap, ...rest] = em.remaining;
+    if (nextGap) {
+      await saveV3State(athleteId, {
+        ...state,
+        slots,
+        edit_mode: { kind: 'finish_gaps', current_gap: nextGap, remaining: rest },
+        last_processed_key: dedupKey ?? state.last_processed_key,
+      });
+      await sendV3(athleteId, chatId, gapQuestion(nextGap));
+    } else {
+      await saveV3State(athleteId, {
+        ...state,
+        slots,
+        edit_mode: undefined,
+        last_processed_key: dedupKey ?? state.last_processed_key,
+      });
+      await sendV3(
+        athleteId,
+        chatId,
+        "Got it — that's everything. I'll put it to work in your next update.",
+      );
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Public entry points (called from bot.ts)
 // ---------------------------------------------------------------------------
 
@@ -357,6 +496,12 @@ export async function handleV3Callback(
   if (collapsed)
     await ctx.editMessageReplyMarkup({ reply_markup: collapsed }).catch(() => undefined);
   else await ctx.editMessageReplyMarkup().catch(() => undefined);
+
+  // /edit_profile fork taps dispatch to the menu, not a conversational turn (W3).
+  if (value === 'edit:update' || value === 'edit:finish') {
+    await handleEditFork(athlete, chatId, value, label);
+    return;
+  }
 
   await runTurn({
     athlete,

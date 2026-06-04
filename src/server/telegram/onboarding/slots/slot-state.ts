@@ -12,9 +12,16 @@
 // isV3OnboardingComplete are W2.
 
 import { supabaseAdmin } from '@/lib/db';
+import type { KnownGapKey } from '@/lib/known-gaps';
 import type { StravaFitnessSnapshot } from '@/server/strava/activities';
-import { isFilled } from './provenance';
-import { requiredCoreSlots, type GoalTypeValue, type SlotKey, type SlotState } from './schema';
+import { isFilled, slotValue } from './provenance';
+import {
+  requiredCoreSlots,
+  type ExperienceTierValue,
+  type GoalTypeValue,
+  type SlotKey,
+  type SlotState,
+} from './schema';
 
 /** Bump when the persisted shape changes incompatibly. loadV3State resets a
  *  mid-flight state on mismatch rather than crash a resuming athlete (the JSONB
@@ -26,11 +33,30 @@ export const DEFAULT_OPTIONAL_BUDGET = 8;
 
 export type OnboardingPhase = 'orientation' | 'intake' | 'recap' | 'complete';
 
+/**
+ * The /edit_profile re-entry marker (W3). Onboarding ends at phase 'complete';
+ * `edit_mode` is how a completed athlete re-enters the engine to walk their open
+ * known-gaps ("Finish my profile"). "Update something" needs no marker — a
+ * completed athlete's free text already routes to the coach, so it just sends a
+ * prompt. The gap queue is captured once when the walk starts (`remaining`) so
+ * each gap is asked exactly once and the walk terminates.
+ */
+export interface EditMode {
+  kind: 'finish_gaps';
+  /** The gap we just asked — the slot the next inbound answer fills. */
+  current_gap: KnownGapKey;
+  /** Gaps still to ask after current_gap, in order. */
+  remaining: KnownGapKey[];
+}
+
 export interface V3OnboardingState {
   flow: 'v3';
   schema_version: number;
   phase: OnboardingPhase;
   slots: SlotState;
+  /** Set only while a post-completion /edit_profile "Finish my profile" walk is
+   *  active; absent otherwise. Routes the next inbound back to the engine. */
+  edit_mode?: EditMode;
   /** Hard counter the engine decrements per optional question (§5.4); not a
    *  number the model is trusted to respect. */
   optional_budget_remaining: number;
@@ -63,6 +89,55 @@ export function initialV3State(snapshot?: StravaFitnessSnapshot | null): V3Onboa
     asked: [],
     strava_snapshot: snapshot ?? null,
   };
+}
+
+/**
+ * A conservative experience-tier read from the Strava snapshot — extremes only.
+ *
+ * v2's training-shape step deliberately asked experience as a plain choice
+ * because "Strava volume is a poor proxy for how someone describes their own
+ * training level" (steps/02-training-shape.ts). v3 keeps that caution: this only
+ * commits a guess at the confident ends (clearly a beginner / clearly
+ * experienced) and returns null through the ambiguous middle, where `for_fun`
+ * vs. `some_training` is intent — not volume — and the model asks cold. Whatever
+ * it returns is seeded `inferred`/unconfirmed, so Opener 2 states it back for a
+ * one-tap correction; a wrong guess costs the athlete nothing.
+ */
+export function inferExperienceTier(snapshot: StravaFitnessSnapshot): ExperienceTierValue | null {
+  if (snapshot.run_count < 4 || snapshot.weeks_observed < 2) return null; // too thin to read
+  const { recent_weekly_mileage_mi: miles, longest_run_mi: longest } = snapshot;
+  if (miles >= 30 && longest >= 13) return 'experienced';
+  if (miles <= 8 && longest <= 4) return 'beginner';
+  return null; // the for_fun / some_training middle — ask, don't guess
+}
+
+/**
+ * Seed the three Strava-inferable training-shape slots as `inferred`/unconfirmed
+ * (W3). The `firstUnconfirmedInferred` guardrail then forces a stated-back
+ * confirm (Opener 2) before plan-gen, deterministically — rather than trusting
+ * the model to remember to infer them from the snapshot text each run. Returns a
+ * new slot map; only slots with a usable signal are added.
+ *
+ * No running signal (run_count 0) → nothing is seeded and the engine asks cold,
+ * matching the snapshot summary the model already sees.
+ */
+export function seedStravaInferences(
+  slots: SlotState,
+  snapshot: StravaFitnessSnapshot | null | undefined,
+): SlotState {
+  if (!snapshot || snapshot.run_count === 0) return slots;
+  const next: SlotState = { ...slots };
+
+  next.days_per_week = slotValue(snapshot.suggested_days_per_week, 'inferred', false);
+
+  if (snapshot.dominant_long_run_weekday != null) {
+    next.long_run_day = slotValue(snapshot.dominant_long_run_weekday, 'inferred', false);
+  }
+
+  const tier = inferExperienceTier(snapshot);
+  if (tier) next.experience_tier = slotValue(tier, 'inferred', false);
+
+  return next;
 }
 
 function isV3Shape(raw: unknown): raw is V3OnboardingState {

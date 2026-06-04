@@ -175,8 +175,9 @@ const INJURY_RULES = [
 
 const FLOW_RULES = [
   'Fill slots from natural conversation — any message can fill any slot. Never re-ask something already answered.',
+  'Work through three topics in order: 1) the goal + race, 2) current training shape (days/week, long-run day, experience), 3) injuries. One topic per message; once a topic is covered, move to the next.',
+  'Some shape slots arrive already filled as "inferred, unconfirmed" from Strava. Do NOT ask those cold — state them back together in one line for a yes/no ("Looks like ~4 days/week, long runs Sunday, and you know your way around training — that right?") and let the athlete correct. A confirm flips them to confirmed.',
   'Confirm safety and plan-driving slots inline (a quick yes/no). Let nice-to-haves ride.',
-  'When a value you inferred (e.g. from Strava) drives the plan, confirm it before relying on it — state it back, do not ask cold.',
   'Generate the plan only once every required slot is filled and the injury beat is answered; recap the whole picture first.',
 ].join(' ');
 
