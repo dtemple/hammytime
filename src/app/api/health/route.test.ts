@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('@/lib/db', () => ({
   supabaseAdmin: vi.fn(),
@@ -8,9 +8,14 @@ vi.mock('@/lib/anthropic', () => ({
   pingAnthropic: vi.fn(),
 }));
 
+vi.mock('@/server/strava/client', () => ({
+  pingStrava: vi.fn(),
+}));
+
 import { GET } from './route';
 import { supabaseAdmin } from '@/lib/db';
 import { pingAnthropic } from '@/lib/anthropic';
+import { pingStrava } from '@/server/strava/client';
 
 function makeSupabaseMock(result: { data?: unknown; error: null | { message: string } }) {
   const limit = vi.fn().mockResolvedValue(result);
@@ -134,6 +139,68 @@ describe('GET /api/health', () => {
       expect(body.checks.anthropic.ok).toBe(false);
       expect(body.checks.anthropic.error).toContain('api error');
       expect(body.status).toBe('degraded');
+    });
+  });
+
+  describe('strava webhook check', () => {
+    const realFetch = global.fetch;
+    beforeEach(() => {
+      process.env.STRAVA_CLIENT_ID = 'cid';
+      process.env.STRAVA_CLIENT_SECRET = 'csecret';
+      // Setting the client id also activates the OAuth ping check; keep it green
+      // so it doesn't perturb the status we're asserting on.
+      vi.mocked(pingStrava).mockResolvedValue({ ok: true, latency_ms: 5 });
+    });
+    afterEach(() => {
+      delete process.env.STRAVA_CLIENT_ID;
+      delete process.env.STRAVA_CLIENT_SECRET;
+      global.fetch = realFetch;
+    });
+
+    it('returns ok=true when at least one subscription exists', async () => {
+      mockPostgresOk();
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => [{ id: 1, callback_url: 'https://www.daybreak.run/api/strava/webhook' }],
+      }) as unknown as typeof fetch;
+
+      const body = await (await GET()).json();
+
+      expect(body.checks.stravaWebhook.configured).toBe(true);
+      expect(body.checks.stravaWebhook.ok).toBe(true);
+      expect(body.checks.stravaWebhook.count).toBe(1);
+      expect(body.checks.stravaWebhook.callback).toContain('www.daybreak.run');
+      expect(body.status).toBe('ok');
+    });
+
+    it('returns status=degraded when configured but no subscription exists', async () => {
+      mockPostgresOk();
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => [],
+      }) as unknown as typeof fetch;
+
+      const body = await (await GET()).json();
+
+      expect(body.checks.stravaWebhook.configured).toBe(true);
+      expect(body.checks.stravaWebhook.ok).toBe(false);
+      expect(body.checks.stravaWebhook.count).toBe(0);
+      expect(body.status).toBe('degraded');
+    });
+
+    it('is configured=false (and does not fetch) when client creds are unset', async () => {
+      delete process.env.STRAVA_CLIENT_ID;
+      delete process.env.STRAVA_CLIENT_SECRET;
+      mockPostgresOk();
+      const fetchSpy = vi.fn();
+      global.fetch = fetchSpy as unknown as typeof fetch;
+
+      const body = await (await GET()).json();
+
+      expect(body.checks.stravaWebhook.configured).toBe(false);
+      expect(body.checks.stravaWebhook.ok).toBe(false);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(body.status).toBe('ok');
     });
   });
 });

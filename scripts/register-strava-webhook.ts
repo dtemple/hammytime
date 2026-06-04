@@ -37,11 +37,24 @@ function clientCreds(): { client_id: string; client_secret: string } {
   };
 }
 
+/**
+ * The callback Strava validates with a GET must answer 200 directly — it does
+ * NOT follow redirects. Our apex (daybreak.run) 307s to www, so an apex callback
+ * fails validation. Normalize a bare apex host (two labels, no subdomain) to www;
+ * hosts that already have a subdomain (www.*, tunnels like *.ngrok.io) pass through.
+ */
+function canonicalCallback(appUrl: string): string {
+  const u = new URL(`${appUrl.replace(/\/$/, '')}/api/strava/webhook`);
+  if (!u.hostname.startsWith('www.') && u.hostname.split('.').length === 2) {
+    u.hostname = `www.${u.hostname}`;
+  }
+  return u.toString();
+}
+
 async function create(): Promise<void> {
   const { client_id, client_secret } = clientCreds();
   const verifyToken = requireEnv('STRAVA_WEBHOOK_VERIFY_TOKEN');
-  const appUrl = requireEnv('NEXT_PUBLIC_APP_URL').replace(/\/$/, '');
-  const callbackUrl = `${appUrl}/api/strava/webhook`;
+  const callbackUrl = canonicalCallback(requireEnv('NEXT_PUBLIC_APP_URL'));
 
   console.log('Creating subscription with callback:', callbackUrl);
   const res = await fetch(PUSH_SUBSCRIPTIONS_URL, {

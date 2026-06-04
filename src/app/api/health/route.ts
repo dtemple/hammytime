@@ -11,6 +11,9 @@ type ExternalCheck = {
   latency_ms?: number;
   error?: string;
 };
+type StravaWebhookCheck = ExternalCheck & { count?: number; callback?: string | null };
+
+const STRAVA_PUSH_SUBSCRIPTIONS_URL = 'https://www.strava.com/api/v3/push_subscriptions';
 
 async function checkPostgres(): Promise<PostgresCheck> {
   const start = Date.now();
@@ -57,15 +60,47 @@ async function checkStrava(): Promise<ExternalCheck> {
   }
 }
 
+// Confirms a Strava push subscription exists. Without one, Strava delivers no
+// activity events and the post-activity coaching trigger silently never fires
+// (SPEC §3.5) — exactly the failure that went unnoticed because nothing surfaced
+// it. ok=false when configured but zero subscriptions, so /api/health goes
+// degraded instead of staying green on a broken integration.
+async function checkStravaWebhook(): Promise<StravaWebhookCheck> {
+  const clientId = process.env.STRAVA_CLIENT_ID;
+  const clientSecret = process.env.STRAVA_CLIENT_SECRET;
+  if (!clientId || !clientSecret) return { ok: false, configured: false };
+  const start = Date.now();
+  try {
+    const params = new URLSearchParams({ client_id: clientId, client_secret: clientSecret });
+    const res = await fetch(`${STRAVA_PUSH_SUBSCRIPTIONS_URL}?${params}`);
+    const latency_ms = Date.now() - start;
+    if (!res.ok) return { ok: false, configured: true, latency_ms, error: `strava ${res.status}` };
+    const subs = (await res.json()) as Array<{ callback_url?: string }>;
+    const count = Array.isArray(subs) ? subs.length : 0;
+    return {
+      ok: count >= 1,
+      configured: true,
+      count,
+      callback: subs[0]?.callback_url ?? null,
+      latency_ms,
+    };
+  } catch (err) {
+    return { ok: false, configured: true, latency_ms: Date.now() - start, error: String(err) };
+  }
+}
+
 export async function GET() {
-  const [postgres, anthropic, telegram, strava] = await Promise.all([
+  const [postgres, anthropic, telegram, strava, stravaWebhook] = await Promise.all([
     checkPostgres(),
     checkAnthropic(),
     checkTelegram(),
     checkStrava(),
+    checkStravaWebhook(),
   ]);
 
-  const configuredFailing = [anthropic, telegram, strava].some((c) => c.configured && !c.ok);
+  const configuredFailing = [anthropic, telegram, strava, stravaWebhook].some(
+    (c) => c.configured && !c.ok,
+  );
 
   let status: 'ok' | 'degraded' | 'error';
   if (!postgres.ok) {
@@ -78,7 +113,7 @@ export async function GET() {
     {
       status,
       timestamp: new Date().toISOString(),
-      checks: { postgres, anthropic, telegram, strava },
+      checks: { postgres, anthropic, telegram, strava, stravaWebhook },
     },
     { headers: { 'Cache-Control': 'no-store' } },
   );
