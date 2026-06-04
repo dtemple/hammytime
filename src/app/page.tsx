@@ -32,10 +32,10 @@ export default function Home() {
         <section className="ht-hero">
           <div className="ht-eyebrow"></div>
           <h1 className="ht-h1">
-            <span className="ht-h1-accent">Your schedule. Your goals. </span>Daybreak makes it work.
+            <span className="ht-h1-accent">Your schedule. Your injuries. Your goals. </span>Daybreak makes it work.
           </h1>
           <p className="ht-lede">
-            Daybreak uses your Strava data, your injury history and your training goals to create a personalized training calendar that updates to your needs. Simply tell it what you want.
+            Daybreak is a daily running companion that helps you avoid injuries and achieve your goals. It uses your Strava data, your injury history and your training goals to create a personalized training calendar that updates to your needs. Simply tell it what you want.
           </p>
           <div className="ht-cta-row">
             <Link href="/signup" className="ht-btn ht-btn-primary">
