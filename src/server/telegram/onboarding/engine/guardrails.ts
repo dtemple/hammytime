@@ -20,6 +20,7 @@ import {
   type SlotState,
 } from '../slots/schema';
 import type { SlotValue, Provenance } from '../slots/provenance';
+import { INJURY_CHIPS, SLOT_CHIPS } from '../slots/chips';
 import type { Chip, ExtractAdvanceOutput, NextAction, SlotFill } from './extract-and-advance';
 
 const EXPERIENCE = new Set(['beginner', 'for_fun', 'some_training', 'experienced']);
@@ -239,6 +240,35 @@ export function buildRecapMessage(state: V3OnboardingState): string {
 }
 
 // ---------------------------------------------------------------------------
+// Chip policy (V3-W4, §5.4 + principle 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Guarantee chips for closed-option and yes/no turns in code, rather than
+ * trusting the model to attach them. The model still proposes chips for open
+ * questions where it wants to offer a shortcut; those pass through untouched.
+ *  - ask + injury beat                       → INJURY_CHIPS (the gate's set)
+ *  - ask + a slot with a canonical set       → that set (overrides the model)
+ *  - confirm | recap with no chips           → YES_FIX_CHIPS (a yes/no is owed one)
+ *  - anything else (open ask, model's chips) → modelChips unchanged
+ */
+export function applyChipPolicy(
+  action: NextAction,
+  targetSlot: SlotKey | null,
+  modelChips: Chip[],
+): Chip[] {
+  if (action === 'ask' && targetSlot) {
+    if (targetSlot === 'injury_status') return [...INJURY_CHIPS];
+    const canonical = SLOT_CHIPS[targetSlot];
+    if (canonical) return [...canonical];
+  }
+  if ((action === 'confirm' || action === 'recap') && modelChips.length === 0) {
+    return [...YES_FIX_CHIPS];
+  }
+  return modelChips;
+}
+
+// ---------------------------------------------------------------------------
 // The resolver
 // ---------------------------------------------------------------------------
 
@@ -270,6 +300,9 @@ export function enforceGuardrails(
   let message = output.message;
   let chips = output.chips;
   let overridden = false;
+  // When an override forces an ask, it owns the target slot — the model's
+  // asked_slot may be stale. Otherwise the chip policy derives it (below).
+  let askSlot: SlotKey | null = null;
 
   const working: V3OnboardingState = {
     ...state,
@@ -285,19 +318,20 @@ export function enforceGuardrails(
     const pendingInferred = firstUnconfirmedInferred(merged);
     if (openRequired) {
       action = 'ask';
+      askSlot = openRequired;
       message = buildAskMessage(openRequired);
       chips = [];
       overridden = true;
     } else if (pendingInferred) {
       action = 'confirm';
       message = buildConfirmMessage(pendingInferred, merged[pendingInferred]!.value);
-      chips = YES_FIX_CHIPS;
+      chips = [];
       overridden = true;
     } else if (!isV3OnboardingComplete(working)) {
       // Injury beat not answered, or some other gate — recap instead of generating.
       action = 'recap';
       message = buildRecapMessage(working);
-      chips = YES_FIX_CHIPS;
+      chips = [];
       overridden = true;
     }
   }
@@ -308,7 +342,7 @@ export function enforceGuardrails(
       // Out of optional questions — move to the recap rather than ask more.
       action = 'recap';
       message = buildRecapMessage(working);
-      chips = YES_FIX_CHIPS;
+      chips = [];
       overridden = true;
     } else {
       budget -= 1;
@@ -317,6 +351,13 @@ export function enforceGuardrails(
 
   working.optional_budget_remaining = budget;
   if (action === 'recap') working.phase = 'recap';
+
+  // Closed-option / yes-no asks always carry chips, in code (§5.4, principle 2).
+  // An override that forced an ask owns its target slot; otherwise it's the
+  // model's asked_slot, falling back to the first open required slot.
+  const targetSlot: SlotKey | null =
+    action === 'ask' ? (askSlot ?? output.asked_slot ?? firstOpenRequired(merged)) : null;
+  chips = applyChipPolicy(action, targetSlot, chips);
 
   return { state: working, action, message, chips, overridden };
 }

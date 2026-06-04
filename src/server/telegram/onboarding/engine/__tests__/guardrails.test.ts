@@ -5,10 +5,12 @@ import {
   firstOpenRequired,
   firstUnconfirmedInferred,
   enforceGuardrails,
+  applyChipPolicy,
   buildRecapMessage,
 } from '../guardrails';
+import { INJURY_CHIPS, SLOT_CHIPS } from '../../slots/chips';
 import { initialV3State, type V3OnboardingState } from '../../slots/slot-state';
-import type { SlotState } from '../../slots/schema';
+import type { SlotKey, SlotState } from '../../slots/schema';
 import type { SlotValue, Provenance } from '../../slots/provenance';
 import type { ExtractAdvanceOutput, SlotFill } from '../extract-and-advance';
 
@@ -273,5 +275,116 @@ describe('buildRecapMessage', () => {
     };
     const msg = buildRecapMessage(stateWith(slots));
     expect(msg).toContain('left knee');
+  });
+});
+
+// --- W4: hybrid chips — the deterministic chip policy ---
+
+const YES_FIX_LABELS = ['Looks right', 'Fix it'];
+
+describe('applyChipPolicy', () => {
+  it('attaches the canonical set for a closed-option ask', () => {
+    expect(applyChipPolicy('ask', 'goal_distance', []).map((c) => c.value)).toEqual([
+      '5k',
+      '10k',
+      'half',
+      'marathon',
+    ]);
+  });
+
+  it('attaches the injury beat chips for an injury ask', () => {
+    expect(applyChipPolicy('ask', 'injury_status', []).map((c) => c.label)).toEqual([
+      'Nothing right now',
+      'Skip',
+    ]);
+  });
+
+  it('overrides whatever chips the model proposed for a closed slot', () => {
+    const r = applyChipPolicy('ask', 'goal_distance', [{ label: 'X', value: 'x' }]);
+    expect(r.map((c) => c.label)).toEqual(['5K', '10K', 'Half', 'Marathon']);
+  });
+
+  it('leaves an open-slot ask with the model chips (no forced set)', () => {
+    expect(applyChipPolicy('ask', 'schedule_constraints', [])).toEqual([]);
+    const shortcut = [{ label: 'Mornings', value: 'mornings' }];
+    expect(applyChipPolicy('ask', 'schedule_constraints', shortcut)).toBe(shortcut);
+  });
+
+  it('owes a confirm / recap a yes-no set when the model sent none', () => {
+    expect(applyChipPolicy('confirm', null, []).map((c) => c.label)).toEqual(YES_FIX_LABELS);
+    expect(applyChipPolicy('recap', null, []).map((c) => c.label)).toEqual(YES_FIX_LABELS);
+  });
+});
+
+describe('enforceGuardrails — chip policy wiring', () => {
+  it('a distance ask ships distance chips even when the model sent none', () => {
+    const r = enforceGuardrails(
+      stateWith({}),
+      out({ next_action: 'ask', asked_slot: 'goal_distance' }),
+    );
+    expect(r.chips.map((c) => c.value)).toEqual(['5k', '10k', 'half', 'marathon']);
+  });
+
+  it('an injury ask ships the Nothing/Skip chips', () => {
+    const r = enforceGuardrails(
+      stateWith({}),
+      out({ next_action: 'ask', asked_slot: 'injury_status', message: 'any injuries?' }),
+    );
+    expect(r.chips.map((c) => c.label)).toEqual(['Nothing right now', 'Skip']);
+  });
+
+  it('an open-slot ask stays chip-less', () => {
+    const r = enforceGuardrails(
+      stateWith({}, { optional_budget_remaining: 8 }),
+      out({ next_action: 'ask', asked_slot: 'schedule_constraints' }),
+    );
+    expect(r.chips).toEqual([]);
+  });
+
+  it('a confirm turn gets yes-no chips', () => {
+    const r = enforceGuardrails(
+      stateWith(coreSlots('race')),
+      out({ next_action: 'confirm', message: 'right?' }),
+    );
+    expect(r.chips.map((c) => c.label)).toEqual(YES_FIX_LABELS);
+  });
+
+  it('a generate override forced to ask a missing distance ships distance chips', () => {
+    const slots = coreSlots('race');
+    delete slots.goal_distance;
+    const r = enforceGuardrails(stateWith(slots), out({ next_action: 'generate' }));
+    expect(r.action).toBe('ask');
+    expect(r.chips.map((c) => c.value)).toEqual(['5k', '10k', 'half', 'marathon']);
+  });
+
+  it('a generate override forced to recap (injury unanswered) gets yes-no chips', () => {
+    const r = enforceGuardrails(stateWith(coreSlots('race')), out({ next_action: 'generate' }));
+    expect(r.action).toBe('recap');
+    expect(r.chips.map((c) => c.label)).toEqual(YES_FIX_LABELS);
+  });
+
+  it('a budget-exhausted recap gets yes-no chips', () => {
+    const slots = { ...coreSlots('race'), injury_status: sv('none') };
+    const r = enforceGuardrails(
+      stateWith(slots, { optional_budget_remaining: 0 }),
+      out({ next_action: 'ask', asked_slot: 'age' }),
+    );
+    expect(r.action).toBe('recap');
+    expect(r.chips.map((c) => c.label)).toEqual(YES_FIX_LABELS);
+  });
+});
+
+describe('chip registry — round-trip safety', () => {
+  it('keeps every chip value within the 60-char callback_data budget', () => {
+    const all = [...Object.values(SLOT_CHIPS).flat(), ...INJURY_CHIPS];
+    for (const c of all) expect(c.value.length).toBeLessThanOrEqual(60);
+  });
+
+  it('uses coercer-safe values for enum slots', () => {
+    for (const [slot, chips] of Object.entries(SLOT_CHIPS)) {
+      for (const c of chips ?? []) {
+        expect(coerceFill(slot as SlotKey, c.value)).toBe(c.value);
+      }
+    }
   });
 });

@@ -117,7 +117,7 @@ const EXTRACT_TOOL = {
       chips: {
         type: 'array',
         description:
-          'Tap options for answers with ≤3 discrete choices (yes/no, a confirm, a day). Empty for open questions.',
+          'The app guarantees chips for closed-option and yes/no questions (distance, the injury beat, a confirm) — leave this empty for those. Populate it only for an open question where you want to offer a shortcut the app cannot infer.',
         items: {
           type: 'object',
           required: ['label', 'value'],

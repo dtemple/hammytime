@@ -210,6 +210,40 @@ describe('router — generate handoff', () => {
   });
 });
 
+// --- W4: chip policy vs the numeric backstop (ordering) ---
+
+describe('router — numeric backstop keeps its chips over the chip policy', () => {
+  it('a target_time turn sends the disambiguation readings, not a yes-no set', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: completeSlots(), // goal_distance = 'marathon'
+    } as V3OnboardingState);
+    // "4:25" parses to 265s; for a marathon that's implausibly fast → ambiguous.
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'confirm',
+        message: 'A 4:25 finish?',
+        fills: [{ slot: 'target_time', value: 265, provenance: 'stated' }],
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(20, '4:25'), athlete);
+
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toMatch(/which did you mean/i);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const labels = (call[2] as any).reply_markup.inline_keyboard
+      .flat()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((b: any) => b.text);
+    expect(labels).toContain('4:25:00');
+    expect(labels).toContain('0:04:25');
+  });
+});
+
 // --- W3: /edit_profile fork + the "Finish my profile" gap-walk ---
 
 function cbCtx(id = 'cb1') {
