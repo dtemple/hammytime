@@ -43,21 +43,20 @@ export async function GET(req: Request) {
     if (onboarded.length === 0) {
       return NextResponse.json({ ok: true, skipped: 'no_onboarded_athlete' });
     }
-    if (onboarded.length > 1) {
-      console.warn(
-        `[daily-checkin cron] multiple onboarded athletes (${onboarded.length}); picking first`,
-      );
+
+    // Enqueue one daily coaching job per onboarded athlete; the worker drains
+    // them and runs the agent. The per-day unique key (in the athlete's local
+    // timezone) makes a cron overlap a no-op. enqueueJob throws on a DB error,
+    // so a per-athlete failure aborts the batch — the next cron tick retries the
+    // not-yet-enqueued athletes (their keys are still free).
+    let enqueued = 0;
+    for (const athlete of onboarded) {
+      const { date } = nowInTimezone(athlete.timezone);
+      await enqueueJob('daily_checkin', `daily-${athlete.id}-${date}`, { athlete_id: athlete.id });
+      enqueued++;
     }
 
-    const athlete = onboarded[0];
-
-    // Enqueue the daily coaching job; the worker runs the agent and then sends
-    // the wellness battery (SPEC §3.7). The per-day unique key makes a cron
-    // overlap a no-op — no inline run, no inline battery here anymore.
-    const { date } = nowInTimezone(athlete.timezone);
-    await enqueueJob('daily_checkin', `daily-${athlete.id}-${date}`, { athlete_id: athlete.id });
-
-    return NextResponse.json({ ok: true, enqueued: athlete.id });
+    return NextResponse.json({ ok: true, enqueued });
   } catch (err) {
     Sentry.captureException(err);
     console.error('[daily-checkin cron] error', err);

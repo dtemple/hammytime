@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
 import { supabaseAdmin } from '@/lib/db';
 import { disconnectStrava } from '@/server/strava/disconnect';
+import { handleActivityCreate } from '@/server/strava/activity-trigger';
 import { sendAndLog } from '@/server/telegram/bot';
 
 /**
@@ -10,10 +11,13 @@ import { sendAndLog } from '@/server/telegram/bot';
  * GET  — subscription validation handshake. Strava calls this once when we
  *        create the push subscription; we echo back the challenge if the
  *        verify token matches.
- * POST — activity + athlete events. We act only on the deauthorization event
- *        (object_type='athlete', updates.authorized='false'): delete our copy
- *        of the athlete's token (compliance) and tell them in Telegram.
- *        Activity events are no-ops — we persist no Strava activity data.
+ * POST — activity + athlete events. Two events matter:
+ *        - deauthorization (object_type='athlete', updates.authorized='false'):
+ *          delete our copy of the athlete's token (compliance) + tell them in TG.
+ *        - activity create (object_type='activity', aspect_type='create'):
+ *          enqueue a proactive post-activity coaching run (SPEC §3.5.1). Nothing
+ *          is persisted from the event — it's a trigger, not a store.
+ *        Other events are no-ops.
  *
  * Strava disables a subscription that errors or times out, so POST ALWAYS
  * returns 200 quickly; every failure is swallowed to Sentry. Strava does not
@@ -60,7 +64,14 @@ export async function POST(req: NextRequest) {
     if (isDeauth && event.owner_id != null) {
       await handleDeauthorization(String(event.owner_id));
     }
-    // Activity events (and everything else) are no-ops — nothing is stored.
+
+    const isActivityCreate =
+      event.object_type === 'activity' && event.aspect_type === 'create';
+
+    if (isActivityCreate && event.owner_id != null && event.object_id != null) {
+      await handleActivityCreate(String(event.owner_id), event.object_id);
+    }
+    // Everything else is a no-op — nothing is stored.
   } catch (err) {
     Sentry.captureException(err);
   }

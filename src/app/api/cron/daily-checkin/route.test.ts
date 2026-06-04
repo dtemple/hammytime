@@ -76,11 +76,44 @@ describe('GET /api/cron/daily-checkin', () => {
     mockAthletes([makeAthlete()]);
     const res = await GET(authedReq());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, enqueued: 'athlete-1' });
+    expect(await res.json()).toEqual({ ok: true, enqueued: 1 });
     expect(vi.mocked(enqueueJob)).toHaveBeenCalledWith(
       'daily_checkin',
       'daily-athlete-1-2026-05-27',
       { athlete_id: 'athlete-1' },
+    );
+  });
+
+  it('enqueues one job per onboarded athlete', async () => {
+    mockAthletes([
+      makeAthlete({ id: 'athlete-1' }),
+      makeAthlete({ id: 'athlete-2' }),
+      makeAthlete({ id: 'athlete-3' }),
+    ]);
+    const res = await GET(authedReq());
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, enqueued: 3 });
+    expect(vi.mocked(enqueueJob)).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(enqueueJob)).toHaveBeenCalledWith(
+      'daily_checkin',
+      'daily-athlete-2-2026-05-27',
+      { athlete_id: 'athlete-2' },
+    );
+  });
+
+  it('skips test athletes (negative chat id) and enqueues the rest', async () => {
+    mockAthletes([
+      makeAthlete({ id: 'real', telegram_chat_id: '42' }),
+      makeAthlete({ id: 'test', telegram_chat_id: '-1001234' }),
+    ]);
+    const res = await GET(authedReq());
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, enqueued: 1 });
+    expect(vi.mocked(enqueueJob)).toHaveBeenCalledOnce();
+    expect(vi.mocked(enqueueJob)).toHaveBeenCalledWith(
+      'daily_checkin',
+      'daily-real-2026-05-27',
+      { athlete_id: 'real' },
     );
   });
 

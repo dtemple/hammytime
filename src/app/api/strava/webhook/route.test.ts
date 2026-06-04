@@ -3,11 +3,13 @@ import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
 vi.mock('@/server/strava/disconnect', () => ({ disconnectStrava: vi.fn() }));
+vi.mock('@/server/strava/activity-trigger', () => ({ handleActivityCreate: vi.fn() }));
 vi.mock('@/server/telegram/bot', () => ({ sendAndLog: vi.fn() }));
 vi.mock('@sentry/nextjs', () => ({ captureException: vi.fn() }));
 
 import { supabaseAdmin } from '@/lib/db';
 import { disconnectStrava } from '@/server/strava/disconnect';
+import { handleActivityCreate } from '@/server/strava/activity-trigger';
 import { sendAndLog } from '@/server/telegram/bot';
 import * as Sentry from '@sentry/nextjs';
 import { GET, POST } from './route';
@@ -71,6 +73,7 @@ beforeEach(() => {
   process.env.STRAVA_WEBHOOK_VERIFY_TOKEN = VERIFY_TOKEN;
   delete process.env.STRAVA_SUBSCRIPTION_ID;
   (disconnectStrava as AnyMock).mockResolvedValue({ hadConnection: true, revoked: false });
+  (handleActivityCreate as AnyMock).mockResolvedValue(undefined);
   (sendAndLog as AnyMock).mockResolvedValue(undefined);
 });
 
@@ -171,8 +174,8 @@ describe('POST /api/strava/webhook — deauthorization', () => {
 // POST — irrelevant events are no-ops, always 200
 // ---------------------------------------------------------------------------
 
-describe('POST /api/strava/webhook — irrelevant events', () => {
-  it('ignores activity create events (nothing stored)', async () => {
+describe('POST /api/strava/webhook — activity create', () => {
+  it('triggers a post-activity coaching run on activity create', async () => {
     (supabaseAdmin as AnyMock).mockReturnValue(makeDb());
 
     const res = await POST(
@@ -185,9 +188,29 @@ describe('POST /api/strava/webhook — irrelevant events', () => {
     );
 
     expect(res.status).toBe(200);
+    expect(handleActivityCreate).toHaveBeenCalledWith('42', 1360128428);
     expect(disconnectStrava).not.toHaveBeenCalled();
   });
 
+  it('ignores activity update events (only create triggers)', async () => {
+    (supabaseAdmin as AnyMock).mockReturnValue(makeDb());
+
+    const res = await POST(
+      postReq({
+        object_type: 'activity',
+        object_id: 1360128428,
+        aspect_type: 'update',
+        owner_id: 42,
+        updates: { title: 'Renamed' },
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(handleActivityCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/strava/webhook — irrelevant events', () => {
   it('ignores athlete events that are not deauthorization', async () => {
     (supabaseAdmin as AnyMock).mockReturnValue(makeDb());
 
