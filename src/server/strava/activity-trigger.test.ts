@@ -105,7 +105,7 @@ beforeEach(() => {
 });
 
 describe('handleActivityCreate', () => {
-  it('enqueues a tg_message keyed to the activity for an onboarded athlete', async () => {
+  it('enqueues a post_activity-flagged tg_message keyed to the activity for an onboarded athlete', async () => {
     (supabaseAdmin as AnyMock).mockReturnValue(makeDb());
 
     await handleActivityCreate(PROVIDER_ID, OBJECT_ID);
@@ -115,6 +115,11 @@ describe('handleActivityCreate', () => {
     expect(kind).toBe('tg_message');
     expect(key).toBe(`tg_strava:${ATHLETE_ID}:${OBJECT_ID}`);
     expect(payload.athlete_id).toBe(ATHLETE_ID);
+    // The worker branches on this flag to run the post-activity prompt, and uses
+    // the activity id to point the agent at the right entry.
+    expect(payload.trigger).toBe('post_activity');
+    expect(payload.strava_activity_id).toBe(OBJECT_ID);
+    // The seed text rides along as a fallback for a not-yet-updated worker.
     expect(typeof payload.text).toBe('string');
     expect(payload.text.length).toBeGreaterThan(0);
   });

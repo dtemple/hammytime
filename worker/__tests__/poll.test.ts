@@ -3,12 +3,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
 vi.mock('@/server/admin/alerts', () => ({ sendDavidAlert: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../jobs/daily-checkin', () => ({ runDailyCheckin: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('../jobs/post-activity', () => ({ runPostActivity: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../jobs/tg-message', () => ({ runTgMessage: vi.fn().mockResolvedValue(undefined) }));
 
 import { claimJob, dispatch, completeJob, failJob, type Job } from '../poll';
 import { supabaseAdmin } from '@/lib/db';
 import { sendDavidAlert } from '@/server/admin/alerts';
 import { runDailyCheckin } from '../jobs/daily-checkin';
+import { runPostActivity } from '../jobs/post-activity';
 import { runTgMessage } from '../jobs/tg-message';
 import { MAX_ATTEMPTS } from '../config';
 
@@ -90,11 +92,38 @@ describe('dispatch', () => {
     expect(runDailyCheckin).toHaveBeenCalledWith('ath-9');
   });
 
-  it('routes tg_message with its text', async () => {
+  it('routes a plain tg_message with its text', async () => {
     await dispatch(
       makeJob({ kind: 'tg_message', payload: { athlete_id: 'ath-9', text: 'how was my run?' } }),
     );
     expect(runTgMessage).toHaveBeenCalledWith('ath-9', 'how was my run?');
+    expect(runPostActivity).not.toHaveBeenCalled();
+  });
+
+  it('routes a post_activity-flagged tg_message to the post-activity handler with the activity id', async () => {
+    await dispatch(
+      makeJob({
+        kind: 'tg_message',
+        payload: {
+          athlete_id: 'ath-9',
+          trigger: 'post_activity',
+          strava_activity_id: 1360128428,
+          text: 'fallback seed',
+        },
+      }),
+    );
+    expect(runPostActivity).toHaveBeenCalledWith('ath-9', 1360128428);
+    expect(runTgMessage).not.toHaveBeenCalled();
+  });
+
+  it('routes a post_activity tg_message with no activity id (undefined)', async () => {
+    await dispatch(
+      makeJob({
+        kind: 'tg_message',
+        payload: { athlete_id: 'ath-9', trigger: 'post_activity' },
+      }),
+    );
+    expect(runPostActivity).toHaveBeenCalledWith('ath-9', undefined);
   });
 
   it('throws when athlete_id is missing', async () => {

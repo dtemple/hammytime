@@ -5,6 +5,7 @@ import type { Database } from '@/lib/db-types';
 import { MAX_ATTEMPTS, STALE_LOCK_MINUTES } from './config';
 import { sendDavidAlert } from '@/server/admin/alerts';
 import { runDailyCheckin } from './jobs/daily-checkin';
+import { runPostActivity } from './jobs/post-activity';
 import { runTgMessage } from './jobs/tg-message';
 
 export type Job = Database['public']['Tables']['job_queue']['Row'];
@@ -32,7 +33,17 @@ export async function dispatch(job: Job): Promise<void> {
       await runDailyCheckin(athleteId);
       return;
     case 'tg_message':
-      await runTgMessage(athleteId, String(payload.text ?? ''));
+      // A post_activity-flagged tg_message is a proactive run off a just-logged
+      // Strava activity — route it to the post-activity prompt. Everything else
+      // (a real athlete message) stays on the generic reply path.
+      if (payload.trigger === 'post_activity') {
+        await runPostActivity(
+          athleteId,
+          payload.strava_activity_id != null ? Number(payload.strava_activity_id) : undefined,
+        );
+      } else {
+        await runTgMessage(athleteId, String(payload.text ?? ''));
+      }
       return;
     default:
       throw new Error(`dispatch: unknown job kind ${job.kind}`);

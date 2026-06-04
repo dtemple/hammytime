@@ -14,11 +14,15 @@ import { persistRun, type CapturedStep, type RunKind } from './persist';
 import { sendReply, startTyping } from './send';
 import { buildPrompt, loadRecentHistory, renderSystemPrompt } from './system-prompt';
 
-export type RunSource = 'daily_checkin' | 'tg_message';
+export type RunSource = 'daily_checkin' | 'tg_message' | 'post_activity';
 
 const SOURCE_TO_KIND: Record<RunSource, RunKind> = {
   daily_checkin: 'daily',
   tg_message: 'adhoc',
+  // Reuses 'adhoc' — the agent_runs.kind CHECK only allows daily/adhoc/weekly/
+  // plan_validate, so a post-activity run isn't separable in the cost ledger.
+  // Splitting it out later is a migration (new kind + CHECK update).
+  post_activity: 'adhoc',
 };
 
 const SOFT_FALLBACK =
@@ -28,6 +32,7 @@ export async function runAgent(
   athleteId: string,
   source: RunSource,
   message?: string,
+  activityId?: number,
 ): Promise<void> {
   const startedAt = new Date().toISOString();
   const timezone = await loadTimezone(athleteId);
@@ -51,7 +56,7 @@ export async function runAgent(
   try {
     const systemPrompt = await renderSystemPrompt(athleteId);
     const history = await loadRecentHistory(athleteId);
-    const prompt = buildPrompt(source, timezone, message, history);
+    const prompt = buildPrompt(source, timezone, message, history, activityId);
 
     const q = query({
       prompt,

@@ -136,20 +136,28 @@ export async function renderSystemPrompt(athleteId: string): Promise<string> {
 
 /**
  * The per-run user prompt. For a daily check-in it's the morning trigger; for
- * an ad-hoc message it's the athlete's text. Recent thread history rides along
- * in both cases so the agent replies in context, not cold.
+ * a post-activity run it's a note about the just-completed activity; for an
+ * ad-hoc message it's the athlete's text. Recent thread history rides along in
+ * every case so the agent replies in context, not cold.
  */
 export function buildPrompt(
   source: RunSource,
   timezone: string,
   message?: string,
   history: HistoryMsg[] = [],
+  activityId?: number,
 ): string {
   const { date, weekday } = localDateParts(timezone);
   const transcript = formatHistory(history);
 
   if (source === 'daily_checkin') {
     const base = `It's the morning of ${weekday}, ${date}. Write today's coaching message: read the Strava file and the athlete's memory files first, then send a training-focused note for today.`;
+    return transcript ? `${base}\n\nRecent conversation, oldest first:\n${transcript}` : base;
+  }
+
+  if (source === 'post_activity') {
+    const idHint = activityId ? ` (Strava id ${activityId})` : '';
+    const base = `The athlete just completed an activity${idHint} and it's on Strava — it's the most recent entry in strava_recent.json. It's ${weekday}, ${date}. Read that activity, marathon_training_plan.json, and plan_drift.md, then send a post-activity note per the "When a Strava activity just came in" section of your instructions: acknowledge this specific activity, and say whether it changes anything for the rest of this week — reassure and point ahead if not, or explain and ask whether to adjust the plan if it does. Don't change the plan yourself this turn.`;
     return transcript ? `${base}\n\nRecent conversation, oldest first:\n${transcript}` : base;
   }
 

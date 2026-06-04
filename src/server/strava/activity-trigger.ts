@@ -2,10 +2,14 @@
 //
 // When an athlete finishes a workout and it lands on Strava, the app-level push
 // subscription delivers an `activity`/`create` event to /api/strava/webhook. We
-// turn that into the same coaching run the athlete gets from /fresh_update: a
-// `tg_message` job whose seed asks for a fresh rundown. The worker's hydrate()
-// already wipes the folder, re-fetches Strava, and reloads memory on every run,
-// so "pull my latest data" comes for free — no worker, schema, or job-kind change.
+// enqueue a `tg_message` job flagged `trigger: 'post_activity'` and carrying the
+// triggering activity id, so the worker runs its dedicated post-activity prompt
+// (acknowledge the specific activity, judge its impact on the week, ask before
+// any plan change) instead of the generic /fresh_update rundown. The worker's
+// hydrate() already wipes the folder, re-fetches Strava, and reloads memory on
+// every run, so the new activity is the newest entry in strava_recent.json by
+// the time the agent reads it — no schema or job-kind change. A `text` seed
+// rides along as a fallback for a worker that predates the post-activity layer.
 //
 // Two guards keep this from spamming (and from drawing down agent_runs/credits):
 //   - per-activity dedup via the job key `tg_strava:<athlete>:<objectId>` (a
@@ -29,9 +33,10 @@ import { onboardingSteps } from '@/server/telegram/onboarding';
 export const POST_ACTIVITY_COOLDOWN_MS = 60 * 60 * 1000;
 
 /**
- * The same intent as the /fresh_update command, anchored to the just-logged
- * activity. The worker reads the new activity from the freshly re-fetched
- * strava_recent.json — this seed only tells the agent what kind of turn it is.
+ * Fallback seed only. An up-to-date worker branches on `trigger: 'post_activity'`
+ * and runs its dedicated post-activity prompt, never reading this. A worker that
+ * predates that layer ignores the flag and runs this text as a generic
+ * /fresh_update rundown — degraded, but still a useful message.
  */
 const POST_ACTIVITY_SEED =
   'I just logged an activity on Strava. Give me a fresh update — pull my latest ' +
@@ -98,6 +103,8 @@ export async function handleActivityCreate(
 
   await enqueueJob('tg_message', `tg_strava:${athleteId}:${objectId}`, {
     athlete_id: athleteId,
-    text: POST_ACTIVITY_SEED,
+    trigger: 'post_activity',
+    strava_activity_id: objectId,
+    text: POST_ACTIVITY_SEED, // fallback for a worker that predates the post-activity layer
   });
 }

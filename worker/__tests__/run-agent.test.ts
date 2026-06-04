@@ -24,6 +24,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import { hydrate, syncBack, cleanup } from '../folder';
 import { sendReply } from '../send';
 import { persistRun } from '../persist';
+import { buildPrompt } from '../system-prompt';
 import { supabaseAdmin } from '@/lib/db';
 import { ALLOWED_TOOLS } from '../isolation';
 
@@ -101,6 +102,19 @@ describe('runAgent — happy path', () => {
   it('maps tg_message to the adhoc kind', async () => {
     await runAgent(ATHLETE, 'tg_message', 'how did I do?');
     expect((persistRun as AnyMock).mock.calls[0][0].kind).toBe('adhoc');
+  });
+
+  it('maps post_activity to the adhoc kind and passes the activity id to buildPrompt', async () => {
+    await runAgent(ATHLETE, 'post_activity', undefined, 1360128428);
+    expect((persistRun as AnyMock).mock.calls[0][0].kind).toBe('adhoc');
+    // buildPrompt(source, tz, message, history, activityId)
+    expect((buildPrompt as AnyMock).mock.calls[0]).toEqual([
+      'post_activity',
+      'America/Los_Angeles',
+      undefined,
+      [],
+      1360128428,
+    ]);
   });
 
   it('syncs back, sends the result text, and cleans up', async () => {

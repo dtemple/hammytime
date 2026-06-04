@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { safetyCapsBlock } from '../system-prompt';
+import { buildPrompt, safetyCapsBlock } from '../system-prompt';
 import { DRAFT_SAFETY_CAPS } from '@/lib/plan-templates/caps';
+
+const TZ = 'America/Los_Angeles';
 
 describe('coach prompt — safety caps share one source of truth', () => {
   it('coach.md carries the {{safety_caps}} placeholder', () => {
@@ -36,5 +38,34 @@ describe('coach prompt — safety caps share one source of truth', () => {
   it('falls back to the full per-distance list when there’s no race', () => {
     const block = safetyCapsBlock(DRAFT_SAFETY_CAPS, null);
     expect(block).toContain(`marathon ${DRAFT_SAFETY_CAPS.maxLongRunMiByDistance.marathon} mi`);
+  });
+});
+
+describe('buildPrompt — post_activity', () => {
+  it('directs the agent to the post-activity note and includes the activity id hint', () => {
+    const prompt = buildPrompt('post_activity', TZ, undefined, [], 1360128428);
+    expect(prompt).toContain('just completed an activity');
+    expect(prompt).toContain('Strava id 1360128428');
+    expect(prompt).toContain('strava_recent.json');
+    // It must not auto-edit the plan this turn — only acknowledge + ask.
+    expect(prompt).toMatch(/Don't change the plan/i);
+  });
+
+  it('omits the id hint when no activity id is passed', () => {
+    const prompt = buildPrompt('post_activity', TZ);
+    expect(prompt).toContain('just completed an activity');
+    expect(prompt).not.toContain('Strava id');
+  });
+
+  it('appends recent conversation when there is history', () => {
+    const prompt = buildPrompt(
+      'post_activity',
+      TZ,
+      undefined,
+      [{ direction: 'in', body: 'thanks coach' }],
+      42,
+    );
+    expect(prompt).toContain('Recent conversation, oldest first:');
+    expect(prompt).toContain('Athlete: thanks coach');
   });
 });
