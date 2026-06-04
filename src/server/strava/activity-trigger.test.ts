@@ -15,6 +15,9 @@ const ATHLETE_ID = 'athlete-uuid-1';
 const CHAT_ID = '987654321';
 const OBJECT_ID = 1360128428;
 
+// Records how the cooldown query was built, so a test can assert its scope.
+let cooldownQuery: { eqCol?: unknown; eqVal?: unknown; likeCol?: unknown; likePattern?: unknown };
+
 // Onboarded athletes have step >= onboardingSteps.length; 99 clears any length.
 function makeAthlete(overrides: Record<string, unknown> = {}) {
   return {
@@ -69,14 +72,24 @@ function makeDb(
       if (table === 'job_queue') {
         return {
           select: vi.fn().mockReturnValue({
-            in: vi.fn().mockReturnValue({
-              like: vi.fn().mockReturnValue({
-                gte: vi.fn().mockReturnValue({
-                  limit: vi.fn().mockReturnValue({
-                    maybeSingle: vi.fn().mockResolvedValue({ data: recentRow, error: null }),
-                  }),
+            eq: vi.fn().mockImplementation((col: unknown, val: unknown) => {
+              cooldownQuery.eqCol = col;
+              cooldownQuery.eqVal = val;
+              return {
+                like: vi.fn().mockImplementation((col2: unknown, pattern: unknown) => {
+                  cooldownQuery.likeCol = col2;
+                  cooldownQuery.likePattern = pattern;
+                  return {
+                    gte: vi.fn().mockReturnValue({
+                      limit: vi.fn().mockReturnValue({
+                        maybeSingle: vi
+                          .fn()
+                          .mockResolvedValue({ data: recentRow, error: null }),
+                      }),
+                    }),
+                  };
                 }),
-              }),
+              };
             }),
           }),
         };
@@ -88,6 +101,7 @@ function makeDb(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  cooldownQuery = {};
 });
 
 describe('handleActivityCreate', () => {
@@ -141,9 +155,18 @@ describe('handleActivityCreate', () => {
     expect(enqueueJob).not.toHaveBeenCalled();
   });
 
-  it('stands down when a coaching run was enqueued within the cooldown', async () => {
+  it('stands down when a prior post-activity push is within the cooldown', async () => {
     (supabaseAdmin as AnyMock).mockReturnValue(makeDb({ recentRow: { id: 'job-1' } }));
     await handleActivityCreate(PROVIDER_ID, OBJECT_ID);
     expect(enqueueJob).not.toHaveBeenCalled();
+  });
+
+  it('scopes the cooldown to prior post-activity pushes only (not the daily/chat)', async () => {
+    (supabaseAdmin as AnyMock).mockReturnValue(makeDb());
+    await handleActivityCreate(PROVIDER_ID, OBJECT_ID);
+    expect(cooldownQuery.eqCol).toBe('kind');
+    expect(cooldownQuery.eqVal).toBe('tg_message');
+    expect(cooldownQuery.likeCol).toBe('key_unique');
+    expect(cooldownQuery.likePattern).toBe(`tg_strava:${ATHLETE_ID}:%`);
   });
 });

@@ -10,21 +10,23 @@
 // Two guards keep this from spamming (and from drawing down agent_runs/credits):
 //   - per-activity dedup via the job key `tg_strava:<athlete>:<objectId>` (a
 //     repeated delivery of the same event is an enqueue no-op), and
-//   - a per-athlete cooldown: skip if any coaching run (daily or ad-hoc) was
-//     enqueued in the last few hours. This also makes the post-activity send
-//     defer to the morning daily — see POST_ACTIVITY_COOLDOWN_MS.
+//   - a per-athlete cooldown that stands down only on a recent *post-activity*
+//     push (another `tg_strava:<athlete>:…` job). It deliberately ignores the
+//     daily and the athlete's own chat/commands: the post-activity push should
+//     fire even right after the morning note. Its only job is to swallow a burst
+//     of activities uploaded at once (a watch syncing a backlog).
 
 import { supabaseAdmin } from '@/lib/db';
 import { enqueueJob } from '@/server/jobs/enqueue';
 import { onboardingSteps } from '@/server/telegram/onboarding';
 
 /**
- * How recently a coaching run must have been enqueued for the post-activity send
- * to stand down. Wide enough to (a) collapse a watch backlog-sync into one
- * message and (b) suppress a post-activity send right after the 6:30 daily.
- * An evening run after a morning run still gets its own message (>3h gap).
+ * How recently another post-activity push must have fired for this one to stand
+ * down. Sized to catch a backlog-sync burst (those upload seconds apart) while
+ * letting a genuine double-day — an AM and a PM run an hour-plus apart — each get
+ * their own message.
  */
-export const POST_ACTIVITY_COOLDOWN_MS = 3 * 60 * 60 * 1000;
+export const POST_ACTIVITY_COOLDOWN_MS = 60 * 60 * 1000;
 
 /**
  * The same intent as the /fresh_update command, anchored to the just-logged
@@ -77,15 +79,18 @@ export async function handleActivityCreate(
   const step = (athlete.onboarding_state as { step?: number } | null)?.step ?? 0;
   if (step < onboardingSteps.length) return;
 
-  // Cooldown: stand down if we already engaged recently. Completed-inclusive
-  // (a recently-finished daily should still suppress), scoped to the athlete via
-  // the uuid embedded in key_unique — same shape as bot.ts hasInFlightCoachingRun.
+  // Cooldown: stand down only if another post-activity push fired recently. The
+  // key prefix `tg_strava:<athlete>:` scopes this to our own pushes — the daily,
+  // /fresh_update, and ordinary chat (other tg_message keys) don't suppress it,
+  // so the push still fires right after the morning note. The athlete uuid has no
+  // LIKE wildcard chars and the pattern is colon-bounded, so it can't match
+  // another athlete or job kind.
   const since = new Date(Date.now() - POST_ACTIVITY_COOLDOWN_MS).toISOString();
   const { data: recent } = await db
     .from('job_queue')
     .select('id')
-    .in('kind', ['daily_checkin', 'tg_message'])
-    .like('key_unique', `%${athleteId}%`)
+    .eq('kind', 'tg_message')
+    .like('key_unique', `tg_strava:${athleteId}:%`)
     .gte('created_at', since)
     .limit(1)
     .maybeSingle();
