@@ -95,6 +95,9 @@ npm run bot:dev
 # 2. Wipe the test athlete back to pre-onboarding (safe — see guard below)
 npm run test:reset -- davidjtemple@gmail.com
 
+# Test but keep strava
+npm run test:reset -- davidjtemple@gmail.com --skip-strava
+
 # 3. Mint a fresh start token
 npm run token:mint -- davidjtemple@gmail.com
 ```

@@ -346,7 +346,7 @@ body {
 .ht-does-row dt {
   font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13px;
-  color: var(--ink);
+  color: var(--accent);
   padding-top: 1px;
 }
 
