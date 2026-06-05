@@ -29,6 +29,15 @@ export const SLOT_CHIPS: Partial<Record<SlotKey, readonly Chip[]>> = {
     { label: 'Half', value: 'half' },
     { label: 'Marathon', value: 'marathon' },
   ],
+  // The enum literal is the chip value so it round-trips cleanly through
+  // coerceFill; this also guarantees a tappable escape if the model ever fails
+  // to map a prose answer onto the enum (the §5 "intermediate" loop).
+  experience_tier: [
+    { label: 'New to running', value: 'beginner' },
+    { label: 'Run for fun', value: 'for_fun' },
+    { label: 'Some training', value: 'some_training' },
+    { label: 'Experienced', value: 'experienced' },
+  ],
 };
 
 /** The injury beat's chips. Kept separate because the set carries the safety

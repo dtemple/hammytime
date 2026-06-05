@@ -77,7 +77,16 @@ export function mergeFills(slots: SlotState, fills: SlotFill[]): SlotState {
   const next: SlotState = { ...slots };
   for (const fill of fills) {
     const coerced = coerceFill(fill.slot, fill.value);
-    if (coerced === undefined) continue; // dropped invalid
+    if (coerced === undefined) {
+      // Dropped invalid. Silent drops on a required slot strand the flow (the
+      // §5 experience_tier loop), so make them visible.
+      if (SLOTS[fill.slot].class === 'required-core') {
+        console.warn(
+          `[onboarding] dropped invalid ${fill.slot} fill: ${JSON.stringify(fill.value)}`,
+        );
+      }
+      continue;
+    }
 
     let value = coerced;
     let provenance = fill.provenance;
@@ -169,7 +178,7 @@ function buildConfirmMessage(slot: SlotKey, value: unknown): string {
 }
 
 function buildAskMessage(slot: SlotKey): string {
-  return `Before I build your plan I still need your ${slotLabel(slot)}.`;
+  return `One more thing before I build your plan — what's your ${slotLabel(slot)}?`;
 }
 
 const DISTANCE_LABELS: Record<string, string> = {

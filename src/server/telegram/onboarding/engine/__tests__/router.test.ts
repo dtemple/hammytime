@@ -210,6 +210,45 @@ describe('router — generate handoff', () => {
   });
 });
 
+// --- §5 fix: the experience loop is broken by enum chips ---
+
+describe('router — a stranded experience_tier re-asks with tappable chips', () => {
+  it('drops the model\'s "intermediate" fill and re-asks experience with enum chips', async () => {
+    // Reproduces the live loop: the model classified the athlete as
+    // "intermediate" (not in the enum) and tried to generate. The fill is
+    // dropped, experience stays open, and the re-ask must carry valid chips so
+    // the athlete can break out instead of seeing the same dead-end statement.
+    const slots = completeSlots();
+    delete slots.experience_tier;
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'recap',
+      slots,
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'generate',
+        message: 'building it',
+        fills: [{ slot: 'experience_tier', value: 'intermediate', provenance: 'stated' }],
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(30, 'looks right'), athlete);
+
+    expect(commitSlots).not.toHaveBeenCalled();
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toMatch(/experience/);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const labels = (call[2] as any).reply_markup.inline_keyboard
+      .flat()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((b: any) => b.text);
+    expect(labels).toEqual(['New to running', 'Run for fun', 'Some training', 'Experienced']);
+  });
+});
+
 // --- W4: chip policy vs the numeric backstop (ordering) ---
 
 describe('router — numeric backstop keeps its chips over the chip policy', () => {

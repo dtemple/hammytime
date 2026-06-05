@@ -173,6 +173,19 @@ const INJURY_RULES = [
   'Silence or a skip is NOT "no injury" — leave it unknown. Capture history (active / monitoring / past), not just today.',
 ].join(' ');
 
+// Enum slots take ONLY these literal values — anything else is silently dropped,
+// which strands a required slot and loops the flow. Map the athlete's words onto
+// the closest literal (e.g. "a few years of consistent running" → experienced),
+// never a free-text label like "intermediate".
+const ENUM_RULES = [
+  'Closed-enum slots take ONLY these exact literal values — never a paraphrase:',
+  '- experience_tier: "beginner" (new to running), "for_fun" (runs but no structure), "some_training" (some structured training), "experienced" (years of consistent training). There is no "intermediate" — map it to some_training or experienced.',
+  '- goal_distance: "5k", "10k", "half", "marathon", "keep_fit" (no race, staying fit).',
+  '- goal_type: "race", "general_fitness".',
+  '- injury_status: "none", "active", "monitoring", "past", "unknown".',
+  '- injury_detail.status: "active", "monitoring", "past".',
+].join('\n');
+
 const FLOW_RULES = [
   'Fill slots from natural conversation — any message can fill any slot. Never re-ask something already answered.',
   'Work through three topics in order: 1) the goal + race, 2) current training shape (days/week, long-run day, experience), 3) injuries. One topic per message; once a topic is covered, move to the next.',
@@ -186,6 +199,7 @@ export function buildSystemPrompt(): string {
     'You are running the onboarding conversation for a marathon coaching app over Telegram.',
     VOICE_RULES,
     FLOW_RULES,
+    ENUM_RULES,
     NUMERIC_RULES,
     INJURY_RULES,
     'Each turn, call extract_and_advance with ONLY the slots that changed plus your next move. Never reply in plain text.',

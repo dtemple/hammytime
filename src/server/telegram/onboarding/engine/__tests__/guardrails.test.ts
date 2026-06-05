@@ -57,6 +57,14 @@ describe('coerceFill', () => {
     expect(coerceFill('goal_distance', '50k')).toBeUndefined();
     expect(coerceFill('experience_tier', 'beginner')).toBe('beginner');
   });
+  it('drops the prose "intermediate" label that stranded the loop; accepts every tier literal', () => {
+    // The §5 bug: the model emitted "intermediate" (not in the enum), it was
+    // silently dropped, and experience_tier never filled.
+    expect(coerceFill('experience_tier', 'intermediate')).toBeUndefined();
+    for (const tier of ['beginner', 'for_fun', 'some_training', 'experienced']) {
+      expect(coerceFill('experience_tier', tier)).toBe(tier);
+    }
+  });
   it('rounds numeric slots and rejects non-numbers', () => {
     expect(coerceFill('days_per_week', '4')).toBe(4);
     expect(coerceFill('target_time', 15900.4)).toBe(15900);
@@ -355,6 +363,21 @@ describe('enforceGuardrails — chip policy wiring', () => {
     const r = enforceGuardrails(stateWith(slots), out({ next_action: 'generate' }));
     expect(r.action).toBe('ask');
     expect(r.chips.map((c) => c.value)).toEqual(['5k', '10k', 'half', 'marathon']);
+  });
+
+  it('a generate override forced to ask a missing experience ships tappable tier chips', () => {
+    // The loop-breaker: even when experience_tier is stranded open, the re-ask
+    // carries enum-literal chips so a tap supplies a valid value (§5 fix).
+    const slots = coreSlots('race');
+    delete slots.experience_tier;
+    const r = enforceGuardrails(stateWith(slots), out({ next_action: 'generate' }));
+    expect(r.action).toBe('ask');
+    expect(r.chips.map((c) => c.value)).toEqual([
+      'beginner',
+      'for_fun',
+      'some_training',
+      'experienced',
+    ]);
   });
 
   it('a generate override forced to recap (injury unanswered) gets yes-no chips', () => {
