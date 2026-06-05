@@ -12,21 +12,32 @@
  * telegram_chat_id). The real day-to-day athlete is linked to a private chat
  * (positive id), so this script physically cannot touch it.
  *
- * Usage: npm run test:reset -- <email>
+ * Usage:
+ *   npm run test:reset -- <email>                 # reset, then re-/start (taps Connect Strava)
+ *   npm run test:reset -- <email> --skip-strava   # reset and land straight at the orientation
  *
- * After resetting, mint a fresh token (npm run token:mint -- <email>) and paste
- * /start@<bot> <token> into the group for a clean onboarding run.
+ * Default: after resetting, mint a fresh token (npm run token:mint -- <email>)
+ * and paste /start@<bot> <token> into the group for a clean onboarding run.
+ *
+ * --skip-strava: the Strava token is preserved (as always), so this replays the
+ * post-OAuth handoff in code — it seeds the same state the Strava callback would
+ * and sends the orientation message ("Ready? [Let's go]"), so you continue the
+ * conversation without re-tapping Connect Strava or re-authorizing. No token mint
+ * needed.
  */
 
 import { config } from 'dotenv';
 config({ path: '.env.local' });
 
 import { supabaseAdmin } from '../src/lib/db';
+import { resumeAfterStrava } from '../src/server/telegram/onboarding/strava-resume';
 
 async function main() {
-  const email = process.argv[2]?.trim().toLowerCase();
+  const args = process.argv.slice(2);
+  const skipStrava = args.includes('--skip-strava');
+  const email = args.find((a) => !a.startsWith('-'))?.trim().toLowerCase();
   if (!email) {
-    console.error('Usage: npm run test:reset -- <email>');
+    console.error('Usage: npm run test:reset -- <email> [--skip-strava]');
     process.exit(1);
   }
 
@@ -101,7 +112,36 @@ async function main() {
   console.log(`Marked ${tokensMarked ?? 0} link_token(s) used`);
   console.log('Reset onboarding_state to step 0 and cleared checkin_state.');
   console.log('Strava connection, messages, and agent_runs left untouched.');
-  console.log('Done. Mint a fresh token to re-onboard: npm run token:mint -- ' + email);
+
+  if (!skipStrava) {
+    console.log('Done. Mint a fresh token to re-onboard: npm run token:mint -- ' + email);
+    return;
+  }
+
+  // --skip-strava: replay the post-OAuth handoff in code. resumeAfterStrava only
+  // fires when onboarding is sitting at sub_step 'awaiting_strava' (the state A0
+  // seeds right before the Connect Strava prompt), so put it there first, then
+  // hand off exactly as the real Strava callback does — using the preserved token
+  // to seed the snapshot and sending the orientation message to the group.
+  const { error: stateErr } = await db
+    .from('athletes')
+    .update({ onboarding_state: { step: 0, question: 0, partial: { sub_step: 'awaiting_strava' } } })
+    .eq('id', athlete.id);
+  if (stateErr) {
+    console.error('Error seeding awaiting_strava state:', stateErr.message);
+    process.exit(1);
+  }
+
+  const resumed = await resumeAfterStrava(athlete.id);
+  if (!resumed) {
+    console.error(
+      'resumeAfterStrava did not fire — is the Strava token still connected for this athlete? ' +
+        'Fall back to the normal flow: npm run token:mint -- ' + email,
+    );
+    process.exit(1);
+  }
+
+  console.log('Skipped Strava: sent the orientation message. Continue in the group from "Ready?".');
 }
 
 main().catch((err) => {
