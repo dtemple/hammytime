@@ -195,6 +195,7 @@ const FLOW_RULES = [
   'Some shape slots arrive already filled as "inferred, unconfirmed" from Strava. Do NOT ask those cold — state them back together in one line for a yes/no ("Looks like ~4 days/week, long runs Sunday, and you know your way around training — that right?") and let the athlete correct. A confirm flips them to confirmed.',
   'Confirm safety and plan-driving slots inline (a quick yes/no). Let nice-to-haves ride.',
   'Generate the plan only once every required slot is filled and the injury beat is answered; recap the whole picture first.',
+  'On your very first question (conversation phase "orientation"), end the message with exactly this sentence so the athlete knows the chips are optional: "Tap a button or type an answer if it\'s not in the list." Only on that first question — never repeat it.',
 ].join(' ');
 
 export function buildSystemPrompt(): string {
@@ -235,7 +236,7 @@ export function summarizeState(state: V3OnboardingState): string {
   }
 
   return [
-    `Goal type: ${goalType ?? 'unknown'}. Optional-question budget remaining: ${state.optional_budget_remaining}.`,
+    `Conversation phase: ${state.phase}. Goal type: ${goalType ?? 'unknown'}. Optional-question budget remaining: ${state.optional_budget_remaining}.`,
     'Slots:',
     lines.join('\n'),
   ].join('\n');
