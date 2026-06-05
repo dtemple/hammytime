@@ -49,35 +49,39 @@ export default function Home() {
 
         <CheckinBubble />
 
-        <section id="how" className="ht-steps">
-          <div className="ht-step">
-            <div className="ht-step-num">01</div>
-            <div>
-              <h3>Prevent injuries</h3>
-              <p>
-                Daybreak adjusts your plan as you go to account for flare&#8209;ups, tweaks, and
-                past injuries.
-              </p>
+        <section id="how" className="ht-does">
+          <div className="ht-does-label">What it does</div>
+          <dl className="ht-does-list">
+            <div className="ht-does-row">
+              <dt>plan</dt>
+              <dd>
+                Creates a plan that fits your schedule and goals.
+              </dd>
             </div>
-          </div>
-          <div className="ht-step">
-            <div className="ht-step-num">02</div>
-            <div>
-              <h3>Connected to your calendar</h3>
-              <p>
-                Adds training sessions directly to your Google/Apple calendars.
-              </p>
+            <div className="ht-does-row">
+              <dt>load</dt>
+              <dd>
+                Tracks vertical, mileage and intensity from Strava. Pre-emptively flags risks.
+              </dd>
             </div>
-          </div>
-          <div className="ht-step">
-            <div className="ht-step-num">03</div>
-            <div>
-              <h3>Daily check&#8209;ins</h3>
-              <p>
-                Ask questions, make updates, and personalize it to your needs. Daybreak is grounded in real-life training principles, injury patterns and strength plans.
-              </p>
+            <div className="ht-does-row">
+              <dt>injury</dt>
+              <dd>Remembers the calf, the IT band, the rolled ankle — and plans around them.</dd>
             </div>
-          </div>
+            <div className="ht-does-row">
+              <dt>calendar</dt>
+              <dd>Writes the day&rsquo;s session into Google / Apple Calendar automatically.</dd>
+            </div>
+            <div className="ht-does-row">
+              <dt>adjusts</dt>
+              <dd>
+                A morning message in Telegram. Reply in plain English; the plan adapts to your needs.
+              </dd>
+            </div>
+          </dl>
+          <p className="ht-does-manifesto">
+            No leaderboards. No ads. No premium tier. Free to start, then pay for just the LLM tokens you use.
+          </p>
         </section>
       </main>
 
