@@ -48,18 +48,91 @@ function age(dob: string | null): string {
   return `${years}yo`;
 }
 
-function goalRaceLine(race: Awaited<ReturnType<typeof loadAthleteData>>['goalRace']): string {
-  if (!race) return 'Goal race: not set yet — confirm it before prescribing a build.';
-  const parts = [race.name];
-  if (race.date) parts.push(race.date);
-  const detail: string[] = [];
-  if (race.distance_mi != null) detail.push(`${race.distance_mi} mi`);
-  if (race.elevation_ft != null) detail.push(`${race.elevation_ft} ft`);
-  const goal =
-    race.target_type === 'time' && race.target_time_sec
-      ? `sub-${formatTime(race.target_time_sec)}`
-      : 'finish';
-  return `Goal race: ${parts.join(', ')}${detail.length ? ` — ${detail.join(', ')}` : ''}. Target: ${goal}.`;
+type LoadedData = Awaited<ReturnType<typeof loadAthleteData>>;
+
+// Which of the three coaching postures this athlete is in. A real race row wins
+// (committed); otherwise the structured goal_state separates an athlete who wants
+// a race but hasn't picked one (intended) from a no-race base athlete (no_race).
+// `unknown` is the legacy fallback (no training profile) — coached as a normal
+// race athlete, preserving prior behavior.
+type CoachMode = 'committed' | 'intended' | 'no_race' | 'unknown';
+
+function coachMode(
+  race: LoadedData['goalRace'],
+  profile: LoadedData['trainingProfile'],
+): CoachMode {
+  if (race) return 'committed';
+  if (profile?.goal_state === 'day_to_day') return 'no_race';
+  if (profile?.goal_state === 'intended') return 'intended';
+  return 'unknown';
+}
+
+function distanceLabel(distance: string | null): string {
+  switch (distance) {
+    case '5k':
+      return '5K';
+    case '10k':
+      return '10K';
+    case 'half':
+      return 'half marathon';
+    case 'marathon':
+      return 'marathon';
+    default:
+      return 'race';
+  }
+}
+
+function goalLine(
+  race: LoadedData['goalRace'],
+  profile: LoadedData['trainingProfile'],
+  mode: CoachMode,
+): string {
+  if (race) {
+    const parts = [race.name];
+    if (race.date) parts.push(race.date);
+    const detail: string[] = [];
+    if (race.distance_mi != null) detail.push(`${race.distance_mi} mi`);
+    if (race.elevation_ft != null) detail.push(`${race.elevation_ft} ft`);
+    const goal =
+      race.target_type === 'time' && race.target_time_sec
+        ? `sub-${formatTime(race.target_time_sec)}`
+        : 'finish';
+    return `Goal race: ${parts.join(', ')}${detail.length ? ` — ${detail.join(', ')}` : ''}. Target: ${goal}.`;
+  }
+  if (mode === 'no_race') {
+    return "Goal: general fitness — no race on the calendar. Keep them consistent and healthy; build and hold an aerobic base. Don't push toward a peak or nudge them to pick a race unless they raise it.";
+  }
+  if (mode === 'intended') {
+    return `Goal: a ${distanceLabel(profile?.goal_distance ?? null)} in mind — no race picked yet. Help them lock one when the timing's right; don't build a peak until a date binds.`;
+  }
+  return 'Goal race: not set yet — confirm it before prescribing a build.';
+}
+
+// Line 3 of coach.md — the coach's mission. Race/intended athletes get the
+// on-track-toward-a-race framing; a no-race athlete gets a consistency/base mission.
+function missionLine(mode: CoachMode): string {
+  if (mode === 'no_race') {
+    return "You coach one athlete who's running to stay fit — no race on the calendar. Your job: read their files, keep them healthy, grow their aerobic base, and make running a durable habit — giving specific, actionable guidance, including prehab, every time you write to them.";
+  }
+  return "You coach one athlete toward their goal race. Your job: read their files, judge whether they're on track, flag risks early, and give specific, actionable guidance — including prehab — every time you write to them.";
+}
+
+// The goal-pace bullet in "Filling known gaps". A no-race athlete has no
+// target_time gap (it's suppressed at seed), so the goal-pace logic is dropped.
+function targetTimeGapGuidance(mode: CoachMode): string {
+  if (mode === 'no_race') {
+    return "- Paces are effort-led — easy, steady, hard. There's no finish-time goal to chase, so don't ask for one unless they bring up a race.";
+  }
+  return '- The first goal-pace session is when `target_time` earns its ask. A time goal turns effort-led paces into concrete targets.';
+}
+
+// The parenthetical examples in the known_gaps.md file description. A no-race
+// athlete never has the race-only gaps seeded, so they're left out here too.
+function knownGapsExamples(mode: CoachMode): string {
+  if (mode === 'no_race') {
+    return 'strength equipment, schedule constraints';
+  }
+  return 'a finish-time goal, strength equipment, tune-up races, schedule constraints';
 }
 
 function formatTime(sec: number): string {
@@ -117,12 +190,18 @@ export async function renderSystemPrompt(athleteId: string): Promise<string> {
   const data = await loadAthleteData(athleteId);
   const template = await loadTemplate();
 
+  const mode = coachMode(data.goalRace, data.trainingProfile);
+
   const values: Record<string, string> = {
     name: data.athlete.name,
     age: age(data.athlete.dob),
     sex: data.athlete.sex ?? 'sex unknown',
     timezone: data.athlete.timezone,
-    goal_race_line: goalRaceLine(data.goalRace),
+    coach_title: mode === 'no_race' ? 'Running coach' : 'Marathon coach',
+    coach_mission_line: missionLine(mode),
+    goal_race_line: goalLine(data.goalRace, data.trainingProfile, mode),
+    target_time_gap_guidance: targetTimeGapGuidance(mode),
+    known_gaps_examples: knownGapsExamples(mode),
     asthma_line: data.athlete.asthma ? '- Mild asthma — watch cold/dry/high-effort conditions' : '',
     injury_history: injuryHistory(data.injuries),
     safety_caps: safetyCapsBlock(DRAFT_SAFETY_CAPS, data.goalRace?.distance_mi ?? null),

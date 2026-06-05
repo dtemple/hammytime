@@ -1,8 +1,16 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { buildPrompt, safetyCapsBlock } from '../system-prompt';
+import { buildPrompt, safetyCapsBlock, renderSystemPrompt } from '../system-prompt';
 import { DRAFT_SAFETY_CAPS } from '@/lib/plan-templates/caps';
+
+// renderSystemPrompt's only DB dependency is loadAthleteData; mock it so the
+// three-way goal branch + coach.md template fill (V3-W7) is testable. The
+// template itself is read from the real worker/prompts/coach.md on disk. The
+// pure-helper suites below don't touch these mocks.
+const { mockLoadAthleteData } = vi.hoisted(() => ({ mockLoadAthleteData: vi.fn() }));
+vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
+vi.mock('@/server/agent/byo-plan', () => ({ loadAthleteData: mockLoadAthleteData }));
 
 const TZ = 'America/Los_Angeles';
 
@@ -67,5 +75,119 @@ describe('buildPrompt — post_activity', () => {
     );
     expect(prompt).toContain('Recent conversation, oldest first:');
     expect(prompt).toContain('Athlete: thanks coach');
+  });
+});
+
+describe('renderSystemPrompt — three-way goal branch (V3-W7)', () => {
+  const baseAthlete = {
+    id: 'a1',
+    name: 'Sam',
+    dob: '1990-01-01',
+    sex: 'M',
+    timezone: TZ,
+    notes: null,
+    asthma: false,
+    telegram_chat_id: '123',
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function loaded(overrides: Record<string, unknown>): any {
+    return {
+      athlete: baseAthlete,
+      goalRace: null,
+      tuneupRaces: [],
+      pastRace: null,
+      injuries: [],
+      profileMd: '',
+      trainingProfile: null,
+      ...overrides,
+    };
+  }
+
+  const committedRace = {
+    id: 'r1',
+    name: 'CIM',
+    date: '2026-12-06',
+    distance_mi: 26.2,
+    elevation_ft: 300,
+    terrain: 'road',
+    target_type: 'finish',
+    target_time_sec: null,
+    status: 'upcoming',
+    created_at: '2026-06-01',
+  };
+
+  const profile = (goal_state: string, goal_distance: string) => ({
+    athlete_id: 'a1',
+    goal_type: goal_state === 'day_to_day' ? 'day_to_day' : 'race',
+    goal_state,
+    goal_distance,
+    experience_tier: 'some_training',
+    days_per_week: 4,
+    long_run_day: 0,
+    target_date: null,
+    goal_race_id: null,
+    created_at: '2026-06-01',
+    updated_at: '2026-06-01',
+  });
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it('leaves no residual {{placeholders}} in any mode', async () => {
+    const fixtures = [
+      loaded({ goalRace: committedRace, trainingProfile: profile('committed', 'marathon') }),
+      loaded({ trainingProfile: profile('intended', 'half') }),
+      loaded({ trainingProfile: profile('day_to_day', 'keep_fit') }),
+      loaded({}), // legacy: no profile, no race
+    ];
+    for (const data of fixtures) {
+      mockLoadAthleteData.mockResolvedValueOnce(data);
+      const out = await renderSystemPrompt('a1');
+      expect(out).not.toContain('{{');
+      expect(out).not.toContain('}}');
+    }
+  });
+
+  it('committed race: marathon framing + goal-pace logic', async () => {
+    mockLoadAthleteData.mockResolvedValueOnce(
+      loaded({ goalRace: committedRace, trainingProfile: profile('committed', 'marathon') }),
+    );
+    const out = await renderSystemPrompt('a1');
+    expect(out).toContain('# Marathon coach');
+    expect(out).toContain('toward their goal race');
+    expect(out).toContain('Goal race: CIM');
+    expect(out).toContain('first goal-pace session');
+    expect(out).toContain('tune-up races');
+  });
+
+  it('intended: still race-framed, nudges to lock a race', async () => {
+    mockLoadAthleteData.mockResolvedValueOnce(
+      loaded({ trainingProfile: profile('intended', 'half') }),
+    );
+    const out = await renderSystemPrompt('a1');
+    expect(out).toContain('# Marathon coach');
+    expect(out).toContain('half marathon in mind');
+    expect(out).toContain('no race picked yet');
+    expect(out).toContain('first goal-pace session'); // race-only logic kept
+  });
+
+  it('no-race / keep_fit: consistency framing, no race/goal-pace logic', async () => {
+    mockLoadAthleteData.mockResolvedValueOnce(
+      loaded({ trainingProfile: profile('day_to_day', 'keep_fit') }),
+    );
+    const out = await renderSystemPrompt('a1');
+    expect(out).toContain('# Running coach');
+    expect(out).toContain('no race on the calendar');
+    expect(out).not.toContain('toward their goal race');
+    expect(out).not.toContain('first goal-pace session');
+    expect(out).not.toContain('tune-up races'); // suppressed in the gaps examples
+    expect(out).toContain('effort-led');
+  });
+
+  it('legacy athlete with no profile: preserves the old "not set yet" line', async () => {
+    mockLoadAthleteData.mockResolvedValueOnce(loaded({}));
+    const out = await renderSystemPrompt('a1');
+    expect(out).toContain('# Marathon coach');
+    expect(out).toContain('Goal race: not set yet');
   });
 });

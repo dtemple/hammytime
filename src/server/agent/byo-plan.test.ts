@@ -98,6 +98,7 @@ function makeFullDb(
     races?: Record<string, unknown>[];
     injuries?: Record<string, unknown>[];
     profileMd?: string;
+    trainingProfile?: Record<string, unknown> | null;
   } = {},
 ) {
   const athlete = {
@@ -178,6 +179,17 @@ function makeFullDb(
                 .fn()
                 .mockResolvedValue({ data: { content_md: profileMd }, error: null }),
             }),
+          }),
+        }),
+      };
+    }
+    if (table === 'athlete_training_profile') {
+      return {
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            maybeSingle: vi
+              .fn()
+              .mockResolvedValue({ data: overrides.trainingProfile ?? null, error: null }),
           }),
         }),
       };

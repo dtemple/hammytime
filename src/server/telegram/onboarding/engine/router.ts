@@ -463,7 +463,10 @@ async function runGapWalkTurn(
     const { filled } = parseKnownGaps(await loadKnownGapsContent(athleteId));
     const merged = { ...filled, ...gapValues };
     if (Object.keys(merged).some((k) => merged[k as KnownGapKey] !== filled[k as KnownGapKey])) {
-      await seedKnownGapsFromFilled(athleteId, merged).catch((e) =>
+      // Keep the no-race / keep_fit athlete's race-only gaps suppressed: the file
+      // is re-rendered whole, so without this they'd reappear as [open] (V3-W7).
+      const noRace = slots.goal_type?.value === 'general_fitness';
+      await seedKnownGapsFromFilled(athleteId, merged, { excludeRaceOnly: noRace }).catch((e) =>
         console.error('[v3] gap-walk write failed', e),
       );
     }

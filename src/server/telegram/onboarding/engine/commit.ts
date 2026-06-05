@@ -16,7 +16,12 @@ import { upsertTrainingProfile, type TrainingProfileInsert } from '../athlete-tr
 import { upsertProfileSection, upsertMemorySection } from '../memory';
 import { seedKnownGapsFromFilled } from '../known-gaps-memory';
 import { formatFinishTime } from '../parsing/durations';
-import { slotsToGaps, type GoalDistanceValue, type InjuryDetail } from '../slots/schema';
+import {
+  slotsToGaps,
+  type GoalDistanceValue,
+  type GoalTypeValue,
+  type InjuryDetail,
+} from '../slots/schema';
 import type { V3OnboardingState } from '../slots/slot-state';
 
 type ProfilePatch = Partial<Omit<TrainingProfileInsert, 'athlete_id'>>;
@@ -128,7 +133,12 @@ export async function commitSlots(athleteId: string, state: V3OnboardingState): 
   await commitGoal(athleteId, state);
   await commitInjury(athleteId, state);
   await commitBackground(athleteId, state);
-  await seedKnownGapsFromFilled(athleteId, slotsToGaps(state.slots));
+  // A no-race / keep_fit athlete never gets the race-only gaps (target_time,
+  // tune_up_races) seeded — the non-race coach branch (V3-W7) drops that framing.
+  const noRace = slotVal<GoalTypeValue>(state, 'goal_type') === 'general_fitness';
+  await seedKnownGapsFromFilled(athleteId, slotsToGaps(state.slots), {
+    excludeRaceOnly: noRace,
+  });
 }
 
 async function commitIdentity(athleteId: string, state: V3OnboardingState): Promise<void> {

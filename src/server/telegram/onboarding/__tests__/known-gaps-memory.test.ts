@@ -85,6 +85,33 @@ describe('renderKnownGaps', () => {
   });
 });
 
+describe('renderKnownGapsFromFilled — excludeRaceOnly (V3-W7)', () => {
+  it('drops the race-only gaps for a no-race athlete, keeps the other four', () => {
+    const md = renderKnownGapsFromFilled({}, TODAY, { excludeRaceOnly: true });
+    // race-only gaps gone entirely (not even [open])
+    expect(md).not.toContain('target_time:');
+    expect(md).not.toContain('tune_up_races:');
+    // the non-race gaps still open
+    for (const key of ['strength_equipment', 'schedule_constraints', 'age', 'recent_long_run']) {
+      expect(md).toContain(`[open] ${key}:`);
+    }
+  });
+
+  it('still suppresses a race-only gap even when a value was somehow captured', () => {
+    const md = renderKnownGapsFromFilled({ target_time: '4:00:00' }, TODAY, {
+      excludeRaceOnly: true,
+    });
+    expect(md).not.toContain('target_time');
+    expect(md).not.toContain('4:00:00');
+  });
+
+  it('default (flag off) keeps all six gaps — race athletes unaffected', () => {
+    const md = renderKnownGapsFromFilled({}, TODAY);
+    expect(md).toContain('[open] target_time:');
+    expect(md).toContain('[open] tune_up_races:');
+  });
+});
+
 describe('seedKnownGaps', () => {
   beforeEach(() => vi.clearAllMocks());
 

@@ -437,6 +437,7 @@ describe('edit_profile — gap-walk turn', () => {
     expect(seedKnownGapsFromFilled).toHaveBeenCalledWith(
       'ath-1',
       expect.objectContaining({ age: '42' }),
+      { excludeRaceOnly: false },
     );
     const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
     expect(saved.edit_mode?.current_gap).toBe('target_time');

@@ -12,6 +12,7 @@
 
 import { supabaseAdmin } from '@/lib/db';
 import { KNOWN_GAPS, type KnownGapKey } from '@/lib/known-gaps';
+import { raceOnlyGapKeys } from './slots/schema';
 import { formatFinishTime } from './parsing/durations';
 import type { Extracted } from './steps/05-enrichment';
 
@@ -98,13 +99,23 @@ export function parseKnownGaps(md: string): ParsedGaps {
   return { open, filled };
 }
 
+/** Options for the gap renderer/seeder. */
+export interface SeedGapsOptions {
+  /** Drop the race-only gaps (`target_time`, `tune_up_races`) entirely — used for a
+   *  no-race / keep_fit athlete so the coach never sees or asks them (V3-W7). The
+   *  set comes from the slot schema's `raceOnly` flag. */
+  excludeRaceOnly?: boolean;
+}
+
 /** Pure renderer from a pre-computed filled-gap map. The v3 engine builds the map
  *  with `slotsToGaps` (slots/schema.ts); v2 builds it from enrichment. */
 export function renderKnownGapsFromFilled(
   filled: Partial<Record<KnownGapKey, string>>,
   today: string,
+  options: SeedGapsOptions = {},
 ): string {
-  const lines = GAP_ORDER.map((key) => {
+  const excluded = options.excludeRaceOnly ? raceOnlyGapKeys() : null;
+  const lines = GAP_ORDER.filter((key) => !excluded?.has(key)).map((key) => {
     const def = KNOWN_GAPS[key];
     const value = filled[key];
     if (value != null) {
@@ -127,9 +138,10 @@ export function renderKnownGaps(e: Extracted | null, today: string): string {
 export async function seedKnownGapsFromFilled(
   athleteId: string,
   filled: Partial<Record<KnownGapKey, string>>,
+  options: SeedGapsOptions = {},
 ): Promise<void> {
   const now = new Date();
-  const content = renderKnownGapsFromFilled(filled, now.toISOString().slice(0, 10));
+  const content = renderKnownGapsFromFilled(filled, now.toISOString().slice(0, 10), options);
 
   const { error } = await supabaseAdmin().from('memory_files').upsert(
     {

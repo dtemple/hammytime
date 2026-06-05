@@ -5,6 +5,10 @@ import { sendAndLog } from '@/server/telegram/bot';
 import { advanceQuestion } from '@/server/telegram/onboarding/state';
 import { onboardingSteps } from '@/server/telegram/onboarding/index';
 import { sendDavidAlert } from '@/server/admin/alerts';
+import {
+  getTrainingProfile,
+  type TrainingProfileRow,
+} from '@/server/telegram/onboarding/athlete-training-profile';
 
 // ---------------------------------------------------------------------------
 // Template renderer
@@ -80,12 +84,15 @@ type LoadedData = {
   pastRace: RaceRow | null;
   injuries: InjuryRow[];
   profileMd: string;
+  // Structured goal state (goal_state / goal_distance). Null for legacy athletes
+  // with no profile row — the coach treats that as a normal race athlete.
+  trainingProfile: TrainingProfileRow | null;
 };
 
 export async function loadAthleteData(athleteId: string): Promise<LoadedData> {
   const db = supabaseAdmin();
 
-  const [athleteRes, racesRes, injuriesRes, profileRes] = await Promise.all([
+  const [athleteRes, racesRes, injuriesRes, profileRes, trainingProfile] = await Promise.all([
     db
       .from('athletes')
       .select('id, name, dob, sex, timezone, notes, asthma, telegram_chat_id')
@@ -105,6 +112,7 @@ export async function loadAthleteData(athleteId: string): Promise<LoadedData> {
       .eq('athlete_id', athleteId)
       .eq('file_name', 'athlete_profile.md')
       .maybeSingle(),
+    getTrainingProfile(athleteId),
   ]);
 
   if (athleteRes.error || !athleteRes.data) {
@@ -127,6 +135,7 @@ export async function loadAthleteData(athleteId: string): Promise<LoadedData> {
     pastRace,
     injuries: (injuriesRes.data ?? []) as InjuryRow[],
     profileMd: profileRes.data?.content_md ?? '',
+    trainingProfile,
   };
 }
 

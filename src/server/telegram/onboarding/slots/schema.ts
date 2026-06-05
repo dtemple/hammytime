@@ -335,6 +335,19 @@ export function planDrivingSlots(): SlotKey[] {
   return SLOT_KEYS.filter((k) => SLOTS[k].planDriving);
 }
 
+/** The known-gap keys that only pay off against a race (`target_time`,
+ *  `tune_up_races`). Derived from the slots' `raceOnly` flag so this schema stays
+ *  the single source of truth — the known-gaps seeder (V3-W7) reads this to drop
+ *  these gaps for a no-race / keep_fit athlete. */
+export function raceOnlyGapKeys(): Set<KnownGapKey> {
+  const keys = new Set<KnownGapKey>();
+  for (const key of SLOT_KEYS) {
+    const def = SLOTS[key];
+    if (def.raceOnly && def.knownGapKey) keys.add(def.knownGapKey);
+  }
+  return keys;
+}
+
 /** Project the filled, stated optional slots onto known-gap values. Mirrors the
  *  stated-only rule in known-gaps-memory.ts `filledFromEnrichment`: only a
  *  `stated` fill closes a gap; `inferred`/`unknown` stay open for the daily

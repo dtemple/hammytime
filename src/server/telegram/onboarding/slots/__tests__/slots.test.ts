@@ -20,6 +20,7 @@ import {
   safetySlots,
   planDrivingSlots,
   slotsToGaps,
+  raceOnlyGapKeys,
   type GoalTypeValue,
   type SlotState,
 } from '../schema';
@@ -212,6 +213,22 @@ describe('slotsToGaps', () => {
 
   it('formats a stated target_time finish goal', () => {
     expect(slotsToGaps({ target_time: sv(15900) }).target_time).toBe('4:25:00');
+  });
+});
+
+describe('raceOnlyGapKeys (V3-W7)', () => {
+  it('returns exactly the race-only gaps that have a known-gap key', () => {
+    // goal_race / goal_date are raceOnly but carry no knownGapKey, so they're excluded.
+    expect(raceOnlyGapKeys()).toEqual(new Set(['target_time', 'tune_up_races']));
+  });
+
+  it('stays in sync with the slot schema raceOnly flags', () => {
+    const expected = new Set(
+      SLOT_KEYS.filter((k) => SLOTS[k].raceOnly && SLOTS[k].knownGapKey).map(
+        (k) => SLOTS[k].knownGapKey,
+      ),
+    );
+    expect(raceOnlyGapKeys()).toEqual(expected);
   });
 });
 
