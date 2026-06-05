@@ -5,6 +5,7 @@ import {
   firstOpenRequired,
   firstUnconfirmedInferred,
   enforceGuardrails,
+  resolveConfirmAndAdvance,
   applyChipPolicy,
   buildRecapMessage,
 } from '../guardrails';
@@ -116,6 +117,81 @@ describe('mergeFills', () => {
   });
 });
 
+// --- Confirm-loop fix (2026-06-05): merge monotonicity ---
+
+describe('mergeFills — monotonicity (the confirm-loop fix)', () => {
+  it('a re-emitted inferred value equal to a confirmed one keeps it confirmed and does not downgrade', () => {
+    const merged = mergeFills({ days_per_week: sv(3, 'stated', true) }, [
+      fill('days_per_week', 3, 'inferred'),
+    ]);
+    expect(merged.days_per_week!.confirmed).toBe(true);
+    expect(merged.days_per_week!.provenance).toBe('stated');
+  });
+
+  it('a re-emitted inferred value equal to an unconfirmed seed stays unconfirmed (no spurious flip)', () => {
+    const merged = mergeFills({ days_per_week: sv(3, 'inferred', false) }, [
+      fill('days_per_week', 3, 'inferred'),
+    ]);
+    expect(merged.days_per_week!.confirmed).toBe(false);
+    expect(merged.days_per_week!.provenance).toBe('inferred');
+  });
+
+  it('a stated re-emit of an unconfirmed inferred value confirms it (an affirmation resolves the confirm)', () => {
+    const merged = mergeFills({ days_per_week: sv(3, 'inferred', false) }, [
+      fill('days_per_week', 3, 'stated'),
+    ]);
+    expect(merged.days_per_week!.confirmed).toBe(true);
+    expect(merged.days_per_week!.provenance).toBe('stated');
+  });
+
+  it('a changed value still resets the confirm', () => {
+    const merged = mergeFills({ days_per_week: sv(3, 'inferred', false) }, [
+      fill('days_per_week', 5, 'inferred'),
+    ]);
+    expect(merged.days_per_week!.value).toBe(5);
+    expect(merged.days_per_week!.confirmed).toBe(false);
+  });
+
+  it('a re-emitted inferred "none" never wipes a confirmed stated injury answer', () => {
+    const merged = mergeFills({ injury_status: sv('none', 'stated', true) }, [
+      fill('injury_status', 'none', 'inferred'),
+    ]);
+    expect(merged.injury_status!.value).toBe('none');
+    expect(merged.injury_status!.provenance).toBe('stated');
+    expect(merged.injury_status!.confirmed).toBe(true);
+  });
+});
+
+// --- Stale goal_date fix (2026-06-05) ---
+
+describe('mergeFills — goal_date invalidation on a goal-race change', () => {
+  it('clears the date when goal_race changes with no goal_date in the delta (Broken Arrow → Rae Lakes)', () => {
+    const slots: SlotState = {
+      goal_race: sv('Broken Arrow Skyrace 18K'),
+      goal_date: sv('2026-06-19'),
+    };
+    const merged = mergeFills(slots, [fill('goal_race', 'Rae Lakes Loop')]);
+    expect(merged.goal_race!.value).toBe('Rae Lakes Loop');
+    expect(merged.goal_date!.value).toBeNull();
+    expect(merged.goal_date!.provenance).toBe('unknown');
+  });
+
+  it('keeps the date when the same delta re-supplies goal_date', () => {
+    const slots: SlotState = { goal_race: sv('Broken Arrow'), goal_date: sv('2026-06-19') };
+    const merged = mergeFills(slots, [
+      fill('goal_race', 'Rae Lakes Loop'),
+      fill('goal_date', '2026-09-12'),
+    ]);
+    expect(merged.goal_date!.value).toBe('2026-09-12');
+  });
+
+  it('keeps the date when goal_race is re-emitted unchanged', () => {
+    const slots: SlotState = { goal_race: sv('Broken Arrow'), goal_date: sv('2026-06-19') };
+    const merged = mergeFills(slots, [fill('goal_race', 'Broken Arrow', 'inferred')]);
+    expect(merged.goal_date!.value).toBe('2026-06-19');
+  });
+});
+
 describe('firstOpenRequired / firstUnconfirmedInferred', () => {
   it('finds an open required slot (goal-type aware)', () => {
     const slots = coreSlots('race');
@@ -168,6 +244,101 @@ describe('enforceGuardrails — generate gate', () => {
     );
     expect(r.action).toBe('generate');
     expect(r.overridden).toBe(false);
+  });
+});
+
+describe('enforceGuardrails — pending-confirm bookkeeping (the confirm-loop fix)', () => {
+  function seeded(over: Partial<V3OnboardingState> = {}): V3OnboardingState {
+    const slots = {
+      ...coreSlots('race'),
+      injury_status: sv('none'),
+      days_per_week: sv(4, 'inferred', false),
+    };
+    return stateWith(slots, over);
+  }
+
+  it('records pending_confirm (attempts 1) when the generate gate issues a confirm', () => {
+    const r = enforceGuardrails(seeded(), out({ next_action: 'generate' }));
+    expect(r.action).toBe('confirm');
+    expect(r.state.pending_confirm).toEqual({ slot: 'days_per_week', value: 4, attempts: 1 });
+  });
+
+  it('increments attempts on a same-slot+value re-issue', () => {
+    const r = enforceGuardrails(
+      seeded({ pending_confirm: { slot: 'days_per_week', value: 4, attempts: 1 } }),
+      out({ next_action: 'generate' }),
+    );
+    expect(r.action).toBe('confirm');
+    expect(r.state.pending_confirm?.attempts).toBe(2);
+  });
+
+  it('switches to a direct plain-words ask on the would-be third confirm, clearing pending_confirm', () => {
+    const r = enforceGuardrails(
+      seeded({ pending_confirm: { slot: 'days_per_week', value: 4, attempts: 2 } }),
+      out({ next_action: 'generate' }),
+    );
+    expect(r.action).toBe('ask');
+    expect(r.overridden).toBe(true);
+    expect(r.message).toMatch(/how many days a week/i);
+    expect(r.message).not.toMatch(/Right\?/);
+    expect(r.state.pending_confirm).toBeUndefined();
+  });
+
+  it('clears a stale pending_confirm on any non-confirm resolution', () => {
+    const r = enforceGuardrails(
+      stateWith({}, { pending_confirm: { slot: 'days_per_week', value: 4, attempts: 1 } }),
+      out({ next_action: 'ask', asked_slot: 'goal_distance' }),
+    );
+    expect(r.state.pending_confirm).toBeUndefined();
+  });
+});
+
+describe('resolveConfirmAndAdvance — chip-yes deterministic resolution', () => {
+  it('confirms the pending slot in code and advances to generate', () => {
+    const slots = {
+      ...coreSlots('race'),
+      injury_status: sv('none'),
+      days_per_week: sv(4, 'inferred', false),
+    };
+    const r = resolveConfirmAndAdvance(
+      stateWith(slots, { pending_confirm: { slot: 'days_per_week', value: 4, attempts: 1 } }),
+    );
+    expect(r.state.slots.days_per_week?.confirmed).toBe(true);
+    expect(r.state.slots.days_per_week?.provenance).toBe('stated');
+    expect(r.action).toBe('generate');
+    expect(r.state.pending_confirm).toBeUndefined();
+  });
+
+  it('chains to the next confirm when another inferred slot is unconfirmed', () => {
+    const slots = {
+      ...coreSlots('race'),
+      injury_status: sv('none'),
+      days_per_week: sv(4, 'inferred', false),
+      long_run_day: sv(0, 'inferred', false),
+    };
+    const r = resolveConfirmAndAdvance(
+      stateWith(slots, { pending_confirm: { slot: 'days_per_week', value: 4, attempts: 1 } }),
+    );
+    expect(r.action).toBe('confirm');
+    expect(r.state.pending_confirm).toEqual({ slot: 'long_run_day', value: 0, attempts: 1 });
+  });
+});
+
+describe('regression — the chase confirm loop terminates', () => {
+  it('a seeded inferred days_per_week resolves on a yes instead of re-confirming forever', () => {
+    const slots = {
+      ...coreSlots('race'),
+      injury_status: sv('none'),
+      days_per_week: sv(3, 'inferred', false),
+    };
+    // the gate issues the confirm and records it pending
+    const first = enforceGuardrails(stateWith(slots), out({ next_action: 'generate' }));
+    expect(first.action).toBe('confirm');
+    expect(first.state.pending_confirm).toEqual({ slot: 'days_per_week', value: 3, attempts: 1 });
+    // a "Looks right" tap resolves it deterministically → generate, not loop
+    const second = resolveConfirmAndAdvance(first.state);
+    expect(second.action).toBe('generate');
+    expect(second.state.pending_confirm).toBeUndefined();
   });
 });
 

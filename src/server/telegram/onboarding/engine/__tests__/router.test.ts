@@ -210,6 +210,72 @@ describe('router — generate handoff', () => {
   });
 });
 
+// --- Confirm-loop fix (2026-06-05): the chip-yes fast path ---
+
+describe('router — pending-confirm chip-yes fast path', () => {
+  it('resolves a pending confirm on a yes tap without calling the model', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'recap',
+      slots: {
+        ...completeSlots(),
+        days_per_week: { value: 4, provenance: 'inferred', confirmed: false },
+        long_run_day: { value: 0, provenance: 'inferred', confirmed: false },
+      },
+      pending_confirm: { slot: 'days_per_week', value: 4, attempts: 1 },
+    } as V3OnboardingState);
+
+    await handleV3Callback(cbCtx('cbyes'), athlete, 'v3:yes');
+
+    expect(callExtractAndAdvance).not.toHaveBeenCalled();
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.slots.days_per_week?.confirmed).toBe(true);
+    // chains to the next unconfirmed inferred slot's confirm
+    expect(saved.pending_confirm).toEqual({ slot: 'long_run_day', value: 0, attempts: 1 });
+    expect(sendMessage).toHaveBeenCalledWith(
+      99,
+      expect.stringMatching(/long-run day/i),
+      expect.anything(),
+    );
+  });
+
+  it('routes a typed affirmation through the model (fromChip is false)', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'recap',
+      slots: completeSlots(),
+      pending_confirm: { slot: 'days_per_week', value: 4, attempts: 1 },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({ next_action: 'ask', asked_slot: 'goal_type', message: 'x' }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(40, 'looks right'), athlete);
+
+    expect(callExtractAndAdvance).toHaveBeenCalledOnce();
+  });
+
+  it('routes a "Fix it" tap through the model (value is not yes)', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'recap',
+      slots: completeSlots(),
+      pending_confirm: { slot: 'days_per_week', value: 4, attempts: 1 },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({ next_action: 'ask', asked_slot: 'days_per_week', message: 'what is it?' }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Callback(cbCtx('cbfix'), athlete, 'v3:let me fix that');
+
+    expect(callExtractAndAdvance).toHaveBeenCalledOnce();
+  });
+});
+
 // --- §5 fix: the experience loop is broken by enum chips ---
 
 describe('router — a stranded experience_tier re-asks with tappable chips', () => {

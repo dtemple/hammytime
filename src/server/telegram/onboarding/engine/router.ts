@@ -27,7 +27,7 @@ import {
   seedKnownGapsFromFilled,
 } from '../known-gaps-memory';
 import { callExtractAndAdvance, logOnboardingRun, type Chip } from './extract-and-advance';
-import { enforceGuardrails, mergeFills } from './guardrails';
+import { enforceGuardrails, mergeFills, resolveConfirmAndAdvance } from './guardrails';
 import { loadRecentHistory } from './history';
 import { resolveFinishTime } from './numeric';
 import { withTyping } from './typing';
@@ -91,9 +91,19 @@ interface TurnInput {
   dedupKey?: string;
   /** What to log as the inbound (the chip's human label, or the typed text). */
   logBody?: string;
+  /** True when `text` is a chip's value (an exact, code-controlled token), not
+   *  typed prose. Only a chip tap can resolve a pending confirm in code. */
+  fromChip?: boolean;
 }
 
-async function runTurn({ athlete, chatId, text, dedupKey, logBody }: TurnInput): Promise<void> {
+async function runTurn({
+  athlete,
+  chatId,
+  text,
+  dedupKey,
+  logBody,
+  fromChip,
+}: TurnInput): Promise<void> {
   const athleteId = athlete.id;
   const state = await loadV3State(athleteId);
   if (!state) return; // not a v3 athlete (gated upstream)
@@ -105,6 +115,28 @@ async function runTurn({ athlete, chatId, text, dedupKey, logBody }: TurnInput):
   }
 
   if (dedupKey && state.last_processed_key === dedupKey) return; // Telegram retry
+
+  // Pending-confirm fast path (the 2026-06-05 confirm-loop fix): a `yes` chip tap
+  // against an outstanding guardrail confirm resolves it in code — the value is
+  // exact, so there's nothing for the model to interpret. Typed "looks right" and
+  // "Fix it" fall through to the model (summarizeState names the pending confirm).
+  if (state.pending_confirm && fromChip && text === 'yes') {
+    await logInbound(athleteId, logBody ?? text);
+    await withTyping(chatId, async () => {
+      const resolved = resolveConfirmAndAdvance(state);
+      const working: V3OnboardingState = {
+        ...resolved.state,
+        last_processed_key: dedupKey ?? state.last_processed_key,
+      };
+      if (resolved.action === 'generate') {
+        await finishOnboarding(athlete, chatId, working);
+        return;
+      }
+      await saveV3State(athleteId, working);
+      await sendV3(athleteId, chatId, resolved.message, chipsKeyboard(resolved.chips));
+    });
+    return;
+  }
 
   await logInbound(athleteId, logBody ?? text);
 
@@ -509,5 +541,6 @@ export async function handleV3Callback(
     text: value,
     dedupKey: ctx.callbackQuery?.id ? `c:${ctx.callbackQuery.id}` : undefined,
     logBody: label ?? value,
+    fromChip: true,
   });
 }

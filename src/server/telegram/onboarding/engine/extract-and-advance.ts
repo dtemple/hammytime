@@ -194,6 +194,7 @@ const FLOW_RULES = [
   'Work through three topics in order: 1) the goal + race, 2) current training shape (days/week, long-run day, experience), 3) injuries. One topic per message; once a topic is covered, move to the next.',
   'Some shape slots arrive already filled as "inferred, unconfirmed" from Strava. Do NOT ask those cold — state them back together in one line for a yes/no ("Looks like ~4 days/week, long runs Sunday, and you know your way around training — that right?") and let the athlete correct. A confirm flips them to confirmed.',
   'Confirm safety and plan-driving slots inline (a quick yes/no). Let nice-to-haves ride.',
+  "When the goal race changes, restate goal_date in the same turn (a fill) or mark it open — never let the old race's date ride on the new goal. When a former goal race becomes a tune-up, carry its name AND its date into tune_up_races.",
   'Generate the plan only once every required slot is filled and the injury beat is answered; recap the whole picture first.',
   'On your very first question (conversation phase "orientation"), end the message with exactly this sentence so the athlete knows the chips are optional: "Tap a button or type an answer if it\'s not in the list." Only on that first question — never repeat it.',
 ].join(' ');
@@ -235,11 +236,19 @@ export function summarizeState(state: V3OnboardingState): string {
     }
   }
 
+  const pending = state.pending_confirm;
+  const pendingLine = pending
+    ? `A confirm is pending for ${pending.slot} = ${JSON.stringify(pending.value)}. If the athlete affirms it ("yes", "looks right", "yep"), emit a fill for ${pending.slot} with provenance "stated" to resolve it. If they correct it, emit the corrected value.`
+    : null;
+
   return [
     `Conversation phase: ${state.phase}. Goal type: ${goalType ?? 'unknown'}. Optional-question budget remaining: ${state.optional_budget_remaining}.`,
+    pendingLine,
     'Slots:',
     lines.join('\n'),
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 // ---------------------------------------------------------------------------

@@ -49,6 +49,23 @@ export interface EditMode {
   remaining: KnownGapKey[];
 }
 
+/**
+ * A guardrail-issued confirm that is still outstanding (the generate-gate override
+ * echoing an inferred safety/plan-driving slot for a yes/no). Set by the engine
+ * when the confirm goes out; a `yes` chip tap resolves it in code with no model
+ * call (router fast path). `attempts` is the per-slot+value confirm counter — the
+ * same confirm is never sent a third time; the would-be third turn becomes a
+ * direct plain-words ask instead, so the athlete's restatement lands as a `stated`
+ * fill. (V3 engine hardening — the 2026-06-05 confirm-loop fix.)
+ */
+export interface PendingConfirm {
+  slot: SlotKey;
+  /** The value being confirmed (used to detect a same-slot+value re-issue). */
+  value: unknown;
+  /** How many times this slot+value confirm has gone out (starts at 1). */
+  attempts: number;
+}
+
 export interface V3OnboardingState {
   flow: 'v3';
   schema_version: number;
@@ -74,6 +91,10 @@ export interface V3OnboardingState {
   /** Set once the slots have been written to the DB, so a generate retry (e.g.
    *  plan-gen failed after commit) doesn't duplicate the race/injury rows. */
   committed?: boolean;
+  /** A guardrail-issued confirm awaiting an answer. Absent = nothing pending. The
+   *  engine owns this field end to end: set when a generate-gate confirm goes out,
+   *  cleared on any other resolution. */
+  pending_confirm?: PendingConfirm;
 }
 
 /** The starting v3 state, post-Strava. The fitness snapshot is cached here; the

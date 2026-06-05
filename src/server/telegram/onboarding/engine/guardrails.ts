@@ -10,7 +10,11 @@
 // the happy path the model's message and chips pass straight through.
 
 import { formatFinishTime } from '../parsing/durations';
-import { isV3OnboardingComplete, type V3OnboardingState } from '../slots/slot-state';
+import {
+  isV3OnboardingComplete,
+  type PendingConfirm,
+  type V3OnboardingState,
+} from '../slots/slot-state';
 import {
   SLOTS,
   SLOT_KEYS,
@@ -19,7 +23,7 @@ import {
   type SlotKey,
   type SlotState,
 } from '../slots/schema';
-import type { SlotValue, Provenance } from '../slots/provenance';
+import { unknownSlot, type SlotValue, type Provenance } from '../slots/provenance';
 import { INJURY_CHIPS, SLOT_CHIPS } from '../slots/chips';
 import type { Chip, ExtractAdvanceOutput, NextAction, SlotFill } from './extract-and-advance';
 
@@ -84,9 +88,31 @@ function needsConfirm(slot: SlotKey, provenance: Provenance): boolean {
   return (def.planDriving || def.safety) && provenance !== 'stated';
 }
 
-/** Apply the model's delta to the slot map, with two hard rules baked in:
- *  injury_status is only "none" on an explicit (stated) answer, and an inferred
- *  safety/plan-driving fill lands unconfirmed. */
+const PROVENANCE_RANK: Record<Provenance, number> = { unknown: 0, inferred: 1, stated: 2 };
+
+/** The stronger of two provenances. Backs merge monotonicity — a re-emit of the
+ *  same value can upgrade `inferred`→`stated`, never the reverse. */
+function strongerProvenance(a: Provenance, b: Provenance): Provenance {
+  return PROVENANCE_RANK[a] >= PROVENANCE_RANK[b] ? a : b;
+}
+
+/** Value equality for the monotonic-merge guard. Primitives compare strictly;
+ *  the two object-valued slots (injury_detail, tune_up_races) compare by shape.
+ *  coerceFill builds injury_detail with a fixed key order, so JSON is stable. */
+function slotValuesEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  if (typeof a === 'object' || typeof b === 'object')
+    return JSON.stringify(a) === JSON.stringify(b);
+  return false;
+}
+
+/** Apply the model's delta to the slot map, with the hard rules baked in:
+ *  injury_status is only "none" on an explicit (stated) answer, an inferred
+ *  safety/plan-driving fill lands unconfirmed, and — the 2026-06-05 confirm-loop
+ *  fix — a re-emitted unchanged value is MONOTONIC: it can only strengthen the
+ *  existing fill (confirm it, upgrade its provenance), never clear `confirmed` or
+ *  downgrade it. Only a genuinely changed value resets the confirm. */
 export function mergeFills(slots: SlotState, fills: SlotFill[]): SlotState {
   const next: SlotState = { ...slots };
   for (const fill of fills) {
@@ -102,6 +128,25 @@ export function mergeFills(slots: SlotState, fills: SlotFill[]): SlotState {
       continue;
     }
 
+    const current = next[fill.slot];
+
+    // Monotonic re-emit: the model re-emits unchanged slots as `inferred`, so a
+    // re-emit of the value already held must never un-confirm it or downgrade its
+    // provenance. Strengthen only — this is also how an affirmation resolves a
+    // confirm: the model echoes the slot as `stated`, the value is unchanged, so
+    // provenance upgrades inferred→stated and `confirmed` flips true.
+    if (current && current.value != null && slotValuesEqual(current.value, coerced)) {
+      const provenance = strongerProvenance(current.provenance, fill.provenance);
+      next[fill.slot] = {
+        value: current.value,
+        provenance,
+        confirmed: current.confirmed || !needsConfirm(fill.slot, fill.provenance),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as SlotValue<any>;
+      continue;
+    }
+
+    // Changed value (or first fill) — reset the confirm per provenance.
     let value = coerced;
     let provenance = fill.provenance;
 
@@ -118,6 +163,20 @@ export function mergeFills(slots: SlotState, fills: SlotFill[]): SlotState {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as SlotValue<any>;
   }
+
+  // A goal-race change invalidates the prior race's date unless the same delta
+  // re-supplies it (the 2026-06-05 stale-goal_date fix). Otherwise the looked-up
+  // date of the previous race silently survives onto the new goal. The gate then
+  // re-asks (goal_date is required-core for a race) or resolveRace re-fills it.
+  const raceFill = fills.find((f) => f.slot === 'goal_race');
+  const hasDateFill = fills.some((f) => f.slot === 'goal_date');
+  if (raceFill && !hasDateFill && next.goal_date?.value != null) {
+    const newRace = coerceFill('goal_race', raceFill.value);
+    if (newRace !== undefined && newRace !== (slots.goal_race?.value ?? null)) {
+      next.goal_date = unknownSlot<string>();
+    }
+  }
+
   return next;
 }
 
@@ -189,6 +248,23 @@ const YES_FIX_CHIPS: Chip[] = [
 
 function buildConfirmMessage(slot: SlotKey, value: unknown): string {
   return `Quick check — I've got your ${slotLabel(slot)} as ${formatSlotValue(slot, value)}. Right?`;
+}
+
+// Plain-words asks for the never-three-times backstop: once a confirm has gone
+// out twice unresolved, stop echoing the value and ask the field outright, so the
+// athlete's restatement arrives as a fresh `stated` fill instead of a yes/no the
+// model keeps failing to land.
+const DIRECT_ASKS: Partial<Record<SlotKey, string>> = {
+  days_per_week: 'Want to be sure I have this — how many days a week are you running?',
+  long_run_day: 'Want to be sure I have this — which day do you do your long run?',
+  goal_distance: 'Want to be sure I have this — what distance are you targeting?',
+  experience_tier: 'Want to be sure I have this — how would you describe your running background?',
+  target_time: 'Want to be sure I have this — what finish time are you aiming for?',
+  goal_date: 'Want to be sure I have this — what date is your race?',
+};
+
+function buildDirectAskMessage(slot: SlotKey): string {
+  return DIRECT_ASKS[slot] ?? `Want to be sure I have this — what's your ${slotLabel(slot)}?`;
 }
 
 function buildAskMessage(slot: SlotKey): string {
@@ -326,6 +402,9 @@ export function enforceGuardrails(
   // When an override forces an ask, it owns the target slot — the model's
   // asked_slot may be stale. Otherwise the chip policy derives it (below).
   let askSlot: SlotKey | null = null;
+  // The engine owns pending_confirm: set only when a confirm goes out below,
+  // cleared (left undefined) on every other resolution.
+  let pendingConfirm: PendingConfirm | undefined;
 
   const working: V3OnboardingState = {
     ...state,
@@ -346,10 +425,25 @@ export function enforceGuardrails(
       chips = [];
       overridden = true;
     } else if (pendingInferred) {
-      action = 'confirm';
-      message = buildConfirmMessage(pendingInferred, merged[pendingInferred]!.value);
-      chips = [];
+      const value = merged[pendingInferred]!.value;
+      const prev = state.pending_confirm;
+      const sameAsPrev =
+        !!prev && prev.slot === pendingInferred && slotValuesEqual(prev.value, value);
+      const attempts = sameAsPrev ? prev.attempts + 1 : 1;
       overridden = true;
+      chips = [];
+      if (attempts >= 3) {
+        // Asked twice already and still unresolved — repeating the same yes/no is
+        // never the move. Ask the field directly so a restatement lands as a
+        // `stated` fill (pending_confirm stays cleared).
+        action = 'ask';
+        askSlot = pendingInferred;
+        message = buildDirectAskMessage(pendingInferred);
+      } else {
+        action = 'confirm';
+        message = buildConfirmMessage(pendingInferred, value);
+        pendingConfirm = { slot: pendingInferred, value, attempts };
+      }
     } else if (!isV3OnboardingComplete(working)) {
       // Injury beat not answered, or some other gate — recap instead of generating.
       action = 'recap';
@@ -373,6 +467,7 @@ export function enforceGuardrails(
   }
 
   working.optional_budget_remaining = budget;
+  working.pending_confirm = pendingConfirm;
   if (action === 'recap') working.phase = 'recap';
 
   // Closed-option / yes-no asks always carry chips, in code (§5.4, principle 2).
@@ -383,4 +478,33 @@ export function enforceGuardrails(
   chips = applyChipPolicy(action, targetSlot, chips);
 
   return { state: working, action, message, chips, overridden };
+}
+
+/**
+ * Resolve an outstanding `pending_confirm` deterministically — the chip-`yes`
+ * fast path (router). The athlete tapped the affirmative against an exact value,
+ * so no model call is needed: write the slot as a `stated` fill (mergeFills'
+ * monotonic path confirms it and upgrades its provenance), clear the pending
+ * confirm, then re-run the generate gate. The result chains — the next
+ * unconfirmed inferred slot issues its own confirm (with a fresh pending_confirm),
+ * an open required slot asks, and otherwise the flow proceeds to recap/generate.
+ *
+ * Caller guarantees `state.pending_confirm` is set.
+ */
+export function resolveConfirmAndAdvance(state: V3OnboardingState): ResolvedTurn {
+  const pending = state.pending_confirm!;
+  const slots = mergeFills(state.slots, [
+    { slot: pending.slot, value: pending.value, provenance: 'stated' },
+  ]);
+  const cleared: V3OnboardingState = { ...state, slots, pending_confirm: undefined };
+  return enforceGuardrails(cleared, {
+    fills: [],
+    next_action: 'generate',
+    message: '',
+    chips: [],
+    asked_slot: null,
+    race_lookup_query: null,
+    contradiction: null,
+    numeric_unresolved: null,
+  });
 }
