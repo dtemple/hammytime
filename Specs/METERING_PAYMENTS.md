@@ -30,17 +30,23 @@ This is the source-of-truth design for how a friend's usage is metered, how they
 
 Balance is denominated in **real dollars the friend paid**. A run that costs us `$cost_usd` of model time debits `cost_usd × 1.5` from the balance. So $25 of credit covers ~$16.70 of actual model cost; the other ~$8.33 is the buffer.
 
-Runway, using SPEC §2.1 per-athlete-per-day cost:
+**Planning number (measured 2026-06-05): raw ~$0.85/athlete/day → billed ~$1.28/day.** Observed average from `agent_runs` was $1.22/day; David discounted ~30% as testing noise. This is **3.6–10.7× the SPEC §2.1 estimates** ($0.08 hybrid / $0.24 Opus-heavy) the first draft of this doc used — §2.1's steady-state cost table is stale and the runway numbers below replace the original ones.
 
-| Model mix | Raw $/day | Billed $/day (×1.5) | $5 lasts | $25 lasts |
-|---|---|---|---|---|
-| Hybrid (Sonnet daily) | $0.08 | $0.12 | ~6 weeks | ~7 months |
-| Opus-heavy | $0.24 | $0.36 | ~2 weeks | ~2.3 months |
+| Amount | Runway at $1.28/day billed |
+|---|---|
+| $5 (free grant) | **~4 days** |
+| $10 | ~8 days |
+| $25 (default top-up) | **~2.8 weeks** |
+| $50 | ~5.6 weeks |
+
+Per athlete per month: **~$26 raw, ~$39 billed.**
 
 Takeaways:
-- **$25 is generous by design.** Most friends will hit a paywall rarely — that's the point. The default is tuned to minimize payment moments, not to extract revenue.
-- **The buffer covers processing, not full infra.** Per $25 top-up: $8.33 buffer collected vs ~$1.03 Stripe fee. Healthy on processing; at 5–25 users it won't fully amortize the ~$130–180/mo infra line. Acceptable under "cover costs, not profit" — flag it if the friend set grows past where that holds.
-- **Refine with real data before launch.** These are SPEC estimates. Once `agent_runs` has a few weeks of real friend traffic, recompute the median billed-$/day from `athlete_cost_rollup` and re-sanity-check $5 and the $25 default.
+- **This is now a ~$39/mo product, not a top-up-twice-a-year one.** The original "$25 lasts months, friends rarely see a paywall" framing is dead at measured burn. A paying friend tops up roughly monthly — auto-reload goes from nice-to-have to the sane default behavior to *recommend* (still opt-in per the locked decision).
+- **The $5 grant buys ~4 days** — a taste, not a trial of a real training week. Flagged for David: either accept it as a deliberate short taste or raise the grant. (Decision pending; $5 stands until he says otherwise.)
+- **Free friends now cost real money.** At ~$26/mo raw, every comped/free friend is ~$26/mo out of pocket — ~$520/mo if 20 friends ride free. The cheapest fix is not pricing, it's cost: confirm the measured number reflects prompt caching + Sonnet-for-daily routing as specced (§2.1's hybrid assumption). If runs are uncached or Opus-everywhere, fixing that is worth more than any billing knob in this doc.
+- **The buffer now clears infra.** 0.5× on $0.85/day collects ~$13/mo per paying athlete vs ~$1 of Stripe fees per monthly top-up — hosting amortization is comfortably covered (reverses the first draft's caveat).
+- **Re-measure after cost optimization and real (non-test) traffic.** Recompute median billed-$/day from `athlete_cost_rollup` excluding test athletes; re-sanity-check the $5 grant and $25 default then.
 
 ---
 
@@ -124,13 +130,13 @@ Webhook idempotency: dedupe on `payment_intent`; a replayed event must not doubl
 - **Off by default.** Offered as a checkbox/secondary button during a `/buy` flow and toggleable later from the help menu. Never silently enabled.
 - **Enabling** requires a saved card. We capture it by setting `setup_future_usage = 'off_session'` on the *next* Checkout the friend completes, then store the resulting `payment_method` id as `default_pm_id` (and the `customer` id). No card on file ⇒ auto-reload can't be turned on; the bot says so and points to `/buy`.
 - **Trigger:** at the pre-run gate, if `auto_reload_enabled` and `balance_cents < auto_reload_threshold_cents` ($3), create an **off-session PaymentIntent** for `auto_reload_amount_cents` ($25) against `default_pm_id`. On success → credit + `kind=topup` ledger row + proceed with the run + a quiet "auto-reloaded $25" note. On failure (card declined, SCA required) → fall through to the $0 gate behavior and tell the friend their auto-reload failed with a `/buy` link.
-- **$3, not "1 week of runway":** David's call. Simpler and predictable; the only risk is a very heavy user burning $3 between the daily gate checks, which at worst defers one run to a manual top-up. Acceptable.
+- **$3, not "1 week of runway":** David's call. Simpler and predictable. Note that at measured burn (~$1.28/day billed, §2) $3 is only ~2.3 days of runway — the trigger fires with one or two runs to spare rather than a comfortable margin. Acceptable (worst case defers one run to a manual top-up), but if average cost rises further, bump the threshold before friends start hitting the gate with auto-reload on.
 
 ---
 
 ## 8. Warnings & burn-rate
 
-**Burn rate** = trailing-14-day billed cost ÷ 14, read from `athlete_cost_rollup` (×1.5 to convert raw→billed). New athletes with <3 days of history use a default of $0.12/day (hybrid). **Runway days** = `balance / billed_per_day`.
+**Burn rate** = trailing-14-day billed cost ÷ 14, read from `athlete_cost_rollup` (×1.5 to convert raw→billed). New athletes with <3 days of history use a default of $1.28/day (the measured fleet average, §2 — keep this constant in one place and update it when the average moves). **Runway days** = `balance / billed_per_day`.
 
 - **Heads-up (~1 week left):** when projected runway crosses ~7 days, send one message: "About a week of credit left (~$X). Top up when you like — /buy." Set `low_balance_warned_at` to dedupe; clear it on any top-up so the next cycle warns again.
 - **Final (at $0):** sent by the gate when a run is blocked. "You're out of credit, so I've paused. Add credit to pick back up — /buy." Includes the preset buttons.
@@ -198,7 +204,7 @@ Ship 1–4 together (the minimum that lets a friend run out and pay). 5–8 foll
 - **Stripe Tax / sales tax on digital goods.** Ignored in v1 (5–25 friends, cost-recovery). Revisit if this ever becomes a real product.
 - **Mini App webview** for in-window payment — deferred (§3). Plain link first.
 - **Telegram Stars** as an alternative rail — rejected on economics, not revisited unless Telegram changes the cut.
-- **Buffer vs. true infra cost** — 1.5× covers processing, not full hosting amortization at low volume (§2). Fine for now; revisit the multiplier with real `athlete_cost_rollup` data before opening beyond the friend set.
+- **Measured run cost is 3.6–10.7× the SPEC §2.1 estimate** (§2). Two open threads: (a) verify the worker is actually getting prompt-cache hits and using Sonnet for routine daily runs — if not, cost optimization beats every billing knob here; (b) the free/comped friend subsidy is ~$26/friend/mo at this burn, so "free for the first ~20" is a ~$500/mo decision, not a rounding error. The $5 grant (~4 days) and $25 default (~3 weeks) may want revisiting once (a) is resolved — pending David.
 - **Card-on-file SCA / declines** for off-session auto-reload — handled by falling through to the manual gate, but European cards or step-up auth will fail off-session more often. Not a concern for a US friend group; note it.
 - **BYO-plan friends** spend tokens in their own Claude/ChatGPT for plan-gen, so our metered cost is daily check-ins + ad-hoc only. The runway math already assumes this.
 
