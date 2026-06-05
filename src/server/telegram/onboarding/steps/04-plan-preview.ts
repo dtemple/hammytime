@@ -97,7 +97,7 @@ export function formatPreview(plan: Plan, params: RenderParams): string {
     const n = params.strengthSessionsPerWeek;
     lines.push(
       `I've also slotted in ${n} short strength session${n > 1 ? 's' : ''} a week — bodyweight for ` +
-        'now. Not into it? Tap Skip strength.',
+        "now. Not into it? Let me know and I'll pull it out.",
     );
   }
 

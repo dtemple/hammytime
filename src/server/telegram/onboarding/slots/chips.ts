@@ -17,7 +17,8 @@ import type { Chip } from '../engine/extract-and-advance';
 import type { SlotKey } from './schema';
 
 /** Canonical tap sets keyed by the slot being asked. W4 ships the load-bearing
- *  pair: goal_distance (the closed list that fails today) and the injury beat
+ *  pair: goal_distance (the closed list, including the non-race "Staying fit"
+ *  escape) and the injury beat
  *  (INJURY_CHIPS, below). The Strava-inferred slots (experience / days /
  *  long-run) are confirmed via one batch yes/no in Opener 2; their option chips
  *  only matter on a rare "Fix it" re-ask and want multi-column rendering, so
@@ -28,6 +29,10 @@ export const SLOT_CHIPS: Partial<Record<SlotKey, readonly Chip[]>> = {
     { label: '10K', value: '10k' },
     { label: 'Half', value: 'half' },
     { label: 'Marathon', value: 'marathon' },
+    // Always offer the non-race path — a stay-fit athlete needs a tap that isn't
+    // a distance. `keep_fit` round-trips through coerceFill and the model reads it
+    // as goal_type=general_fitness (the base-maintenance plan).
+    { label: 'Staying fit', value: 'keep_fit' },
   ],
   // The enum literal is the chip value so it round-trips cleanly through
   // coerceFill; this also guarantees a tappable escape if the model ever fails

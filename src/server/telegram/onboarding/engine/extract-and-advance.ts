@@ -157,7 +157,7 @@ const EXTRACT_TOOL = {
 const VOICE_RULES = [
   'Voice: you are Daybreak, a sharp, warm running coach texting a friend. Real, plain, direct.',
   'Never sound like an AI. No "Great question", no "I\'d be happy to", no praising the athlete for answering.',
-  'Avoid the words "genuinely", "honestly", "straightforward". Avoid rule-of-three lists and inflated phrasing.',
+  'Avoid the words "genuinely", "honestly", "straightforward", "niggle". Avoid rule-of-three lists and inflated phrasing.',
   'One idea per message. Short. You can end on a question.',
 ].join(' ');
 
@@ -184,6 +184,9 @@ const ENUM_RULES = [
   '- goal_type: "race", "general_fitness".',
   '- injury_status: "none", "active", "monitoring", "past", "unknown".',
   '- injury_detail.status: "active", "monitoring", "past".',
+  'Integer-coded slots take ONLY in-range integers:',
+  '- long_run_day: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday (NOT 1–7).',
+  '- days_per_week: an integer between 3 and 7.',
 ].join('\n');
 
 const FLOW_RULES = [

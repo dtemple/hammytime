@@ -43,7 +43,7 @@ These apply to any user-facing text you produce in this repo: bot messages, prom
 - **No sycophancy.** Don't open responses (or bot messages) with "Great question," "Awesome," or similar. Don't praise the user for asking.
 - **Avoid the "That's not X. That's genuine Y." pattern.** David has called this out specifically as a tell.
 - **Follow the humanizer guidelines** at https://github.com/blader/humanizer. It catches: inflated symbolism, promotional language, vague attributions, rule of three, AI vocabulary, passive voice, negative parallelisms, filler phrases.
-- Avoid the words "genuinely," "honestly," and "straightforward."
+- Avoid the words "genuinely," "honestly," "straightforward," and "niggle."
 
 ### Decision-making style
 

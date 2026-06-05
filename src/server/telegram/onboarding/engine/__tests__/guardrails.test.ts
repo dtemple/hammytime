@@ -70,6 +70,19 @@ describe('coerceFill', () => {
     expect(coerceFill('target_time', 15900.4)).toBe(15900);
     expect(coerceFill('age', 'old')).toBeUndefined();
   });
+  it('drops out-of-range day-coded slots that would violate the DB CHECK and strand the commit', () => {
+    // The blocker: Sunday emitted as ISO 7 survived rounding, passed the gate,
+    // then blew up `long_run_day between 0 and 6` at commit → "Hit a snag saving
+    // your profile". Out-of-range now drops so the gate re-asks instead.
+    expect(coerceFill('long_run_day', 7)).toBeUndefined();
+    expect(coerceFill('long_run_day', -1)).toBeUndefined();
+    expect(coerceFill('long_run_day', 0)).toBe(0);
+    expect(coerceFill('long_run_day', 6)).toBe(6);
+    expect(coerceFill('days_per_week', 2)).toBeUndefined();
+    expect(coerceFill('days_per_week', 8)).toBeUndefined();
+    expect(coerceFill('days_per_week', 3)).toBe(3);
+    expect(coerceFill('days_per_week', 7)).toBe(7);
+  });
   it('validates injury_detail shape', () => {
     expect(coerceFill('injury_detail', { body_part: 'knee', status: 'active' })).toEqual({
       body_part: 'knee',
@@ -297,6 +310,7 @@ describe('applyChipPolicy', () => {
       '10k',
       'half',
       'marathon',
+      'keep_fit',
     ]);
   });
 
@@ -309,7 +323,7 @@ describe('applyChipPolicy', () => {
 
   it('overrides whatever chips the model proposed for a closed slot', () => {
     const r = applyChipPolicy('ask', 'goal_distance', [{ label: 'X', value: 'x' }]);
-    expect(r.map((c) => c.label)).toEqual(['5K', '10K', 'Half', 'Marathon']);
+    expect(r.map((c) => c.label)).toEqual(['5K', '10K', 'Half', 'Marathon', 'Staying fit']);
   });
 
   it('leaves an open-slot ask with the model chips (no forced set)', () => {
@@ -330,7 +344,7 @@ describe('enforceGuardrails — chip policy wiring', () => {
       stateWith({}),
       out({ next_action: 'ask', asked_slot: 'goal_distance' }),
     );
-    expect(r.chips.map((c) => c.value)).toEqual(['5k', '10k', 'half', 'marathon']);
+    expect(r.chips.map((c) => c.value)).toEqual(['5k', '10k', 'half', 'marathon', 'keep_fit']);
   });
 
   it('an injury ask ships the Nothing/Skip chips', () => {
@@ -362,7 +376,7 @@ describe('enforceGuardrails — chip policy wiring', () => {
     delete slots.goal_distance;
     const r = enforceGuardrails(stateWith(slots), out({ next_action: 'generate' }));
     expect(r.action).toBe('ask');
-    expect(r.chips.map((c) => c.value)).toEqual(['5k', '10k', 'half', 'marathon']);
+    expect(r.chips.map((c) => c.value)).toEqual(['5k', '10k', 'half', 'marathon', 'keep_fit']);
   });
 
   it('a generate override forced to ask a missing experience ships tappable tier chips', () => {

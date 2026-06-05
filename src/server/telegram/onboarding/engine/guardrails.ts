@@ -43,11 +43,25 @@ export function coerceFill(slot: SlotKey, value: unknown): unknown {
     case 'injury_status':
       return INJURY_STATUS.has(String(value)) ? value : undefined;
     case 'age':
-    case 'target_time':
-    case 'days_per_week':
-    case 'long_run_day': {
+    case 'target_time': {
       const n = typeof value === 'number' ? value : Number(value);
       return Number.isFinite(n) ? Math.round(n) : undefined;
+    }
+    // Range-checked against the athlete_training_profile CHECK constraints
+    // (20260601000000_athlete_training_profile.sql): an out-of-range integer
+    // survives rounding but blows up the commit upsert, stranding onboarding on
+    // "Hit a snag saving your profile". Drop it so the gate re-asks instead.
+    case 'days_per_week': {
+      const n = typeof value === 'number' ? value : Number(value);
+      if (!Number.isFinite(n)) return undefined;
+      const r = Math.round(n);
+      return r >= 3 && r <= 7 ? r : undefined;
+    }
+    case 'long_run_day': {
+      const n = typeof value === 'number' ? value : Number(value);
+      if (!Number.isFinite(n)) return undefined;
+      const r = Math.round(n);
+      return r >= 0 && r <= 6 ? r : undefined;
     }
     case 'injury_detail': {
       const v = value as { body_part?: unknown; status?: unknown };
