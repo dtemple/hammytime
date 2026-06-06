@@ -244,11 +244,15 @@ export async function seedV3IfAwaitingStrava(
   return data === true;
 }
 
-/** Whether onboarding v3 is the active flow for new athletes (global env flag).
- *  An athlete already mid-v3 (state.flow === 'v3') keeps using v3 regardless. */
+/** Whether onboarding v3 is the active flow for new athletes. v3 is the default
+ *  (it shipped 2026-06-05) — ON unless `ONBOARDING_V3` is explicitly set to a
+ *  disable value (`false`/`0`/`off`). The env var is now a kill-switch back to v2,
+ *  not an enable-switch, completing the v0.7.20 decision #3 (the flag was always a
+ *  temporary fallback, never a long-lived A/B). An athlete already mid-v3
+ *  (state.flow === 'v3') keeps using v3 regardless. */
 export function isV3Enabled(): boolean {
-  const v = process.env.ONBOARDING_V3;
-  return v === 'true' || v === '1';
+  const v = process.env.ONBOARDING_V3?.toLowerCase();
+  return v !== 'false' && v !== '0' && v !== 'off';
 }
 
 /**

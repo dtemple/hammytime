@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { z } from 'zod';
 import { KNOWN_GAPS } from '@/lib/known-gaps';
 
@@ -29,6 +29,7 @@ import {
   loadV3State,
   saveV3State,
   isV3OnboardingComplete,
+  isV3Enabled,
   inferExperienceTier,
   seedStravaInferences,
   DEFAULT_OPTIONAL_BUDGET,
@@ -404,5 +405,32 @@ describe('seedStravaInferences', () => {
     const slots = seedStravaInferences({ name: sv('Sam') }, snapshot());
     expect(slots.name?.value).toBe('Sam');
     expect(slots.days_per_week).toBeDefined();
+  });
+});
+
+describe('isV3Enabled — default-on kill-switch (2026-06-05)', () => {
+  const orig = process.env.ONBOARDING_V3;
+  afterEach(() => {
+    if (orig === undefined) delete process.env.ONBOARDING_V3;
+    else process.env.ONBOARDING_V3 = orig;
+  });
+
+  it('is ON when the flag is unset (v3 is the default)', () => {
+    delete process.env.ONBOARDING_V3;
+    expect(isV3Enabled()).toBe(true);
+  });
+
+  it('stays ON for any non-disable value', () => {
+    for (const v of ['true', '1', 'on', 'yes', '']) {
+      process.env.ONBOARDING_V3 = v;
+      expect(isV3Enabled()).toBe(true);
+    }
+  });
+
+  it('is OFF only for an explicit disable value (the kill-switch)', () => {
+    for (const v of ['false', '0', 'off', 'FALSE', 'Off']) {
+      process.env.ONBOARDING_V3 = v;
+      expect(isV3Enabled()).toBe(false);
+    }
   });
 });
