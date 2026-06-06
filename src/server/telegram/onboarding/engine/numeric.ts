@@ -60,6 +60,26 @@ export function resolveFinishTime(
   return { status: 'ok', seconds };
 }
 
+/**
+ * Map a concrete race/goal distance (miles) to a training bucket IN CODE — the
+ * deterministic derivation the model never does (V3-W8, ONBOARDING_V3 §5.3). A
+ * confirmed race's `distance_mi`, or a stated distance the model surfaced, runs
+ * through here; the model only maps freeform distance *vocabulary* when no number
+ * exists. Bands are wide on purpose — a 27-mile trail "marathon" trains like a
+ * marathon (the full table, widened for the ultra buckets, lives in
+ * ULTRA_SUPPORT.md §3.1). Returns null for anything past the current catalog
+ * (~28 mi) — the caller routes that to the uncatalogued-goal pocket (§5.2).
+ * `keep_fit` is never derived from miles (it's a no-race state).
+ */
+export function deriveBucketFromMiles(mi: number): GoalDistanceValue | null {
+  if (!Number.isFinite(mi) || mi <= 0) return null;
+  if (mi < 4.65) return '5k'; // 5k=3.1, 10k=6.2 → split at the midpoint
+  if (mi < 8) return '10k';
+  if (mi < 17) return 'half';
+  if (mi <= 28) return 'marathon';
+  return null; // out of catalog → the pocket
+}
+
 /** Implied finish time for a goal pace (seconds per mile) over a distance.
  *  Lets the engine turn "10 minute miles for a marathon" into ~4:22. */
 export function paceToFinish(secPerMile: number, distance: GoalDistanceValue): number {

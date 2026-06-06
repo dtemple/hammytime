@@ -38,6 +38,7 @@ function out(partial: Partial<ExtractAdvanceOutput>): ExtractAdvanceOutput {
     chips: [],
     asked_slot: null,
     race_lookup_query: null,
+    goal_distance_mi: null,
     contradiction: null,
     numeric_unresolved: null,
     ...partial,
@@ -189,6 +190,30 @@ describe('mergeFills — goal_date invalidation on a goal-race change', () => {
     const slots: SlotState = { goal_race: sv('Broken Arrow'), goal_date: sv('2026-06-19') };
     const merged = mergeFills(slots, [fill('goal_race', 'Broken Arrow', 'inferred')]);
     expect(merged.goal_date!.value).toBe('2026-06-19');
+  });
+});
+
+// --- W8: a goal-race change also invalidates the code-derived distance ---
+
+describe('mergeFills — goal_distance invalidation on a goal-race change (V3-W8)', () => {
+  it('clears the derived distance when goal_race changes with no goal_distance in the delta', () => {
+    const slots: SlotState = {
+      goal_race: sv('CIM'),
+      goal_distance: sv('marathon'),
+      goal_date: sv('2026-12-06'),
+    };
+    const merged = mergeFills(slots, [fill('goal_race', 'Shamrock Half')]);
+    expect(merged.goal_distance!.value).toBeNull();
+    expect(merged.goal_distance!.provenance).toBe('unknown');
+  });
+
+  it('keeps the distance when the same delta re-supplies it', () => {
+    const slots: SlotState = { goal_race: sv('CIM'), goal_distance: sv('marathon') };
+    const merged = mergeFills(slots, [
+      fill('goal_race', 'Shamrock Half'),
+      fill('goal_distance', 'half'),
+    ]);
+    expect(merged.goal_distance!.value).toBe('half');
   });
 });
 
@@ -457,6 +482,27 @@ describe('buildRecapMessage', () => {
     const msg = buildRecapMessage(stateWith(slots));
     expect(msg).toContain('no race');
     expect(msg).not.toContain('Race:');
+  });
+
+  it('recaps the real out-of-catalog goal, not the marathon-proxy (V3-W8)', () => {
+    const slots: SlotState = {
+      ...coreSlots('race'),
+      goal_distance: sv('marathon'),
+      injury_status: sv('none'),
+    };
+    const msg = buildRecapMessage(
+      stateWith(slots, {
+        out_of_catalog: {
+          words: 'Rae Lakes Loop',
+          distance_mi: 44,
+          proxy: 'marathon',
+          consent: 'accepted',
+        },
+      }),
+    );
+    expect(msg).toContain('Rae Lakes Loop');
+    expect(msg).toContain('44 mi');
+    expect(msg).toContain('marathon block');
   });
 
   it('surfaces a described injury over the bare status', () => {

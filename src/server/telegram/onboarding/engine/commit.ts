@@ -89,6 +89,13 @@ export function buildGoalWrite(state: V3OnboardingState): GoalWrite {
   const raceDate = slotVal<string>(state, 'goal_date');
   const targetTime = slotVal<number>(state, 'target_time');
 
+  // An accepted out-of-catalog goal: the plan is structured toward the proxy
+  // bucket, but the race row carries the athlete's REAL distance so the coach and
+  // race_calendar read the truth, not the proxy's nominal mileage (V3-W8 §5.2).
+  const ooc = state.out_of_catalog;
+  const realDistanceMi =
+    ooc?.consent === 'accepted' && ooc.distance_mi != null ? ooc.distance_mi : null;
+
   // Committed: a named, dated race.
   if (raceName && raceDate) {
     return {
@@ -102,7 +109,7 @@ export function buildGoalWrite(state: V3OnboardingState): GoalWrite {
       race: {
         name: raceName,
         date: raceDate,
-        distance_mi: nominalRaceMiles(distance),
+        distance_mi: realDistanceMi ?? nominalRaceMiles(distance),
         target_type: targetTime ? 'time' : 'finish',
         target_time_sec: targetTime ?? null,
       },
@@ -184,6 +191,18 @@ async function commitGoal(athleteId: string, state: V3OnboardingState): Promise<
   }
 
   await upsertTrainingProfile(athleteId, { ...profile, goal_race_id: goalRaceId });
+
+  // Store the true goal in the athlete's own words (V3-W8 §5.2): the plan is built
+  // toward the marathon-proxy, but the daily coach needs to know the real target.
+  const ooc = state.out_of_catalog;
+  if (ooc?.consent === 'accepted') {
+    const miles = ooc.distance_mi != null ? ` (~${Math.round(ooc.distance_mi)} mi)` : '';
+    await upsertProfileSection(
+      athleteId,
+      'North-star goal',
+      `- ${ooc.words}${miles}\n- The structured plan is a ${ooc.proxy} block as a proxy — this is the real target the athlete is chasing.`,
+    );
+  }
 
   if (race) {
     const target = race.target_time_sec ? formatFinishTime(race.target_time_sec) : 'Finish';

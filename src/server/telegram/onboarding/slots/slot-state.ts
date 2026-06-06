@@ -18,6 +18,7 @@ import { isFilled, slotValue } from './provenance';
 import {
   requiredCoreSlots,
   type ExperienceTierValue,
+  type GoalDistanceValue,
   type GoalTypeValue,
   type SlotKey,
   type SlotState,
@@ -25,8 +26,9 @@ import {
 
 /** Bump when the persisted shape changes incompatibly. loadV3State resets a
  *  mid-flight state on mismatch rather than crash a resuming athlete (the JSONB
- *  outlives a multi-day flow, and W2/W3 will reshape it during dev). */
-export const V3_SCHEMA_VERSION = 1;
+ *  outlives a multi-day flow, and W2/W3 will reshape it during dev).
+ *  v2 (V3-W8): added the `out_of_catalog` pocket field. */
+export const V3_SCHEMA_VERSION = 2;
 
 /** Pinned at 8 for headroom (ONBOARDING_V3 decision #4). */
 export const DEFAULT_OPTIONAL_BUDGET = 8;
@@ -66,6 +68,26 @@ export interface PendingConfirm {
   attempts: number;
 }
 
+/**
+ * A goal the current catalog can't structure — an oversize race distance, a
+ * non-race objective with no in-catalog distance (V3-W8, ONBOARDING_V3 §5.2).
+ * Detected in CODE (a confirmed race's distance_mi out of the bucket bands, or a
+ * stated distance the model surfaced as `goal_distance_mi`), never a model guess.
+ * The engine acknowledges it plainly, offers the nearest in-catalog structure
+ * (`proxy`) with consent, and — on accept — stores `words` for the daily coach.
+ */
+export interface OutOfCatalogGoal {
+  /** The athlete's own description of the goal (race name, or their message). */
+  words: string;
+  /** The real distance when known (miles); null for a shapeless objective. */
+  distance_mi: number | null;
+  /** The nearest in-catalog structure offered — `marathon` against today's catalog. */
+  proxy: GoalDistanceValue;
+  /** pending = consent turn is out; accepted = proxy taken; declined is handled
+   *  by clearing the pocket (re-offer), so it's not persisted. */
+  consent: 'pending' | 'accepted' | 'declined';
+}
+
 export interface V3OnboardingState {
   flow: 'v3';
   schema_version: number;
@@ -95,6 +117,9 @@ export interface V3OnboardingState {
    *  engine owns this field end to end: set when a generate-gate confirm goes out,
    *  cleared on any other resolution. */
   pending_confirm?: PendingConfirm;
+  /** An uncatalogued goal awaiting (or holding) the athlete's consent to the
+   *  marathon-proxy (V3-W8). Absent until a goal lands outside the catalog. */
+  out_of_catalog?: OutOfCatalogGoal;
 }
 
 /** The starting v3 state, post-Strava. The fitness snapshot is cached here; the

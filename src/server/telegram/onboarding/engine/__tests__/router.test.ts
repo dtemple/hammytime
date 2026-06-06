@@ -71,6 +71,7 @@ vi.mock('../../known-gaps-memory', async (orig) => ({
 }));
 
 import { handleV3Message, handleV3Callback } from '../router';
+import { lookupRace } from '@/server/agent/race-lookup';
 import { KNOWN_GAPS } from '@/lib/known-gaps';
 import { initialV3State, type V3OnboardingState } from '../../slots/slot-state';
 import type { SlotState } from '../../slots/schema';
@@ -101,6 +102,7 @@ function out(p: Partial<ExtractAdvanceOutput>): ExtractAdvanceOutput {
     chips: [],
     asked_slot: null,
     race_lookup_query: null,
+    goal_distance_mi: null,
     contradiction: null,
     numeric_unresolved: null,
     ...p,
@@ -346,6 +348,172 @@ describe('router — numeric backstop keeps its chips over the chip policy', () 
       .map((b: any) => b.text);
     expect(labels).toContain('4:25:00');
     expect(labels).toContain('0:04:25');
+  });
+});
+
+// --- W8: deterministic distance derivation + the uncatalogued-goal pocket ---
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function labels(call: any[]): string[] {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return ((call[2] as any).reply_markup?.inline_keyboard ?? []).flat().map((b: any) => b.text);
+}
+
+describe('router — confirmed-race distance derivation (V3-W8)', () => {
+  it('derives goal_distance in code from a looked-up race (no separate distance confirm)', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race') },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({ next_action: 'confirm', race_lookup_query: 'CIM', message: 'looking' }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+    vi.mocked(lookupRace).mockResolvedValue({
+      ok: true,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      found: { canonical_name: 'CIM', date: '2026-12-06', distance_mi: 26.2 } as any,
+    });
+
+    await handleV3Message(ctx(50, 'doing CIM'), athlete);
+
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.slots.goal_distance).toEqual({
+      value: 'marathon',
+      provenance: 'stated',
+      confirmed: true,
+    });
+    expect(saved.out_of_catalog).toBeUndefined();
+  });
+});
+
+describe('router — out-of-catalog race opens the pocket (V3-W8)', () => {
+  it('a 100-mile race offers the marathon-proxy with consent, never a bucket write', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race') },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'confirm',
+        race_lookup_query: 'Western States',
+        message: 'looking',
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+    vi.mocked(lookupRace).mockResolvedValue({
+      ok: true,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      found: { canonical_name: 'Western States 100', date: '2026-06-27', distance_mi: 100 } as any,
+    });
+
+    await handleV3Message(ctx(51, 'Western States'), athlete);
+
+    expect(commitSlots).not.toHaveBeenCalled();
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toMatch(/past what I can build/i);
+    expect(labels(call)).toEqual(['Do that', 'Not now']);
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.slots.goal_distance).toBeUndefined(); // no nearest-bucket write
+    expect(saved.out_of_catalog).toMatchObject({
+      distance_mi: 100,
+      proxy: 'marathon',
+      consent: 'pending',
+    });
+  });
+});
+
+describe('router — stated out-of-bucket distance opens the pocket (V3-W8)', () => {
+  it('"44 miles" with no race lookup pockets the goal', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race') },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({ next_action: 'ask', goal_distance_mi: 44, message: 'got it' }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(52, '44 miles in the mountains'), athlete);
+
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toMatch(/past what I can build/i);
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.out_of_catalog?.consent).toBe('pending');
+    expect(saved.slots.goal_distance).toBeUndefined();
+  });
+
+  it('an in-bucket stated distance is set in code, no pocket', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race') },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({ next_action: 'ask', goal_distance_mi: 13.1, message: 'a half then' }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(53, 'about 13 miles'), athlete);
+
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.slots.goal_distance?.value).toBe('half');
+    expect(saved.out_of_catalog).toBeUndefined();
+  });
+});
+
+describe('router — pocket consent chips (V3-W8)', () => {
+  function pocketState(): V3OnboardingState {
+    return {
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: {
+        goal_type: sv('race'),
+        experience_tier: sv('some_training'),
+        days_per_week: sv(4),
+        long_run_day: sv(0),
+        goal_date: sv('2026-09-15'),
+        injury_status: sv('none'),
+      },
+      out_of_catalog: {
+        words: 'Rae Lakes Loop, 44mi',
+        distance_mi: 44,
+        proxy: 'marathon',
+        consent: 'pending',
+      },
+    } as V3OnboardingState;
+  }
+
+  it('"Do that" accepts the proxy without calling the model and generates', async () => {
+    loadV3State.mockResolvedValue(pocketState());
+
+    await handleV3Callback(cbCtx('cbpocketyes'), athlete, 'v3:yes');
+
+    expect(callExtractAndAdvance).not.toHaveBeenCalled();
+    expect(commitSlots).toHaveBeenCalledOnce(); // all required slots filled → generate
+  });
+
+  it('"Not now" declines, clears the pocket, and re-offers without the model', async () => {
+    loadV3State.mockResolvedValue(pocketState());
+
+    await handleV3Callback(cbCtx('cbpocketno'), athlete, 'v3:no');
+
+    expect(callExtractAndAdvance).not.toHaveBeenCalled();
+    expect(commitSlots).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith(
+      99,
+      expect.stringMatching(/want to aim at something/i),
+      expect.anything(),
+    );
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.out_of_catalog).toBeUndefined();
   });
 });
 

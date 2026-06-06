@@ -75,6 +75,26 @@ describe('buildGoalWrite', () => {
     expect(profile.goal_distance).toBe('marathon');
     expect(race).toBeNull();
   });
+
+  it('carries the real distance onto the race row for an accepted pocket (V3-W8)', () => {
+    const { profile, race } = buildGoalWrite({
+      ...state({
+        ...trainingBase,
+        goal_type: sv('race'),
+        goal_distance: sv('marathon'), // the proxy bucket the plan is built toward
+        goal_race: sv('Western States 100'),
+        goal_date: sv('2026-06-27'),
+      }),
+      out_of_catalog: {
+        words: 'Western States 100',
+        distance_mi: 100,
+        proxy: 'marathon',
+        consent: 'accepted',
+      },
+    });
+    expect(profile.goal_distance).toBe('marathon'); // proxy still drives selection
+    expect(race!.distance_mi).toBe(100); // but the row tells the truth
+  });
 });
 
 describe('mapInjuryStatus', () => {

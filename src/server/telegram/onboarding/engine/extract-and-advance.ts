@@ -60,6 +60,12 @@ export const ExtractAdvanceSchema = z.object({
     .string()
     .nullish()
     .transform((v) => v ?? null),
+  // A concrete distance (miles) the athlete stated that ISN'T a standard bucket
+  // — the code buckets it (or routes it to the pocket), never the model (§5.3).
+  goal_distance_mi: z
+    .number()
+    .nullish()
+    .transform((v) => v ?? null),
   // A safety-relevant cross-slot conflict to surface before plan-gen (§5.1).
   contradiction: z
     .string()
@@ -136,6 +142,11 @@ const EXTRACT_TOOL = {
         type: 'string',
         description: 'If the athlete named a race, the race name to look up before confirming.',
       },
+      goal_distance_mi: {
+        type: 'number',
+        description:
+          "A concrete goal distance in MILES that isn't one of the standard buckets (5k/10k/half/marathon) — e.g. '44 miles', '50k' (≈31), '100 miler'. The app maps it to a bucket or handles it specially. Don't set this if you set race_lookup_query (the lookup carries the distance), and don't guess goal_distance from a number yourself.",
+      },
       contradiction: {
         type: 'string',
         description:
@@ -180,7 +191,7 @@ const INJURY_RULES = [
 const ENUM_RULES = [
   'Closed-enum slots take ONLY these exact literal values — never a paraphrase:',
   '- experience_tier: "beginner" (new to running), "for_fun" (runs but no structure), "some_training" (some structured training), "experienced" (years of consistent training). There is no "intermediate" — map it to some_training or experienced.',
-  '- goal_distance: "5k", "10k", "half", "marathon", "keep_fit" (no race, staying fit).',
+  '- goal_distance: "5k", "10k", "half", "marathon", "keep_fit" (no race, staying fit). For ANY other stated distance — a number of miles/km, or a named distance like "50k" / "50 miler" / "44 miles" — do NOT guess a bucket; set goal_distance_mi (in miles) and leave goal_distance alone.',
   '- goal_type: "race", "general_fitness".',
   '- injury_status: "none", "active", "monitoring", "past", "unknown".',
   '- injury_detail.status: "active", "monitoring", "past".',
@@ -241,9 +252,18 @@ export function summarizeState(state: V3OnboardingState): string {
     ? `A confirm is pending for ${pending.slot} = ${JSON.stringify(pending.value)}. If the athlete affirms it ("yes", "looks right", "yep"), emit a fill for ${pending.slot} with provenance "stated" to resolve it. If they correct it, emit the corrected value.`
     : null;
 
+  // An out-of-catalog goal is awaiting consent to the marathon-proxy. A chip tap
+  // resolves it in code; this covers a typed reply. (V3-W8.)
+  const ooc = state.out_of_catalog;
+  const oocLine =
+    ooc?.consent === 'pending'
+      ? `An out-of-catalog goal is pending consent: "${ooc.words}"${ooc.distance_mi != null ? ` (~${Math.round(ooc.distance_mi)} mi)` : ''}. If the athlete accepts a ${ooc.proxy}-shaped plan toward it, emit goal_distance = "${ooc.proxy}" (provenance "stated"). If they'd rather aim at something else, emit their new goal instead.`
+      : null;
+
   return [
     `Conversation phase: ${state.phase}. Goal type: ${goalType ?? 'unknown'}. Optional-question budget remaining: ${state.optional_budget_remaining}.`,
     pendingLine,
+    oocLine,
     'Slots:',
     lines.join('\n'),
   ]

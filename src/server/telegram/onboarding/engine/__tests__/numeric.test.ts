@@ -1,5 +1,35 @@
 import { describe, it, expect } from 'vitest';
-import { resolveFinishTime, paceToFinish, finishToPace, formatPace } from '../numeric';
+import {
+  resolveFinishTime,
+  paceToFinish,
+  finishToPace,
+  formatPace,
+  deriveBucketFromMiles,
+} from '../numeric';
+
+describe('deriveBucketFromMiles (V3-W8)', () => {
+  it('buckets in-catalog distances by their bands', () => {
+    expect(deriveBucketFromMiles(3.1)).toBe('5k');
+    expect(deriveBucketFromMiles(4.6)).toBe('5k'); // just under the 5k/10k split
+    expect(deriveBucketFromMiles(6.2)).toBe('10k');
+    expect(deriveBucketFromMiles(13.1)).toBe('half');
+    expect(deriveBucketFromMiles(16.9)).toBe('half');
+    expect(deriveBucketFromMiles(26.2)).toBe('marathon');
+    expect(deriveBucketFromMiles(28)).toBe('marathon'); // wide band — a 28mi trail "marathon"
+  });
+
+  it('returns null past the current catalog → the pocket', () => {
+    expect(deriveBucketFromMiles(31)).toBeNull(); // 50k
+    expect(deriveBucketFromMiles(44)).toBeNull(); // Rae Lakes
+    expect(deriveBucketFromMiles(100)).toBeNull(); // Western States
+  });
+
+  it('returns null for nonsense input', () => {
+    expect(deriveBucketFromMiles(0)).toBeNull();
+    expect(deriveBucketFromMiles(-5)).toBeNull();
+    expect(deriveBucketFromMiles(NaN)).toBeNull();
+  });
+});
 
 describe('resolveFinishTime', () => {
   it('accepts a plausible marathon finish', () => {

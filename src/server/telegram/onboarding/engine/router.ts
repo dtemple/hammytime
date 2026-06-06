@@ -29,7 +29,16 @@ import {
 import { callExtractAndAdvance, logOnboardingRun, type Chip } from './extract-and-advance';
 import { enforceGuardrails, mergeFills, resolveConfirmAndAdvance } from './guardrails';
 import { loadRecentHistory } from './history';
-import { resolveFinishTime } from './numeric';
+import { deriveBucketFromMiles, resolveFinishTime } from './numeric';
+import {
+  acceptPocketAndAdvance,
+  applyStatedDistance,
+  declinePocket,
+  pocketBody,
+  POCKET_CHIPS,
+  reconcilePocket,
+  setPocket,
+} from './pocket';
 import { withTyping } from './typing';
 
 type AthleteRow = Database['public']['Tables']['athletes']['Row'];
@@ -138,6 +147,41 @@ async function runTurn({
     return;
   }
 
+  // Pocket consent fast path (V3-W8): a chip tap against an outstanding
+  // out-of-catalog offer resolves in code — `yes` takes the marathon-proxy and
+  // advances; `no` re-offers. Typed replies fall through to the model (the pocket
+  // is surfaced in summarizeState; reconcilePocket settles the result below).
+  if (
+    state.out_of_catalog?.consent === 'pending' &&
+    fromChip &&
+    (text === 'yes' || text === 'no')
+  ) {
+    await logInbound(athleteId, logBody ?? text);
+    await withTyping(chatId, async () => {
+      if (text === 'no') {
+        const declined = declinePocket(state);
+        await saveV3State(athleteId, {
+          ...declined.state,
+          last_processed_key: dedupKey ?? state.last_processed_key,
+        });
+        await sendV3(athleteId, chatId, declined.message, chipsKeyboard(declined.chips));
+        return;
+      }
+      const resolved = acceptPocketAndAdvance(state);
+      const working: V3OnboardingState = {
+        ...resolved.state,
+        last_processed_key: dedupKey ?? state.last_processed_key,
+      };
+      if (resolved.action === 'generate') {
+        await finishOnboarding(athlete, chatId, working);
+        return;
+      }
+      await saveV3State(athleteId, working);
+      await sendV3(athleteId, chatId, resolved.message, chipsKeyboard(resolved.chips));
+    });
+    return;
+  }
+
   await logInbound(athleteId, logBody ?? text);
 
   await withTyping(chatId, async () => {
@@ -178,12 +222,31 @@ async function runTurn({
       }
     }
 
-    // Race lookup — a second, slower call, only on the race-naming turn.
+    // Race lookup — a second, slower call, only on the race-naming turn. A
+    // confirmed race's distance drives goal_distance in code (resolveRace);
+    // otherwise a stated out-of-bucket distance the model surfaced is bucketed (or
+    // pocketed) here. Mutually exclusive: the lookup already carries a distance.
     if (result.output.race_lookup_query && !resolved.overridden) {
       const lr = await resolveRace(athleteId, chatId, result.output.race_lookup_query, working);
       working = lr.state;
       message = lr.message;
       chips = lr.chips;
+    } else if (result.output.goal_distance_mi != null && !resolved.overridden) {
+      const sd = applyStatedDistance(working, result.output.goal_distance_mi, text);
+      working = sd.state;
+      if (sd.pocket) {
+        message = sd.message;
+        chips = sd.chips;
+      }
+    }
+
+    // Settle a pocket that was pending BEFORE this turn and answered in prose (the
+    // chip path resolves in the fast path above). V3-W8.
+    if (
+      state.out_of_catalog?.consent === 'pending' &&
+      working.out_of_catalog?.consent === 'pending'
+    ) {
+      working = reconcilePocket(state.out_of_catalog, working);
     }
 
     if (resolved.action === 'generate') {
@@ -250,14 +313,35 @@ async function resolveRace(
 
   if (r.ok && 'found' in r) {
     const f = r.found;
+    const dateStr = f.date ?? 'date still TBD';
+    const derived = f.distance_mi != null ? deriveBucketFromMiles(f.distance_mi) : null;
+
+    // Out of catalog (e.g. Western States, 100 mi): the consent turn doubles as the
+    // race confirm, so name + date land `stated`; a `yes` takes the marathon-proxy.
+    if (f.distance_mi != null && derived === null) {
+      const slots: SlotState = {
+        ...state.slots,
+        goal_type: state.slots.goal_type ?? mkSlot('race', 'inferred', true),
+        goal_race: mkSlot(f.canonical_name, 'stated', true),
+        goal_date: f.date ? mkSlot(f.date, 'stated', true) : state.slots.goal_date,
+      };
+      return {
+        state: setPocket({ ...state, slots }, f.canonical_name, f.distance_mi),
+        message: `Found it — ${f.canonical_name}, ${dateStr}. Heads up though: ${pocketBody(f.distance_mi)}`,
+        chips: POCKET_CHIPS,
+      };
+    }
+
     const slots: SlotState = {
       ...state.slots,
       goal_type: state.slots.goal_type ?? mkSlot('race', 'inferred', true),
       // System-resolved → unconfirmed: the athlete confirms the match (plan-driving).
       goal_race: mkSlot(f.canonical_name, 'inferred', false),
       goal_date: f.date ? mkSlot(f.date, 'inferred', false) : state.slots.goal_date,
+      // The bucket comes from the number in code, never the model (§5.3). `stated`
+      // (the athlete confirms the race) skips the redundant distance-confirm gate.
+      goal_distance: derived ? mkSlot(derived, 'stated', true) : state.slots.goal_distance,
     };
-    const dateStr = f.date ?? 'date still TBD';
     return {
       state: { ...state, slots },
       message: `Found it — ${f.canonical_name}, ${dateStr}. That the one?`,

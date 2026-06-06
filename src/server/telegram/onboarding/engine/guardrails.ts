@@ -19,6 +19,7 @@ import {
   SLOTS,
   SLOT_KEYS,
   requiredCoreSlots,
+  type GoalDistanceValue,
   type GoalTypeValue,
   type SlotKey,
   type SlotState,
@@ -164,16 +165,24 @@ export function mergeFills(slots: SlotState, fills: SlotFill[]): SlotState {
     } as SlotValue<any>;
   }
 
-  // A goal-race change invalidates the prior race's date unless the same delta
-  // re-supplies it (the 2026-06-05 stale-goal_date fix). Otherwise the looked-up
-  // date of the previous race silently survives onto the new goal. The gate then
-  // re-asks (goal_date is required-core for a race) or resolveRace re-fills it.
+  // A goal-race change invalidates the prior race's date AND its code-derived
+  // distance unless the same delta re-supplies them (the 2026-06-05 stale-goal_date
+  // fix, extended for the W8 distance derivation). Otherwise the looked-up date or
+  // bucket of the previous race silently survives onto the new goal. The gate then
+  // re-asks (both are required-core for a race) or resolveRace re-fills them. Same
+  // recoverable tradeoff the date reset already accepts (a separately-stated
+  // distance is rare on a race goal, and the recap is the net).
   const raceFill = fills.find((f) => f.slot === 'goal_race');
   const hasDateFill = fills.some((f) => f.slot === 'goal_date');
-  if (raceFill && !hasDateFill && next.goal_date?.value != null) {
+  const hasDistanceFill = fills.some((f) => f.slot === 'goal_distance');
+  if (raceFill) {
     const newRace = coerceFill('goal_race', raceFill.value);
-    if (newRace !== undefined && newRace !== (slots.goal_race?.value ?? null)) {
+    const raceChanged = newRace !== undefined && newRace !== (slots.goal_race?.value ?? null);
+    if (raceChanged && !hasDateFill && next.goal_date?.value != null) {
       next.goal_date = unknownSlot<string>();
+    }
+    if (raceChanged && !hasDistanceFill && next.goal_distance?.value != null) {
+      next.goal_distance = unknownSlot<GoalDistanceValue>();
     }
   }
 
@@ -314,7 +323,15 @@ function recapInjuryLine(s: SlotState): string | null {
 export function buildRecapMessage(state: V3OnboardingState): string {
   const s = state.slots;
 
-  const lines: string[] = [recapGoalLine(s)];
+  // An accepted out-of-catalog goal recaps the athlete's REAL target, not the
+  // marathon-proxy the plan is structured toward (V3-W8 §5.2 — the second chance
+  // to catch a misread before plan-gen).
+  const ooc = state.out_of_catalog;
+  const goalLine =
+    ooc?.consent === 'accepted'
+      ? `• Goal: ${ooc.words}${ooc.distance_mi != null ? `, ${Math.round(ooc.distance_mi)} mi` : ''} (training as a ${DISTANCE_LABELS[ooc.proxy] ?? ooc.proxy} block)`
+      : recapGoalLine(s);
+  const lines: string[] = [goalLine];
 
   const tier = s.experience_tier?.value as string | undefined;
   if (tier) lines.push(`• Experience: ${TIER_LABELS[tier] ?? tier}`);
@@ -504,6 +521,7 @@ export function resolveConfirmAndAdvance(state: V3OnboardingState): ResolvedTurn
     chips: [],
     asked_slot: null,
     race_lookup_query: null,
+    goal_distance_mi: null,
     contradiction: null,
     numeric_unresolved: null,
   });
