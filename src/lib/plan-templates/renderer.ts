@@ -23,6 +23,7 @@ import type {
   WorkoutSpec,
 } from './types';
 import { nominalRaceMiles } from './selector';
+import { addDays, mondayOf, weekdayOf } from './dates';
 
 type AgentGuidance = NonNullable<Plan['agent_guidance']>;
 type ComplianceRule = NonNullable<AgentGuidance['compliance_rules']>[number];
@@ -48,21 +49,9 @@ const HARD_TYPES = new Set<Day['type']>([
 ]);
 
 // ---------------------------------------------------------------------------
-// Date helpers — ISO yyyy-mm-dd, UTC anchored (deterministic).
+// Date helpers — ISO yyyy-mm-dd, UTC anchored. addDays/mondayOf/weekdayOf live in
+// ./dates (shared with the selector); the small grid helpers stay local.
 // ---------------------------------------------------------------------------
-
-function addDays(iso: string, n: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
-
-function mondayOf(iso: string): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  const dow = d.getUTCDay(); // 0=Sun..6=Sat
-  const diff = dow === 0 ? -6 : 1 - dow;
-  return addDays(iso, diff);
-}
 
 function offsetFromMonday(weekday: number): number {
   return weekday === 0 ? 6 : weekday - 1;
@@ -129,53 +118,71 @@ export function allocatePhases(template: PlanTemplate, params: RenderParams): Ph
   return allocation;
 }
 
+/** Spread `remainder` extra weeks across phases[startIdx..] by weight, honoring
+ *  maxWeeks: each step goes to the phase furthest below its weighted target, skipping
+ *  any that have hit maxWeeks. Mutates `counts`. Assumes a surviving un-capped phase
+ *  (every template has an un-capped `build`) to absorb spill; if every candidate is
+ *  capped, any leftover is dropped rather than overflowing a cap. */
+function distributeByWeight(
+  phases: PlanTemplate['phases'],
+  counts: number[],
+  remainder: number,
+  startIdx = 0,
+): void {
+  const totalWeight = phases.reduce((s, p) => s + p.weight, 0) || 1;
+  while (remainder > 0) {
+    let best = -1;
+    let bestRatio = Infinity;
+    for (let i = startIdx; i < phases.length; i++) {
+      const p = phases[i]!;
+      if (p.maxWeeks != null && counts[i]! >= p.maxWeeks) continue;
+      const ratio = (counts[i]! + 1) / (p.weight / totalWeight || 1e-9);
+      if (ratio < bestRatio) {
+        bestRatio = ratio;
+        best = i;
+      }
+    }
+    if (best < 0) break; // everything capped — leave the remainder off
+    counts[best]!++;
+    remainder--;
+  }
+}
+
 function allocateCounts(phases: PlanTemplate['phases'], weeks: number): number[] {
   const n = phases.length;
   const minSum = phases.reduce((s, p) => s + p.minWeeks, 0);
 
   if (weeks >= minSum) {
+    // Enough runway for every minimum: seed at minWeeks, spread the surplus by weight.
     const counts = phases.map((p) => p.minWeeks);
-    let remainder = weeks - minSum;
-    const totalWeight = phases.reduce((s, p) => s + p.weight, 0) || 1;
-    while (remainder > 0) {
-      // Assign the next week to the phase furthest below its weighted target,
-      // skipping any that have hit maxWeeks. `build` (no maxWeeks) absorbs spill.
-      let best = -1;
-      let bestRatio = Infinity;
-      for (let i = 0; i < n; i++) {
-        const p = phases[i]!;
-        if (p.maxWeeks != null && counts[i]! >= p.maxWeeks) continue;
-        const ratio = (counts[i]! + 1) / (p.weight / totalWeight || 1e-9);
-        if (ratio < bestRatio) {
-          bestRatio = ratio;
-          best = i;
-        }
-      }
-      if (best < 0) break; // everything capped — leave the remainder off
-      counts[best]!++;
-      remainder--;
-    }
+    distributeByWeight(phases, counts, weeks - minSum, 0);
     return counts;
   }
 
-  // Over-compressed: fewer weeks than the phases' minimums. Distribute
-  // proportionally; keep as many phases as possible (>=1 each when weeks >= n).
+  // Over-compressed: fewer weeks than the phases' summed minimums, but at least one
+  // per phase is affordable. Drop whole phases from the FRONT (base first, then
+  // build, …) — keeping the tail incl. taper/race — until the survivors' minimums fit,
+  // then seed survivors at minWeeks and spread any surplus by weight honoring maxWeeks.
+  // This never overflows a capped phase, so `race` stays at exactly 1 week and last.
   if (weeks >= n) {
-    const counts = phases.map(() => 1);
-    let remainder = weeks - n;
-    const order = phases.map((p, i) => ({ i, w: p.minWeeks })).sort((a, b) => b.w - a.w);
-    let j = 0;
-    while (remainder > 0) {
-      counts[order[j % order.length]!.i]!++;
-      remainder--;
-      j++;
+    const minSumFrom = (s: number) => phases.slice(s).reduce((acc, p) => acc + p.minWeeks, 0);
+    let start = 0;
+    while (start < n - 1 && minSumFrom(start) > weeks) start++;
+
+    const counts = phases.map(() => 0);
+    let budget = weeks;
+    for (let i = start; i < n; i++) {
+      const give = Math.min(phases[i]!.minWeeks, budget); // partial only in the extreme
+      counts[i] = give;
+      budget -= give;
     }
+    distributeByWeight(phases, counts, budget, start);
     return counts;
   }
 
   // Extreme: fewer weeks than phases. Keep the last `weeks` phases (taper/race
   // win — arriving rested matters more than a full base). Never silently emit
-  // a zero-length plan.
+  // a zero-length plan; 1 each honors every maxWeeks (all are >= 1).
   const counts = phases.map(() => 0);
   for (let i = n - weeks; i < n; i++) counts[i] = 1;
   return counts;
@@ -332,7 +339,16 @@ export function buildWeeks(
   allocation: PhaseAllocation[],
 ): Plan['weeks'] {
   const volumes = rampVolumes(template, params, allocation);
-  const planMonday = mondayOf(params.startDate);
+  // Anchor a committed plan so its LAST week is the race week and the race day lands on
+  // the real date; intended/open-ended plans (no committed race) keep starting from
+  // today's week. The inclusive week count (selector) makes the unclamped anchor equal
+  // mondayOf(today); a far race clamped to MAX_PLAN_WEEKS starts later, still ending on
+  // race day.
+  const anchored = params.totalWeeks !== null && params.race != null;
+  const planMonday = anchored
+    ? addDays(mondayOf(params.race!.date), -(allocation.length - 1) * 7)
+    : mondayOf(params.startDate);
+  const raceSlotWeekday = anchored ? weekdayOf(params.race!.date) : params.longRunDay;
   const pattern = microcycleFor(template, params.runsPerWeek);
 
   return allocation.map((alloc, wi) => {
@@ -354,7 +370,7 @@ export function buildWeeks(
       (wd) =>
         roleByWeekday[wd] !== undefined &&
         roleByWeekday[wd] !== 'long_run' &&
-        !(isRaceWeek && wd === params.longRunDay),
+        !(isRaceWeek && wd === raceSlotWeekday),
     );
     const nonLongBudget = Math.max(0, vol.totalMi - vol.longRunMi);
     const per = nonLongWeekdays.length > 0 ? roundHalf(nonLongBudget / nonLongWeekdays.length) : 0;
@@ -380,13 +396,41 @@ export function buildWeeks(
       const role = roleByWeekday[weekday];
       const miles = distByWeekday[weekday] ?? 0;
 
-      if (isRaceWeek && weekday === params.longRunDay) {
-        return raceDay(dayName, date, params);
+      if (isRaceWeek) {
+        // Place the race on its real date (anchored) — checked first and
+        // unconditionally so a race on a rest-day weekday still lands. Days after the
+        // race in the race week are recovery. Non-anchored (placeholder) plans keep
+        // the race on the long-run day.
+        if (anchored) {
+          if (date === params.race!.date) return raceDay(dayName, date, params);
+          if (date > params.race!.date) {
+            return {
+              day: dayName,
+              date,
+              type: 'rest',
+              category: 'rest',
+              description: 'Recover — the race is done.',
+            };
+          }
+        } else if (weekday === params.longRunDay) {
+          return raceDay(dayName, date, params);
+        }
       }
       if (role === undefined) {
         return { day: dayName, date, type: 'rest', category: 'rest', description: 'Rest day.' };
       }
       if (role === 'long_run') {
+        // No long run in the race week — the race is the long effort (its long-run
+        // volume is already 0), so the slot is rest/shakeout.
+        if (isRaceWeek) {
+          return {
+            day: dayName,
+            date,
+            type: 'rest',
+            category: 'rest',
+            description: 'Easy or rest — race week.',
+          };
+        }
         return longRunDayEntry(dayName, date, vol.longRunMi, template, params, alloc);
       }
       if (role === 'quality') {
@@ -680,14 +724,20 @@ export function placeStrength(
   const sessionOrder: Array<'lower_body' | 'upper_body'> = ['lower_body', 'upper_body'];
 
   return weeks.map((week) => {
-    const restWeekdays = week.days
-      .map((d, idx) => ({ d, idx }))
-      .filter(({ d }) => d.type === 'rest')
-      .map(({ idx }) => idx);
-    const slots = restWeekdays.slice(0, want);
-
     const isTaper = week.phase === 'taper';
     const isRace = week.phase === 'race';
+
+    // Don't slot strength onto days AFTER the race in the race week (that's recovery,
+    // not training); pre-race rest days still take a light race-week session.
+    const restWeekdays = week.days
+      .map((d, idx) => ({ d, idx }))
+      .filter(
+        ({ d }) =>
+          d.type === 'rest' &&
+          !(isRace && params.race != null && d.date != null && d.date > params.race.date),
+      )
+      .map(({ idx }) => idx);
+    const slots = restWeekdays.slice(0, want);
 
     const days = [...week.days];
     slots.forEach((dayIdx, s) => {
@@ -1004,13 +1054,41 @@ function applyOpenEndedOverlay(plan: Plan): void {
 // renderPlan — the composed pipeline.
 // ---------------------------------------------------------------------------
 
+/**
+ * T-9 generation-time guard: a committed plan must contain exactly one `type:'race'`
+ * day, on the real race date. Catches both the duplicate-race-day (T-1a) and
+ * misplaced-race-day (T-1b) regressions and any future drift. Throws — this path is
+ * inline on the bot and is meant to be deterministic and correct, so a wrong race date
+ * should fail generation rather than get persisted. Skipped for intended/open-ended
+ * plans, which carry a deliberately synthetic placeholder race (no real race day in the
+ * grid). `metadata.race.date` equals `params.race.date` by construction, so checking the
+ * race day against `params.race.date` is the load-bearing assertion.
+ */
+export function assertRaceDayInvariant(plan: Plan, params: RenderParams): void {
+  if (!params.race) return;
+  const raceDays = plan.weeks.flatMap((w) => w.days).filter((d) => d.type === 'race');
+  if (raceDays.length !== 1) {
+    throw new Error(
+      `renderPlan: expected exactly one type:'race' day for a committed race, found ${raceDays.length}.`,
+    );
+  }
+  const raceDate = raceDays[0]!.date;
+  if (raceDate !== params.race.date) {
+    throw new Error(
+      `renderPlan: race day is ${raceDate ?? 'undated'} but the committed race is ${params.race.date}.`,
+    );
+  }
+}
+
 export function renderPlan(template: PlanTemplate, params: RenderParams): Plan {
   const allocation = allocatePhases(template, params);
   let weeks = buildWeeks(template, params, allocation);
   weeks = placeStrength(weeks, template, params);
   const draft = assemblePlan(template, params, allocation, weeks);
   const overlaid = applyOverlays(draft, params);
-  return PlanSchema.parse(overlaid);
+  const plan = PlanSchema.parse(overlaid);
+  assertRaceDayInvariant(plan, params);
+  return plan;
 }
 
 // ---------------------------------------------------------------------------

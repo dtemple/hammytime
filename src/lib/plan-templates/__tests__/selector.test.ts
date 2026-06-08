@@ -125,8 +125,9 @@ describe('computeRenderParams — timeline across the three goal states', () => 
       DRAFT_SAFETY_CAPS,
       t,
     );
-    // 2026-06-08 → 2026-10-04 is 118 days = 16 whole weeks
-    expect(p.totalWeeks).toBe(16);
+    // 2026-06-08 (Mon) → race 2026-10-04 (Sun). mondayOf both: 2026-06-08 → 2026-09-28
+    // is 16 weeks; the count is INCLUSIVE of today's week through the race week, so 17.
+    expect(p.totalWeeks).toBe(17);
     expect(p.race).not.toBeNull();
   });
 

@@ -20,6 +20,7 @@ import type {
 } from './types';
 import type { DayType } from '@/lib/plan-schema';
 import type { KnownGapKey, StrengthEquipment } from '@/lib/known-gaps';
+import { mondayOf, wholeWeeksBetween } from './dates';
 
 // ---------------------------------------------------------------------------
 // (distance × tier) → template. The structural axis is distance; tier mostly
@@ -173,11 +174,6 @@ function clampInt(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, Math.round(n)));
 }
 
-function whole_weeks_between(fromISO: string, toISO: string): number {
-  const ms = Date.parse(`${toISO}T00:00:00Z`) - Date.parse(`${fromISO}T00:00:00Z`);
-  return Math.floor(ms / (7 * 24 * 3600 * 1000));
-}
-
 function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
@@ -232,14 +228,18 @@ export function computeRenderParams(
   const distance = profile.goalDistance;
   const templateId = template.id;
 
-  // 1. Timeline. Open-ended for day-to-day, keep_fit, or an intended goal with
-  //    no date yet; otherwise the whole weeks between today and the target.
+  // 1. Timeline. Open-ended for day-to-day, keep_fit, or an intended goal with no date
+  //    yet; otherwise the INCLUSIVE count of Monday→Sunday weeks from today's week
+  //    through the race week, so the rendered plan's final week IS the race week (the
+  //    renderer anchors the same way). Use the committed race's date when present so the
+  //    count and the renderer's anchor agree.
   let totalWeeks: number | null;
-  if (profile.goalState === 'day_to_day' || distance === 'keep_fit' || !profile.targetDate) {
+  const anchorDate = profile.race?.date ?? profile.targetDate;
+  if (profile.goalState === 'day_to_day' || distance === 'keep_fit' || !anchorDate) {
     totalWeeks = null;
   } else {
     totalWeeks = clampInt(
-      whole_weeks_between(profile.today, profile.targetDate),
+      wholeWeeksBetween(mondayOf(profile.today), mondayOf(anchorDate)) + 1,
       MIN_PLAN_WEEKS,
       MAX_PLAN_WEEKS,
     );

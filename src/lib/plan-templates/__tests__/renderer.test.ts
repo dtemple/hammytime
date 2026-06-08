@@ -211,6 +211,159 @@ describe('buildWeeks', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Race-day anchoring (T-1). A committed race must render exactly one type:'race'
+// day, on the real race date, in the plan's final week.
+// ---------------------------------------------------------------------------
+
+function isoAddDays(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function isoWeekday(iso: string): number {
+  return new Date(`${iso}T00:00:00Z`).getUTCDay();
+}
+
+describe('race-day anchoring (T-1)', () => {
+  it('Brenden: marathon-finish, 11 weeks out, race lands once on the real date', () => {
+    // The reported prod failure: onboarded 2026-06-07 (Sun), Santa Rosa 2026-08-23
+    // (Sun), long-run day Saturday. Before the fix this rendered race days on
+    // 2026-08-08 and 2026-08-15 and ended 2026-08-16.
+    const brenden: SelectorProfile = {
+      experienceTier: 'some_training',
+      goalDistance: 'marathon',
+      daysPerWeek: 4,
+      longRunDay: 6, // Saturday — deliberately ≠ the race weekday (Sunday)
+      goalState: 'committed',
+      targetDate: '2026-08-23',
+      targetType: 'finish',
+      targetTimeSec: null,
+      race: { name: 'Santa Rosa Marathon', date: '2026-08-23', distanceMiles: 26.2, type: 'road' },
+      injuries: [],
+      today: '2026-06-07',
+    };
+    const { template, params } = selectPlan(brenden, SNAP, DRAFT_SAFETY_CAPS);
+    // Inclusive count: mondayOf(06-07)=06-01 → mondayOf(08-23)=08-17 is 11 weeks, +1 = 12
+    // (= the marathon-finish phase minimum), so base survives.
+    expect(params.totalWeeks).toBe(12);
+
+    const plan = renderPlan(template, params);
+    const raceDays = plan.weeks.flatMap((w) => w.days).filter((d) => d.type === 'race');
+    expect(raceDays).toHaveLength(1);
+    expect(raceDays[0]!.date).toBe('2026-08-23');
+    expect(plan.metadata.race.date).toBe('2026-08-23');
+
+    const last = plan.weeks[plan.weeks.length - 1]!;
+    expect(last.start_date! <= '2026-08-23' && '2026-08-23' <= last.end_date!).toBe(true);
+    // The race is the long effort — no long run in the race week.
+    expect(last.days.some((d) => d.type === 'long_run')).toBe(false);
+  });
+
+  // One representative selection per template that has a race phase.
+  const RACE_TEMPLATE_CASES: Array<[string, GoalDistance, ExperienceTier]> = [
+    ['marathon-finish', 'marathon', 'some_training'],
+    ['marathon-performance', 'marathon', 'experienced'],
+    ['half-foundation', 'half', 'beginner'],
+    ['half-development', 'half', 'some_training'],
+    ['short-race', '5k', 'for_fun'],
+  ];
+  const TODAY = '2026-06-08'; // a Monday
+
+  function committedProfile(
+    distance: GoalDistance,
+    tier: ExperienceTier,
+    raceDate: string,
+    longRunDay: number,
+  ): SelectorProfile {
+    return {
+      experienceTier: tier,
+      goalDistance: distance,
+      daysPerWeek: 4,
+      longRunDay,
+      goalState: 'committed',
+      targetDate: raceDate,
+      targetType: 'finish',
+      targetTimeSec: null,
+      race: { name: 'Goal Race', date: raceDate, distanceMiles: MILES[distance], type: 'road' },
+      injuries: [],
+      today: TODAY,
+    };
+  }
+
+  for (const [label, distance, tier] of RACE_TEMPLATE_CASES) {
+    it(`${label}: invariants hold across runways (race weekday = and ≠ long-run day)`, () => {
+      const failures: string[] = [];
+      for (let weeksOut = 4; weeksOut <= 24; weeksOut++) {
+        // Vary the race weekday across the range so we cover weekend + midweek races.
+        const raceDate = isoAddDays(TODAY, weeksOut * 7 + (weeksOut % 7));
+        const rwd = isoWeekday(raceDate);
+        for (const rel of ['same', 'diff'] as const) {
+          const longRunDay = rel === 'same' ? rwd : (rwd + 3) % 7;
+          const tag = `${label} ${weeksOut}wk/${rel}`;
+          const { template, params } = selectPlan(
+            committedProfile(distance, tier, raceDate, longRunDay),
+            SNAP,
+            DRAFT_SAFETY_CAPS,
+          );
+
+          // Invariant #2 — no phase exceeds maxWeeks; a present phase is ≥ minWeeks
+          // (phases drop whole, from the front, rather than going under their min).
+          const alloc = allocatePhases(template, params);
+          const counts = new Map<string, number>();
+          for (const a of alloc) counts.set(a.basePhase, (counts.get(a.basePhase) ?? 0) + 1);
+          for (const phase of template.phases) {
+            const c = counts.get(phase.name) ?? 0;
+            if (phase.maxWeeks != null && c > phase.maxWeeks) {
+              failures.push(`${tag}: ${phase.name}=${c} exceeds max ${phase.maxWeeks}`);
+            }
+            if (c > 0 && c < phase.minWeeks) {
+              failures.push(`${tag}: ${phase.name}=${c} under min ${phase.minWeeks}`);
+            }
+          }
+
+          let plan;
+          try {
+            plan = renderPlan(template, params); // throws via assertRaceDayInvariant on #1
+          } catch (e) {
+            failures.push(`${tag}: renderPlan threw — ${(e as Error).message}`);
+            continue;
+          }
+
+          // Invariant #1 — exactly one race day, on the real date.
+          const raceDays = plan.weeks.flatMap((w) => w.days).filter((d) => d.type === 'race');
+          if (raceDays.length !== 1) {
+            failures.push(`${tag}: ${raceDays.length} race days`);
+          } else if (raceDays[0]!.date !== raceDate) {
+            failures.push(`${tag}: race day ${raceDays[0]!.date} ≠ ${raceDate}`);
+          }
+
+          // Invariant #3 — the final week contains the race date; no long run there.
+          const last = plan.weeks[plan.weeks.length - 1]!;
+          if (!(last.start_date! <= raceDate && raceDate <= last.end_date!)) {
+            failures.push(`${tag}: final week ${last.start_date}..${last.end_date} excludes race`);
+          }
+          if (last.days.some((d) => d.type === 'long_run')) {
+            failures.push(`${tag}: long_run present in the race week`);
+          }
+          // Length: exact when the runway fits every phase minimum. When it can't, a
+          // shorter correct plan is allowed (whole phases drop from the front rather
+          // than overflowing a cap or going under a min) — but never longer than asked,
+          // never empty.
+          const minSum = template.phases.reduce((s, p) => s + p.minWeeks, 0);
+          if (params.totalWeeks! >= minSum && plan.weeks.length !== params.totalWeeks) {
+            failures.push(`${tag}: weeks ${plan.weeks.length} ≠ totalWeeks ${params.totalWeeks}`);
+          }
+          if (plan.weeks.length > params.totalWeeks! || plan.weeks.length < 1) {
+            failures.push(`${tag}: weeks ${plan.weeks.length} out of range (totalWeeks ${params.totalWeeks})`);
+          }
+        }
+      }
+      expect(failures).toEqual([]);
+    });
+  }
+});
+
 describe('caps surface into agent_guidance.compliance_rules', () => {
   it('includes the three caps-derived rules with the locked numbers', () => {
     const profile = buildProfile('marathon', 'some_training', 'committed');
