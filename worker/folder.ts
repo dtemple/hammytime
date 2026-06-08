@@ -15,7 +15,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { supabaseAdmin } from '@/lib/db';
 import { computeDrift, renderDriftSummary, type PlanDrift } from '@/lib/plan-drift';
-import { PlanSchema } from '@/lib/plan-schema';
+import { PlanSchema, type Plan } from '@/lib/plan-schema';
 import { ATHLETE_ROOT, STRAVA_LOOKBACK_DAYS } from './config';
 import { compactJson } from './json-compact';
 import { buildStravaContext } from './strava';
@@ -49,6 +49,10 @@ export type HydratedFolder = {
   // plan. persistPlanEdit compares against this to detect a coach edit. Absent
   // when the athlete has no active plan.
   planHash?: string;
+  // The working plan JSON already loaded for the folder, surfaced so the system
+  // prompt can derive an ease-in-week signal without a second DB round-trip.
+  // Null when the athlete has no active plan.
+  plan: Plan | null;
 };
 
 export function hash(content: string): string {
@@ -96,6 +100,10 @@ export async function hydrate(athleteId: string): Promise<HydratedFolder> {
     await writeFile(path.join(dir, 'marathon_training_plan.json'), planText, 'utf8');
     planHash = hash(planText);
   }
+  // The working plan as a typed object (or null). easeInContext (system-prompt.ts)
+  // reads it defensively, so a malformed row degrades to no ease-in signal rather
+  // than throwing here.
+  const plan = (refs?.currentJson ?? null) as Plan | null;
 
   // Drift summary (read-only input) — how far the working plan has moved from
   // the original baseline. The coach reads this and raises material drift.
@@ -110,7 +118,7 @@ export async function hydrate(athleteId: string): Promise<HydratedFolder> {
   // advice in vetted cues + canonical source links. Excluded from syncBack.
   await copyFile(CORPUS_SRC, path.join(dir, 'exercises.md'));
 
-  return { dir, memoryHashes, planHash };
+  return { dir, memoryHashes, planHash, plan };
 }
 
 /**

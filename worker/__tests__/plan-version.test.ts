@@ -53,7 +53,7 @@ function makeDb() {
 
 function folderWithPlan(content: string): HydratedFolder {
   writeFileSync(path.join(dir, 'marathon_training_plan.json'), content);
-  return { dir, memoryHashes: {}, planHash: hash(content) };
+  return { dir, memoryHashes: {}, planHash: hash(content), plan: null };
 }
 
 beforeEach(() => {
@@ -70,7 +70,7 @@ afterEach(() => {
 
 describe('persistPlanEdit', () => {
   it('no-ops when the athlete had no plan at hydrate', async () => {
-    await persistPlanEdit(ATHLETE, { dir, memoryHashes: {}, planHash: undefined });
+    await persistPlanEdit(ATHLETE, { dir, memoryHashes: {}, planHash: undefined, plan: null });
     expect(rpcCalls).toHaveLength(0);
   });
 

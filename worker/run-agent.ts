@@ -55,7 +55,7 @@ export async function runAgent(
   const steps: CapturedStep[] = [];
 
   try {
-    const systemPrompt = await renderSystemPrompt(athleteId);
+    const systemPrompt = await renderSystemPrompt(athleteId, folder.plan);
     const history = await loadRecentHistory(athleteId);
     const prompt = buildPrompt(source, timezone, message, history, activityId);
 

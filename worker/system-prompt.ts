@@ -9,6 +9,7 @@ import { supabaseAdmin } from '@/lib/db';
 import { loadAthleteData } from '@/server/agent/byo-plan';
 import { DRAFT_SAFETY_CAPS } from '@/lib/plan-templates/caps';
 import type { SafetyCaps } from '@/lib/plan-templates/types';
+import type { Plan } from '@/lib/plan-schema';
 import type { RunSource } from './run-agent';
 
 export type HistoryMsg = { direction: string; body: string };
@@ -65,6 +66,58 @@ function coachMode(
   if (profile?.goal_state === 'day_to_day') return 'no_race';
   if (profile?.goal_state === 'intended') return 'intended';
   return 'unknown';
+}
+
+// The prefix the renderer stamps on an ease-in week-1 coaching_note (see
+// `easeInNote` in src/lib/plan-templates/renderer.ts). The worker keys on it to
+// know week 1 is a partial ease-in; kept here as a local constant so the coupling
+// is documented without importing from the renderer.
+const EASE_IN_NOTE_PREFIX = 'Ease-in week';
+
+function daysInclusive(fromISO: string, toISO: string): number {
+  const ms = Date.parse(`${toISO}T00:00:00Z`) - Date.parse(`${fromISO}T00:00:00Z`);
+  return Math.round(ms / 86_400_000) + 1;
+}
+
+// Brief the coach with the ease-in facts and the shaping instruction, but only
+// while today actually sits inside a mid-week onboarder's partial week 1. The
+// renderer set a conservative floor (elapsed + sign-up day rested, the rest easy,
+// no long run / no quality); the coach owns how to use the days that remain given
+// the runway, and the warm framing of week 2 as the first full week. Returns '' on
+// every other run so the block self-suppresses mid-plan — same empty-substitution
+// pattern as {{asthma_line}}.
+export function easeInContext(
+  plan: Plan | null | undefined,
+  today: string,
+  race: LoadedData['goalRace'],
+): string {
+  const w1 = plan?.weeks?.[0];
+  if (!w1?.coaching_note?.startsWith(EASE_IN_NOTE_PREFIX)) return '';
+  const start = w1.start_date;
+  const end = w1.end_date;
+  // A clamped far-race plan's week 1 starts in the future (today < start), so it
+  // never carries the ease-in note and never matches here; the same athlete past
+  // week 1 has today > end. Both fall through to ''.
+  if (!start || !end || today < start || today > end) return '';
+
+  const daysLeft = daysInclusive(today, end);
+  const totalWeeks = plan!.metadata?.plan_structure?.total_weeks ?? plan!.weeks.length;
+  const runway =
+    race && race.date
+      ? `${totalWeeks} weeks to ${race.name} on ${race.date}`
+      : `a ${totalWeeks}-week plan`;
+
+  return `## The athlete's ease-in first week
+
+This athlete onboarded partway through the week, so week 1 is a partial ease-in. The plan set a safe floor: the days that had already passed and the sign-up day are rest, the rest of the week is easy runs, and there's no long run or hard session. Week 2 is their first full week.
+
+What you're working with:
+- Days left in this partial week: ${daysLeft} (through ${end}).
+- Runway: ${runway}.
+
+This is one of their first messages with you, so use those two numbers. A long stretch left with a short runway is worth filling: an easy run today, and an easy long run before week 2 if the days allow. A short remainder, or a long runway, stays easy — a couple of shakeouts, then a real start on Monday. Either way, tell them week 2 is where the full training begins, and treat the short week as deliberate.
+
+The floor is your baseline; keep it. Float any extra runs as suggestions, and don't write them into marathon_training_plan.json until the athlete agrees, the same ask-first rule as any plan change. If you've already framed week 2 earlier in this thread, don't say it again — just carry on from there.`;
 }
 
 function distanceLabel(distance: string | null): string {
@@ -186,11 +239,15 @@ export function safetyCapsBlock(caps: SafetyCaps, distanceMi: number | null): st
   return lines.join('\n');
 }
 
-export async function renderSystemPrompt(athleteId: string): Promise<string> {
+export async function renderSystemPrompt(
+  athleteId: string,
+  plan?: Plan | null,
+): Promise<string> {
   const data = await loadAthleteData(athleteId);
   const template = await loadTemplate();
 
   const mode = coachMode(data.goalRace, data.trainingProfile);
+  const { date: today } = localDateParts(data.athlete.timezone);
 
   const values: Record<string, string> = {
     name: data.athlete.name,
@@ -205,6 +262,7 @@ export async function renderSystemPrompt(athleteId: string): Promise<string> {
     asthma_line: data.athlete.asthma ? '- Mild asthma — watch cold/dry/high-effort conditions' : '',
     injury_history: injuryHistory(data.injuries),
     safety_caps: safetyCapsBlock(DRAFT_SAFETY_CAPS, data.goalRace?.distance_mi ?? null),
+    ease_in_context: easeInContext(plan, today, data.goalRace),
   };
 
   return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {
