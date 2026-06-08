@@ -293,6 +293,51 @@ export async function handleInboundVoice(ctx: Context): Promise<void> {
   await handleInboundText(ctx);
 }
 
+// Telegram delivers an album as one update per item, each sharing a
+// media_group_id, but only the first item carries the caption. We only want to
+// react once per album, so we remember groups we've already handled and drop the
+// repeats. In-memory is enough: album items land within milliseconds while the
+// instance is warm; a cold split across serverless instances at worst yields a
+// second notice, never fewer. Entries self-expire so the map can't grow without
+// bound.
+const recentMediaGroups = new Map<string, number>();
+const MEDIA_GROUP_TTL_MS = 60_000;
+
+function isDuplicateMediaGroup(mediaGroupId: string | undefined): boolean {
+  if (!mediaGroupId) return false;
+  const now = Date.now();
+  for (const [id, seenAt] of recentMediaGroups) {
+    if (now - seenAt > MEDIA_GROUP_TTL_MS) recentMediaGroups.delete(id);
+  }
+  if (recentMediaGroups.has(mediaGroupId)) return true;
+  recentMediaGroups.set(mediaGroupId, now);
+  return false;
+}
+
+// Unsupported attachments (photos, documents/"send as file", video, stickers,
+// GIFs, audio…) have no `text` field, so without this they're dropped silently
+// and the bot looks broken. Any caption lives on ctx.message.caption. We can't
+// open the attachment, so tell the athlete that and — when there's a caption —
+// route it through handleInboundText as if typed, so they still get a real
+// reply. Mirrors handleInboundVoice.
+export async function handleInboundMedia(ctx: Context): Promise<void> {
+  // An album fans out into one update per item; only react to the first.
+  if (isDuplicateMediaGroup(ctx.message?.media_group_id)) return;
+
+  const caption = ctx.message?.caption?.trim() ?? '';
+
+  if (!caption) {
+    await ctx.reply(
+      "I can't open attachments like that yet. Tell me in a message what you needed and I'll pick it up from there.",
+    );
+    return;
+  }
+
+  await ctx.reply("I can't open attachments like that yet, so I'll go off your caption.");
+  (ctx.message as { text?: string }).text = caption;
+  await handleInboundText(ctx);
+}
+
 export async function handleConnectStravaCommand(ctx: CommandContext<Context>): Promise<void> {
   const db = supabaseAdmin();
   const chatId = String(ctx.chat.id);
@@ -747,6 +792,20 @@ function getBot(): Bot {
     _bot.on('message:voice', async (ctx) => {
       await handleInboundVoice(ctx);
     });
+    _bot.on(
+      [
+        'message:photo',
+        'message:document', // includes images sent as a file
+        'message:video',
+        'message:video_note',
+        'message:animation', // GIFs
+        'message:audio',
+        'message:sticker',
+      ],
+      async (ctx) => {
+        await handleInboundMedia(ctx);
+      },
+    );
     _bot.on('callback_query:data', async (ctx) => {
       const data = ctx.callbackQuery.data;
 

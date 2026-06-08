@@ -31,6 +31,7 @@ import { enqueueJob } from '@/server/jobs/enqueue';
 import { disconnectStrava } from '@/server/strava/disconnect';
 import {
   handleInboundText,
+  handleInboundMedia,
   handleConnectStravaCommand,
   handleDisconnectStravaCommand,
   handleNextAction,
@@ -197,6 +198,72 @@ describe('handleInboundText — wellness routing', () => {
     await handleInboundText(ctx as AnyMock);
 
     expect(handleWellnessMessage).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Inbound media (photos, files, video, stickers…)
+// ---------------------------------------------------------------------------
+
+describe('handleInboundMedia', () => {
+  it('replies with the not-supported notice and does nothing else when there is no caption', async () => {
+    (supabaseAdmin as AnyMock).mockReturnValue(makeDb('active'));
+    const ctx = makeCtx({ message: { photo: [{ file_id: 'abc' }], message_id: 7 } });
+
+    await handleInboundMedia(ctx as AnyMock);
+
+    expect(ctx.reply).toHaveBeenCalledOnce();
+    expect((ctx.reply as AnyMock).mock.calls[0]![0]).toContain("can't open attachments");
+    // No caption → never routed into the coaching pipeline.
+    expect(enqueueJob).not.toHaveBeenCalled();
+  });
+
+  it('posts the notice then routes the caption through handleInboundText as if typed', async () => {
+    (supabaseAdmin as AnyMock).mockReturnValue(makeDb('active'));
+    const ctx = makeCtx({
+      message: { photo: [{ file_id: 'abc' }], caption: 'how did my long run look?', message_id: 42 },
+      react: vi.fn().mockResolvedValue(undefined),
+    });
+
+    await handleInboundMedia(ctx as AnyMock);
+
+    // Athlete is told images aren't read yet.
+    expect((ctx.reply as AnyMock).mock.calls[0]![0]).toContain("can't open attachments");
+    // The caption is dispatched as a normal message: enqueued for the worker.
+    expect(enqueueJob).toHaveBeenCalledWith(
+      'tg_message',
+      `tg-${ATHLETE_ID}-42`,
+      { athlete_id: ATHLETE_ID, text: 'how did my long run look?' },
+    );
+    // It was injected onto ctx.message.text so downstream paths read it.
+    expect((ctx.message as { text?: string }).text).toBe('how did my long run look?');
+  });
+
+  it('reacts once per album, dropping the repeat items of the same media group', async () => {
+    (supabaseAdmin as AnyMock).mockReturnValue(makeDb('active'));
+    const mediaGroupId = 'album-abc';
+    // Telegram puts the caption on the first item only; the rest share the group id.
+    const first = makeCtx({
+      message: {
+        photo: [{ file_id: 'a' }],
+        caption: 'check these out',
+        media_group_id: mediaGroupId,
+        message_id: 1,
+      },
+      react: vi.fn().mockResolvedValue(undefined),
+    });
+    const second = makeCtx({
+      message: { photo: [{ file_id: 'b' }], media_group_id: mediaGroupId, message_id: 2 },
+    });
+
+    await handleInboundMedia(first as AnyMock);
+    await handleInboundMedia(second as AnyMock);
+
+    // First item handled: one notice, caption routed once.
+    expect(first.reply).toHaveBeenCalledOnce();
+    expect(enqueueJob).toHaveBeenCalledTimes(1);
+    // Repeat item suppressed entirely — no second notice.
+    expect(second.reply).not.toHaveBeenCalled();
   });
 });
 
