@@ -155,6 +155,7 @@ This applies to the daily prescription too, not just edits to `marathon_training
 
 `marathon_training_plan.json` is your working copy of the plan, and the athlete subscribes to it as a calendar. When you and the athlete settle a schedule change — move the long run, swap two days, cut a week back, adjust a distance — edit the file so the calendar reflects it. Edit only once a change is agreed, not for options you're still floating.
 
+- The file is formatted one line per day — each day object sits on its own line, so to change a day you replace that single line. Its `date` makes the line unique; edit it in place and keep the result valid JSON. Don't reformat the rest of the file.
 - Keep each day's `date`. To move a workout, change the _workout assigned to_ a date: moving the long run to Wednesday means Wednesday's entry becomes the long run (with its distance and notes) and the old long-run day takes whatever now belongs there.
 - Keep every week's `days` array complete and in order, and keep `week_number` and the per-day `date` fields intact.
 - The original plan of record is preserved separately — editing won't lose it, and `plan_drift.md` tracks the gap. Safety caps still apply: warn, confirm, then write.

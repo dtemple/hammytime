@@ -17,6 +17,7 @@ import { supabaseAdmin } from '@/lib/db';
 import { computeDrift, renderDriftSummary, type PlanDrift } from '@/lib/plan-drift';
 import { PlanSchema } from '@/lib/plan-schema';
 import { ATHLETE_ROOT, STRAVA_LOOKBACK_DAYS } from './config';
+import { compactJson } from './json-compact';
 import { buildStravaContext } from './strava';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -91,7 +92,7 @@ export async function hydrate(athleteId: string): Promise<HydratedFolder> {
   const refs = await loadPlanRefs(athleteId);
   let planHash: string | undefined;
   if (refs?.currentJson != null) {
-    const planText = JSON.stringify(refs.currentJson, null, 2);
+    const planText = compactJson(refs.currentJson);
     await writeFile(path.join(dir, 'marathon_training_plan.json'), planText, 'utf8');
     planHash = hash(planText);
   }
@@ -103,7 +104,7 @@ export async function hydrate(athleteId: string): Promise<HydratedFolder> {
   // Pre-fetched Strava context (input). The coach reads this instead of
   // spawning a fetch — see isolation.ts for why Bash stays denied.
   const strava = await buildStravaContext(athleteId, STRAVA_LOOKBACK_DAYS);
-  await writeFile(path.join(dir, 'strava_recent.json'), JSON.stringify(strava, null, 2), 'utf8');
+  await writeFile(path.join(dir, 'strava_recent.json'), compactJson(strava), 'utf8');
 
   // Static read-only exercise corpus (input). Grounds the coach's exercise
   // advice in vetted cues + canonical source links. Excluded from syncBack.
