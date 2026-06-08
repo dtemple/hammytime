@@ -197,3 +197,29 @@ Each prompt is a scoped unit of work defined by the deliverable stated in that p
 - Do not refactor surrounding code unless the deliverable explicitly asks for it.
 - Do not add error handling, fallbacks, or validation for scenarios outside the deliverable's stated scope.
 - Before starting any non-trivial task, re-read the relevant section of `Specs/SPEC.md` to confirm your understanding matches the spec.
+
+---
+
+## 10. Git & deploy discipline
+
+This is a low-stakes, friends-only repo, worked directly on `main` (no PR flow), and David often runs 2–3 Claude Code sessions at once against the same checkout. The rules below keep that safe without heavyweight process.
+
+### Two surfaces deploy two different ways
+
+- **Web (Vercel)** auto-deploys on **push to `main`**. The push *is* the web deploy.
+- **Worker (Fly)** deploys only via **`fly deploy`**, which **builds from the local working tree, not git** — it bundles whatever is on disk right now, committed or not.
+
+Match the action to what changed:
+- Worker-only change → `commit → push → fly deploy`.
+- Web-only change → `commit → push` (no `fly deploy`).
+- Both → `commit → push → fly deploy`.
+
+### Commit and push, always, together
+
+Commit and push in one motion, every time, as soon as a unit of work is done and green. **Never leave a commit unpushed.** David doesn't test locally — prod is the test environment — so holding a push buys nothing and only hides work from his other sessions and the remote. Don't batch up local commits.
+
+### Before any `fly deploy` or push: confirm the tree is just your change
+
+Because Fly ships the local tree and other sessions may be editing it, run `git status` first and proceed only if the working tree contains **only** the change you're shipping. If files appear that aren't yours, **stop and flag it** — another session is likely mid-flight. Commit (and push) before you `fly deploy`, never deploy first and commit after.
+
+If two sessions repeatedly collide on the same files, that's the signal to move to a worktree or separate clone per session — raise it rather than pushing through.
