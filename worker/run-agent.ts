@@ -50,6 +50,7 @@ export async function runAgent(
 
   let result: SDKResultMessage | null = null;
   let runError: string | null = null;
+  let budgetStopped = false;
   let replyText = '';
   const steps: CapturedStep[] = [];
 
@@ -88,7 +89,9 @@ export async function runAgent(
       // throwing. Treat it like a thrown failure so we record the error and
       // fall back to SOFT_FALLBACK — never let a raw API error reach Telegram.
       runError = `agent run ended with ${result.subtype}`;
-      replyText = '';
+      // A budget stop isn't a crash — the folder holds partial-but-valid work
+      // worth keeping. Flag it so persistence below still runs.
+      budgetStopped = result.subtype === 'error_max_budget_usd';
       console.error(`[run-agent] athlete ${athleteId} run failed: ${result.subtype}`);
     } else if (result?.subtype === 'success' && result.result.trim()) {
       replyText = result.result;
@@ -99,9 +102,10 @@ export async function runAgent(
   }
 
   try {
-    // Only persist the agent's file edits when the run completed cleanly — a
-    // crashed run may have left the folder half-written.
-    if (!runError) {
+    // Persist file edits on a clean run OR a budget stop — both leave the folder
+    // usable. Only a crash/other error skips this (folder may be half-written).
+    // persistPlanEdit additionally schema-gates, so a half-written plan is dropped.
+    if (!runError || budgetStopped) {
       await syncBack(athleteId, folder).catch((e) =>
         console.error(`[run-agent] syncBack failed for ${athleteId}:`, e),
       );
@@ -123,7 +127,9 @@ export async function runAgent(
 
     // TODO(#12): decrement athlete_credits by result.total_cost_usd * markup.
 
-    const finalReply = replyText.trim() || SOFT_FALLBACK;
+    // Any error (incl. a budget stop) sends the fallback — never ship the partial
+    // text streamed before the failure as if it were a clean answer.
+    const finalReply = runError ? SOFT_FALLBACK : replyText.trim() || SOFT_FALLBACK;
     await sendReply(athleteId, finalReply, runId ?? undefined);
   } finally {
     stopTyping();

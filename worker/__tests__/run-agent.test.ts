@@ -12,6 +12,7 @@ vi.mock('../send', () => ({
   startTyping: vi.fn().mockResolvedValue(() => {}),
 }));
 vi.mock('../persist', () => ({ persistRun: vi.fn().mockResolvedValue('run-1') }));
+vi.mock('../plan-version', () => ({ persistPlanEdit: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../system-prompt', () => ({
   renderSystemPrompt: vi.fn().mockResolvedValue('SYSTEM PROMPT'),
   buildPrompt: vi.fn().mockReturnValue('PROMPT'),
@@ -24,6 +25,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import { hydrate, syncBack, cleanup } from '../folder';
 import { sendReply } from '../send';
 import { persistRun } from '../persist';
+import { persistPlanEdit } from '../plan-version';
 import { buildPrompt } from '../system-prompt';
 import { supabaseAdmin } from '@/lib/db';
 import { ALLOWED_TOOLS } from '../isolation';
@@ -54,6 +56,15 @@ function successResult(text: string) {
     result: text,
     total_cost_usd: 0.04,
     usage: { input_tokens: 1200, output_tokens: 300 },
+  };
+}
+// SDKResultError has no `result` field — the budget stop carries no clean text.
+function budgetResult() {
+  return {
+    type: 'result',
+    subtype: 'error_max_budget_usd',
+    total_cost_usd: 1.0,
+    usage: { input_tokens: 5000, output_tokens: 2000 },
   };
 }
 
@@ -146,5 +157,48 @@ describe('runAgent — SDK failure', () => {
     const sent = (sendReply as AnyMock).mock.calls[0];
     expect(sent[1]).toMatch(/Hit a snag/);
     expect(cleanup).toHaveBeenCalledWith(DIR);
+  });
+});
+
+describe('runAgent — budget stop is non-destructive', () => {
+  beforeEach(() => {
+    (query as AnyMock).mockReturnValue(stream([assistantText('partial'), budgetResult()]));
+  });
+
+  it('persists file edits and the plan edit even though the run errored on budget', async () => {
+    await runAgent(ATHLETE, 'daily_checkin');
+    expect(syncBack).toHaveBeenCalledOnce();
+    expect(persistPlanEdit).toHaveBeenCalledOnce();
+  });
+
+  it('sends the soft fallback, not the partial streamed text', async () => {
+    await runAgent(ATHLETE, 'daily_checkin');
+    const sent = (sendReply as AnyMock).mock.calls[0];
+    expect(sent[1]).toMatch(/Hit a snag/);
+    expect(sent[1]).not.toBe('partial');
+  });
+
+  it('records the budget-stop subtype as the run error', async () => {
+    await runAgent(ATHLETE, 'daily_checkin');
+    expect((persistRun as AnyMock).mock.calls[0][0].error).toMatch(/error_max_budget_usd/);
+  });
+});
+
+describe('runAgent — false-success hole', () => {
+  it('never ships text streamed before a mid-stream throw', async () => {
+    // Text streams, then the iterator throws — runError is set but replyText holds 'partial'.
+    (query as AnyMock).mockReturnValue(
+      (async function* () {
+        yield assistantText('partial');
+        throw new Error('stream died mid-run');
+      })(),
+    );
+
+    await runAgent(ATHLETE, 'tg_message', 'how did I do?');
+
+    expect(syncBack).not.toHaveBeenCalled(); // a crash still skips persistence
+    const sent = (sendReply as AnyMock).mock.calls[0];
+    expect(sent[1]).toMatch(/Hit a snag/);
+    expect(sent[1]).not.toBe('partial');
   });
 });
