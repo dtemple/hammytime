@@ -99,6 +99,17 @@ describe('formatPreview', () => {
       'strength session',
     );
   });
+
+  it('flags the partial first week when the athlete onboards mid-week', () => {
+    // 2026-06-02 is a Tuesday → week 1 contains the sign-up day → ease-in.
+    const { plan, params } = render(COMMITTED);
+    expect(formatPreview(plan, params)).toContain('first full week');
+  });
+
+  it('omits the ease-in line when a clamped far race makes week 1 a normal future week', () => {
+    const { plan, params } = render({ ...COMMITTED, targetDate: '2027-06-01', race: { ...COMMITTED.race!, date: '2027-06-01' } });
+    expect(formatPreview(plan, params)).not.toContain('first full week');
+  });
 });
 
 // ---------------------------------------------------------------------------

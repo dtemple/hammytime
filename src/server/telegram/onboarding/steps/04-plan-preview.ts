@@ -86,6 +86,29 @@ export function formatPreview(plan: Plan, params: RenderParams): string {
     );
   }
 
+  // Week 1 is a partial ease-in when the sign-up day falls inside it (the renderer rests
+  // the elapsed days + sign-up day and keeps the remainder to easy warm-ups). A far race
+  // clamped to MAX_PLAN_WEEKS starts in the future, so its week 1 starts after the sign-up
+  // day and is a normal week — no line. Skip a 1-week plan (no "week 2" to point at).
+  const w1 = plan.weeks[0];
+  const eased =
+    w1 != null &&
+    plan.weeks.length > 1 &&
+    w1.start_date != null &&
+    w1.end_date != null &&
+    params.startDate >= w1.start_date &&
+    params.startDate <= w1.end_date;
+  if (eased) {
+    const hasRemainder = w1!.end_date != null && params.startDate < w1!.end_date;
+    lines.push(
+      hasRemainder
+        ? "One more thing: you're starting partway through the week, so I've kept the rest of " +
+            'it to a few easy warm-up runs. Week 2 is your first full week.'
+        : "One more thing: you're joining right at the end of the week, so rest up and we'll " +
+            'get going Monday. Week 2 is your first full week.',
+    );
+  }
+
   if (params.timeGoalDiscouraged) {
     lines.push(
       "One thing: for where you are right now, I'd point you at finishing strong before chasing a " +

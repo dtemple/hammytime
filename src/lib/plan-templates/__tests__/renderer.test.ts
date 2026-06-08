@@ -364,6 +364,107 @@ describe('race-day anchoring (T-1)', () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Ease-in first week. An athlete who onboards mid-week gets a partial week 1: the
+// elapsed days and the sign-up day rest, the remainder is easy warm-ups (no long
+// run, no quality). A far race clamped to MAX_PLAN_WEEKS starts in the future, so
+// its week 1 is a normal week (no ease-in). The T-1 race-day placement is untouched.
+// ---------------------------------------------------------------------------
+
+const QUALITY_TYPES = new Set(['tempo', 'trail_tempo', 'intervals', 'hill_repeats']);
+
+function easeProfile(today: string, raceDate: string, longRunDay: number): SelectorProfile {
+  return {
+    experienceTier: 'some_training',
+    goalDistance: 'marathon',
+    daysPerWeek: 4,
+    longRunDay,
+    goalState: 'committed',
+    targetDate: raceDate,
+    targetType: 'finish',
+    targetTimeSec: null,
+    race: { name: 'Goal Race', date: raceDate, distanceMiles: 26.2, type: 'road' },
+    injuries: [],
+    today,
+  };
+}
+
+describe('ease-in first week', () => {
+  it('mid-week sign-up: elapsed days + the sign-up day rest, the remainder is easy', () => {
+    // Wednesday onboarder, race ~17 weeks out (unclamped). Long run on Sunday so the
+    // long-run slot lands in the remainder and must be suppressed.
+    const { template, params } = selectPlan(
+      easeProfile('2026-06-10', '2026-10-04', 0),
+      SNAP,
+      DRAFT_SAFETY_CAPS,
+    );
+    const plan = renderPlan(template, params);
+    const w1 = plan.weeks[0]!;
+
+    // Week 1 starts on this week's Monday and contains the sign-up day.
+    expect(w1.start_date! <= '2026-06-10' && '2026-06-10' <= w1.end_date!).toBe(true);
+
+    for (const d of w1.days) {
+      if (d.date! < '2026-06-10') expect(d.type).toBe('rest'); // elapsed
+      if (d.date === '2026-06-10') expect(d.type).toBe('rest'); // sign-up day
+    }
+    // No long run and no quality anywhere in week 1.
+    expect(w1.days.some((d) => d.type === 'long_run')).toBe(false);
+    expect(w1.days.some((d) => QUALITY_TYPES.has(d.type))).toBe(false);
+    // Remaining run days (after the sign-up day) are plain easy warm-ups.
+    for (const d of w1.days) {
+      if (d.date! > '2026-06-10' && d.category === 'run') expect(d.type).toBe('easy');
+    }
+    expect(w1.coaching_note).toContain('first full week');
+  });
+
+  it('Monday sign-up: the whole first week eases in; week 2 is the first full week', () => {
+    const { template, params } = selectPlan(
+      easeProfile('2026-06-08', '2026-10-04', 0), // 2026-06-08 is a Monday
+      SNAP,
+      DRAFT_SAFETY_CAPS,
+    );
+    const plan = renderPlan(template, params);
+    const w1 = plan.weeks[0]!;
+
+    const monday = w1.days.find((d) => d.date === '2026-06-08')!;
+    expect(monday.type).toBe('rest');
+    expect(w1.days.some((d) => d.type === 'long_run')).toBe(false);
+    expect(w1.days.some((d) => QUALITY_TYPES.has(d.type))).toBe(false);
+    // Week 2 is a normal full week with a long run.
+    expect(plan.weeks[1]!.days.some((d) => d.type === 'long_run')).toBe(true);
+  });
+
+  it('clamped far race: week 1 starts in the future and is NOT eased', () => {
+    // Race > 30 weeks out → clamped to MAX_PLAN_WEEKS → plan starts in the future.
+    const { template, params } = selectPlan(
+      easeProfile('2026-06-08', '2027-06-01', 0),
+      SNAP,
+      DRAFT_SAFETY_CAPS,
+    );
+    const plan = renderPlan(template, params);
+    const w1 = plan.weeks[0]!;
+
+    expect(w1.start_date! > '2026-06-08').toBe(true);
+    expect(w1.days.some((d) => d.type === 'long_run')).toBe(true); // normal base week
+    expect(w1.coaching_note).not.toContain('first full week');
+  });
+
+  it('week 1 == race week (1-week plan): ease-in never clobbers the race day', () => {
+    // Race this week → totalWeeks clamps to 1, so week 1 is both ease-in and race week.
+    const { template, params } = selectPlan(
+      easeProfile('2026-06-08', '2026-06-13', 6), // race Sat 2026-06-13
+      SNAP,
+      DRAFT_SAFETY_CAPS,
+    );
+    expect(params.totalWeeks).toBe(1);
+    const plan = renderPlan(template, params); // throws via assertRaceDayInvariant on a miss
+    const raceDays = plan.weeks.flatMap((w) => w.days).filter((d) => d.type === 'race');
+    expect(raceDays).toHaveLength(1);
+    expect(raceDays[0]!.date).toBe('2026-06-13');
+  });
+});
+
 describe('caps surface into agent_guidance.compliance_rules', () => {
   it('includes the three caps-derived rules with the locked numbers', () => {
     const profile = buildProfile('marathon', 'some_training', 'committed');

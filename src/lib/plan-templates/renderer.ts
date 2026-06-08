@@ -355,6 +355,14 @@ export function buildWeeks(
     const vol = volumes[wi]!;
     const weekMonday = addDays(planMonday, wi * 7);
     const isRaceWeek = alloc.basePhase === 'race';
+    // Ease-in: an athlete who onboards mid-week shouldn't be told to run hard on a day
+    // that's already gone, or on the sign-up day itself. When week 1 actually contains the
+    // sign-up day (the common case — a far race clamped to MAX_PLAN_WEEKS starts in the
+    // future, so its week 1 does not), rest the elapsed days + the sign-up day and keep the
+    // remainder to easy warm-up runs. The coach reasons about how to use the rest of the
+    // week from here; this is just the safe baseline the preview shows.
+    const isEaseInWeek =
+      wi === 0 && params.startDate >= weekMonday && params.startDate <= addDays(weekMonday, 6);
 
     const roleByWeekday = assignWeekdays(
       pattern,
@@ -416,6 +424,36 @@ export function buildWeeks(
           return raceDay(dayName, date, params);
         }
       }
+      if (isEaseInWeek) {
+        // Past the race-week check above (a 1-week plan can be both), so the race day is
+        // already placed. Rest the elapsed days and the sign-up day; the remainder is easy
+        // warm-up runs only — no long run, no quality.
+        if (date < params.startDate) {
+          return { day: dayName, date, type: 'rest', category: 'rest', description: 'Rest day.' };
+        }
+        if (date === params.startDate) {
+          return {
+            day: dayName,
+            date,
+            type: 'rest',
+            category: 'rest',
+            description: "Rest today; we'll ease in from here.",
+          };
+        }
+        if (role === undefined) {
+          return { day: dayName, date, type: 'rest', category: 'rest', description: 'Rest day.' };
+        }
+        if (role === 'long_run') {
+          return {
+            day: dayName,
+            date,
+            type: 'rest',
+            category: 'rest',
+            description: 'Easy week to start — long runs pick up in week 2.',
+          };
+        }
+        return easyDayEntry(dayName, date, miles, 'easy', template);
+      }
       if (role === undefined) {
         return { day: dayName, date, type: 'rest', category: 'rest', description: 'Rest day.' };
       }
@@ -463,7 +501,7 @@ export function buildWeeks(
       end_date: addDays(weekMonday, 6),
       phase: alloc.phase,
       planned_total_run_miles: runTotal,
-      coaching_note: weekNote(alloc, template),
+      coaching_note: isEaseInWeek ? easeInNote(params, weekMonday) : weekNote(alloc, template),
       days,
     } satisfies Week;
   });
@@ -707,6 +745,18 @@ function weekNote(alloc: PhaseAllocation, template: PlanTemplate): string {
   return phase?.description ?? '';
 }
 
+/** Week-1 note when the athlete onboarded partway through the week. Carries the facts the
+ *  coach reasons from (mid-week start, week 2 is the first full week); the coach decides how
+ *  to use the days that remain. */
+function easeInNote(params: RenderParams, weekMonday: string): string {
+  const hasRemainder = params.startDate < addDays(weekMonday, 6);
+  return hasRemainder
+    ? "Ease-in week. You're starting partway through the week, so the rest of it stays easy. " +
+        'Long runs and harder sessions start in week 2, your first full week.'
+    : "Ease-in week. You're joining at the end of the week, so this week is rest. Week 2 is " +
+        'your first full week.';
+}
+
 // ---------------------------------------------------------------------------
 // Strength placement.
 // ---------------------------------------------------------------------------
@@ -726,15 +776,25 @@ export function placeStrength(
   return weeks.map((week) => {
     const isTaper = week.phase === 'taper';
     const isRace = week.phase === 'race';
+    // The ease-in week is the one containing the sign-up day (a clamped far-race plan
+    // starts in the future, so no week contains it). Its elapsed days and the sign-up day
+    // are rest by design — don't fill them with strength.
+    const isEaseIn =
+      week.start_date != null &&
+      week.end_date != null &&
+      params.startDate >= week.start_date &&
+      params.startDate <= week.end_date;
 
     // Don't slot strength onto days AFTER the race in the race week (that's recovery,
-    // not training); pre-race rest days still take a light race-week session.
+    // not training); pre-race rest days still take a light race-week session. In the
+    // ease-in week, skip the elapsed days and the sign-up day too.
     const restWeekdays = week.days
       .map((d, idx) => ({ d, idx }))
       .filter(
         ({ d }) =>
           d.type === 'rest' &&
-          !(isRace && params.race != null && d.date != null && d.date > params.race.date),
+          !(isRace && params.race != null && d.date != null && d.date > params.race.date) &&
+          !(isEaseIn && d.date != null && d.date <= params.startDate),
       )
       .map(({ idx }) => idx);
     const slots = restWeekdays.slice(0, want);
@@ -1190,6 +1250,12 @@ export function validateSafety(
     // re-ramp out of a cutback.
     if (phaseOf(w) === 'cutback' || phaseOf(prev) === 'cutback') continue;
     if (phaseOf(w) === 'taper' || phaseOf(w) === 'race') continue;
+    // An ease-in first week (athlete onboarded mid-week) carries no long run by design, so
+    // week 2's first real long run reads as a 0→N jump. That's the start of the
+    // progression, not an escalation off a full week — exempt it, like a cutback re-ramp.
+    if (i === 1 && phaseOf(prev) !== 'taper' && phaseOf(prev) !== 'race' && longRunMi(prev) === 0) {
+      continue;
+    }
 
     const prevTotal = prev.planned_total_run_miles ?? 0;
     const inc = total - prevTotal;
