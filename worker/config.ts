@@ -3,7 +3,11 @@
 
 export const ATHLETE_ROOT = process.env.ATHLETE_ROOT ?? '/data/athletes';
 export const COACH_MODEL = process.env.COACH_MODEL ?? 'claude-sonnet-4-6';
-export const MAX_TURNS = numEnv('WORKER_MAX_TURNS', 12);
+// 20, not 12: a multi-day plan rewrite is 6+ sequential Edits plus the reads
+// around it, and 12 left no margin once the agent had read the folder — runs
+// were dying on max_turns and shipping the fallback. MAX_BUDGET_USD ($1) is the
+// real cost bound, so a higher turn ceiling can't run away.
+export const MAX_TURNS = numEnv('WORKER_MAX_TURNS', 20);
 // Bumped 0.5 -> 1.0: structural plan edits routinely land at $0.47-$0.56 and
 // were getting killed mid-write. Stopgap until the budget/persistence rework.
 export const MAX_BUDGET_USD = numEnv('WORKER_MAX_BUDGET_USD', 1);
