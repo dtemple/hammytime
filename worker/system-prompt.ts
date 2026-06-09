@@ -164,11 +164,12 @@ function goalLine(
 
 // Line 3 of coach.md — the coach's mission. Race/intended athletes get the
 // on-track-toward-a-race framing; a no-race athlete gets a consistency/base mission.
+// Prehab cadence is owned by coach.md §Prehab + prehab_program.md, not this sentence.
 function missionLine(mode: CoachMode): string {
   if (mode === 'no_race') {
-    return "You coach one athlete who's running to stay fit — no race on the calendar. Your job: read their files, keep them healthy, grow their aerobic base, and make running a durable habit — giving specific, actionable guidance, including prehab, every time you write to them.";
+    return "You coach one athlete who's running to stay fit — no race on the calendar. Your job: read their files, keep them healthy, grow their aerobic base, and make running a durable habit — giving specific, actionable guidance every time you write to them.";
   }
-  return "You coach one athlete toward their goal race. Your job: read their files, judge whether they're on track, flag risks early, and give specific, actionable guidance — including prehab — every time you write to them.";
+  return "You coach one athlete toward their goal race. Your job: read their files, judge whether they're on track, flag risks early, and give specific, actionable guidance every time you write to them.";
 }
 
 // The goal-pace bullet in "Filling known gaps". A no-race athlete has no
@@ -240,10 +241,7 @@ export function safetyCapsBlock(caps: SafetyCaps, distanceMi: number | null): st
   return lines.join('\n');
 }
 
-export async function renderSystemPrompt(
-  athleteId: string,
-  plan?: Plan | null,
-): Promise<string> {
+export async function renderSystemPrompt(athleteId: string, plan?: Plan | null): Promise<string> {
   const data = await loadAthleteData(athleteId);
   const template = await loadTemplate();
 

@@ -100,11 +100,14 @@ describe('hydrate', () => {
     expect(existsSync(path.join(folder.dir, 'strava_recent.json'))).toBe(true);
     expect(folder.planHash).toBeDefined();
 
-    // The static exercise corpus is copied in for the coach to read.
+    // The static knowledge corpora are copied in for the coach to read.
     const corpus = readFileSync(path.join(folder.dir, 'exercises.md'), 'utf8');
     expect(corpus).toContain('# Exercise library');
-    // It is not a memory file — no hash recorded, so syncBack treats it as input.
+    const principles = readFileSync(path.join(folder.dir, 'prehab-principles.md'), 'utf8');
+    expect(principles).toContain('# Prehab principles');
+    // They are not memory files — no hash recorded, so syncBack treats them as input.
     expect(Object.keys(folder.memoryHashes)).not.toContain('exercises.md');
+    expect(Object.keys(folder.memoryHashes)).not.toContain('prehab-principles.md');
 
     expect(Object.keys(folder.memoryHashes).sort()).toEqual([
       'athlete_profile.md',
@@ -160,14 +163,26 @@ describe('syncBack', () => {
     expect(upsertCalls).toHaveLength(0);
   });
 
-  it('never writes the exercise corpus back, even if the agent edits it', async () => {
+  it('never writes a knowledge corpus back, even if the agent edits it', async () => {
     const folder = await hydrate(ATHLETE);
     writeFileSync(path.join(folder.dir, 'exercises.md'), 'tampered');
+    writeFileSync(path.join(folder.dir, 'prehab-principles.md'), 'tampered');
     await syncBack(ATHLETE, folder);
     const synced = upsertCalls.flatMap((c) =>
       (c.rows as { file_name: string }[]).map((r) => r.file_name),
     );
     expect(synced).not.toContain('exercises.md');
+    expect(synced).not.toContain('prehab-principles.md');
+  });
+
+  it('syncs back an agent-authored prehab_program.md', async () => {
+    const folder = await hydrate(ATHLETE);
+    writeFileSync(path.join(folder.dir, 'prehab_program.md'), '# Prehab program — Sam');
+    await syncBack(ATHLETE, folder);
+    expect(upsertCalls).toHaveLength(1);
+    const rows = upsertCalls[0]!.rows as { file_name: string; content_md: string }[];
+    expect(rows.map((r) => r.file_name)).toEqual(['prehab_program.md']);
+    expect(rows[0]!.content_md).toBe('# Prehab program — Sam');
   });
 });
 

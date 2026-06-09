@@ -22,6 +22,12 @@ import { buildStravaContext } from './strava';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Static read-only knowledge corpora copied in at hydrate — never per-athlete
+// data, so they must never be written back to memory_files. Sources resolve
+// relative to this module so the path is correct regardless of cwd; they ship
+// in the worker image (Dockerfile `COPY worker`).
+const KNOWLEDGE_FILES = ['exercises.md', 'prehab-principles.md'];
+
 // Files the worker writes as agent input — excluded from the memory_files
 // sync-back. strava_recent.json and plan_drift.md are read-only derived input.
 // marathon_training_plan.json is the coach's working plan: it IS persisted on a
@@ -31,14 +37,8 @@ export const INPUT_ONLY_FILES = new Set([
   'strava_recent.json',
   'marathon_training_plan.json',
   'plan_drift.md',
-  // Static read-only exercise corpus copied in at hydrate — never per-athlete
-  // data, so it must never be written back to memory_files.
-  'exercises.md',
+  ...KNOWLEDGE_FILES,
 ]);
-
-// The corpus source, resolved relative to this module so the path is correct
-// regardless of cwd. Ships in the worker image (Dockerfile `COPY worker`).
-const CORPUS_SRC = fileURLToPath(new URL('knowledge/exercises.md', import.meta.url));
 
 export type HydratedFolder = {
   dir: string;
@@ -114,9 +114,16 @@ export async function hydrate(athleteId: string): Promise<HydratedFolder> {
   const strava = await buildStravaContext(athleteId, STRAVA_LOOKBACK_DAYS);
   await writeFile(path.join(dir, 'strava_recent.json'), compactJson(strava), 'utf8');
 
-  // Static read-only exercise corpus (input). Grounds the coach's exercise
-  // advice in vetted cues + canonical source links. Excluded from syncBack.
-  await copyFile(CORPUS_SRC, path.join(dir, 'exercises.md'));
+  // Static read-only knowledge corpora (input). exercises.md grounds exercise
+  // advice in vetted cues + canonical source links; prehab-principles.md holds
+  // the load→tissue map and dose rules behind the coach's prehab decisions.
+  // Excluded from syncBack.
+  for (const name of KNOWLEDGE_FILES) {
+    await copyFile(
+      fileURLToPath(new URL(`knowledge/${name}`, import.meta.url)),
+      path.join(dir, name),
+    );
+  }
 
   return { dir, memoryHashes, planHash, plan };
 }

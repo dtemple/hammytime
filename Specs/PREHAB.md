@@ -1,8 +1,8 @@
 # Prehab v2 — standing program + load-aware contextual layer
 
-**Status: designed 2026-06-09, signed off by David, not yet built.** The CHANGELOG v0.7.27 entry is the
-pointer; this doc is the design record and implementation plan. Supersedes the coach.md "Prehab"
-section (currently three lines) once built.
+**Status: built 2026-06-09 (CHANGELOG v0.7.29) — deployed pending David's P1 sign-off on
+`worker/knowledge/prehab-principles.md` (§4 science), then `fly deploy`.** This doc is the design
+record and implementation plan; the v0.7.27 entry recorded the design, v0.7.29 the build.
 
 ---
 
@@ -83,7 +83,12 @@ A normal `memory_files` row, created by the coach itself. **No migration, no see
 `worker/folder.ts` `syncBack()` already upserts files the agent creates. Absent file = not yet
 authored (same convention as `known_gaps.md`).
 
-### Authoring (first daily run where the file is missing)
+### Authoring (first daily run where the file is missing — or earlier on a direct ask)
+
+> Amendment (David, 2026-06-09, at build time): an explicit athlete prehab question in an ad-hoc
+> message may also trigger authoring — the announcement lands as the answer to their question,
+> rather than answering loose and "formalizing" a possibly-different routine the next morning.
+> The daily run remains the default trigger.
 
 - Derive from: `{{injury_history}}` (system prompt), `athlete_profile.md`, `injury_log.md`, the
   `strength_equipment` known-gap state, and recent Strava signal.

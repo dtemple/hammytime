@@ -149,6 +149,20 @@ describe('renderSystemPrompt — three-way goal branch (V3-W7)', () => {
     }
   });
 
+  it('mission line no longer carries the prehab clause in either mode (prehab v2)', async () => {
+    const fixtures = [
+      loaded({ goalRace: committedRace, trainingProfile: profile('committed', 'marathon') }),
+      loaded({ trainingProfile: profile('day_to_day', 'keep_fit') }),
+    ];
+    for (const data of fixtures) {
+      mockLoadAthleteData.mockResolvedValueOnce(data);
+      const out = await renderSystemPrompt('a1');
+      // coach.md §Prehab owns cadence now; the mission sentence must not.
+      expect(out).not.toContain('including prehab');
+      expect(out).toContain('every time you write to them');
+    }
+  });
+
   it('committed race: marathon framing + goal-pace logic', async () => {
     mockLoadAthleteData.mockResolvedValueOnce(
       loaded({ goalRace: committedRace, trainingProfile: profile('committed', 'marathon') }),
@@ -241,7 +255,12 @@ describe('easeInContext — mid-week onboarder ease-in signal', () => {
   } as any;
 
   it('active: mid-week onboarder in week 1 → days-left + runway + first-full-week framing', () => {
-    const plan = planFixture({ note: REMAINDER_NOTE, start: '2026-06-08', end: '2026-06-14', totalWeeks: 12 });
+    const plan = planFixture({
+      note: REMAINDER_NOTE,
+      start: '2026-06-08',
+      end: '2026-06-14',
+      totalWeeks: 12,
+    });
     const out = easeInContext(plan, '2026-06-11', race); // Thursday, inside week 1
     expect(out).toContain('ease-in first week');
     // Thu→Sun inclusive = 4 days remaining, through the Sunday end.
@@ -253,14 +272,24 @@ describe('easeInContext — mid-week onboarder ease-in signal', () => {
   });
 
   it('active: no committed race → week-count runway framing, no race line', () => {
-    const plan = planFixture({ note: REMAINDER_NOTE, start: '2026-06-08', end: '2026-06-14', totalWeeks: 16 });
+    const plan = planFixture({
+      note: REMAINDER_NOTE,
+      start: '2026-06-08',
+      end: '2026-06-14',
+      totalWeeks: 16,
+    });
     const out = easeInContext(plan, '2026-06-11', null);
     expect(out).toContain('a 16-week plan');
     expect(out).not.toContain('weeks to');
   });
 
   it('days-left counts inclusively from today through the Sunday end', () => {
-    const plan = planFixture({ note: REMAINDER_NOTE, start: '2026-06-08', end: '2026-06-14', totalWeeks: 12 });
+    const plan = planFixture({
+      note: REMAINDER_NOTE,
+      start: '2026-06-08',
+      end: '2026-06-14',
+      totalWeeks: 12,
+    });
     // Monday onboarder: the whole week remains.
     expect(easeInContext(plan, '2026-06-08', race)).toContain('Days left in this partial week: 7');
     // Sunday onboarder: only the last day.
@@ -268,7 +297,12 @@ describe('easeInContext — mid-week onboarder ease-in signal', () => {
   });
 
   it('inactive: same athlete past week 1 (today after week-1 end) → empty', () => {
-    const plan = planFixture({ note: REMAINDER_NOTE, start: '2026-06-08', end: '2026-06-14', totalWeeks: 12 });
+    const plan = planFixture({
+      note: REMAINDER_NOTE,
+      start: '2026-06-08',
+      end: '2026-06-14',
+      totalWeeks: 12,
+    });
     expect(easeInContext(plan, '2026-06-25', race)).toBe(''); // week 3
   });
 
@@ -279,7 +313,12 @@ describe('easeInContext — mid-week onboarder ease-in signal', () => {
   });
 
   it('inactive: week 1 has no ease-in note even if today is inside its dates → empty', () => {
-    const plan = planFixture({ note: 'Base week. Build the aerobic engine.', start: '2026-06-08', end: '2026-06-14', totalWeeks: 12 });
+    const plan = planFixture({
+      note: 'Base week. Build the aerobic engine.',
+      start: '2026-06-08',
+      end: '2026-06-14',
+      totalWeeks: 12,
+    });
     expect(easeInContext(plan, '2026-06-11', race)).toBe('');
   });
 
@@ -289,7 +328,12 @@ describe('easeInContext — mid-week onboarder ease-in signal', () => {
   });
 
   it('the active block leaves no residual {{placeholders}}', () => {
-    const plan = planFixture({ note: REMAINDER_NOTE, start: '2026-06-08', end: '2026-06-14', totalWeeks: 12 });
+    const plan = planFixture({
+      note: REMAINDER_NOTE,
+      start: '2026-06-08',
+      end: '2026-06-14',
+      totalWeeks: 12,
+    });
     const out = easeInContext(plan, '2026-06-11', race);
     expect(out).not.toContain('{{');
     expect(out).not.toContain('}}');
