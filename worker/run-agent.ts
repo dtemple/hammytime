@@ -13,6 +13,7 @@ import { makePlanEditHook } from './plan-edit-hook';
 import { attemptPlanRepair } from './plan-repair';
 import { ALLOWED_TOOLS, makeIsolationGuard, scrubbedEnv } from './isolation';
 import { persistRun, type CapturedStep, type RunKind } from './persist';
+import { stripCoachPreamble } from './reply-sanitize';
 import {
   resolveStaleProposalMessage,
   sendCalendarConfirm,
@@ -196,7 +197,13 @@ export async function runAgent(
 
     // Any error (incl. a budget stop) sends the fallback — never ship the partial
     // text streamed before the failure as if it were a clean answer.
-    let finalReply = runError ? SOFT_FALLBACK : replyText.trim() || SOFT_FALLBACK;
+    // stripCoachPreamble removes a leading "now I'll write…" + `---` artifact the
+    // model sometimes prefixes despite the prompt forbidding it (reply-sanitize.ts).
+    // If stripping empties the text (model produced only a fenced preamble), the
+    // fallback below catches it.
+    let finalReply = runError
+      ? SOFT_FALLBACK
+      : stripCoachPreamble(replyText).trim() || SOFT_FALLBACK;
     // A plan edit the coach described to the athlete couldn't be saved — append a
     // plain notice so they don't trust a calendar change that didn't land. Only on
     // a clean run: a fallback message never claimed a change in the first place.
