@@ -124,4 +124,24 @@ describe('GET /api/cron/daily-checkin', () => {
     expect(await res.json()).toEqual({ ok: true, skipped: 'no_onboarded_athlete' });
     expect(vi.mocked(enqueueJob)).not.toHaveBeenCalled();
   });
+
+  it('enqueues v3-complete athletes (no `step` field, gated on phase)', async () => {
+    mockAthletes([makeAthlete({ id: 'v3-done', onboarding_state: { flow: 'v3', phase: 'complete' } })]);
+    const res = await GET(authedReq());
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, enqueued: 1 });
+    expect(vi.mocked(enqueueJob)).toHaveBeenCalledWith(
+      'daily_checkin',
+      'daily-v3-done-2026-05-27',
+      { athlete_id: 'v3-done' },
+    );
+  });
+
+  it('filters out v3 athletes still mid-onboarding (phase !== complete)', async () => {
+    mockAthletes([makeAthlete({ onboarding_state: { flow: 'v3', phase: 'intake' } })]);
+    const res = await GET(authedReq());
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, skipped: 'no_onboarded_athlete' });
+    expect(vi.mocked(enqueueJob)).not.toHaveBeenCalled();
+  });
 });

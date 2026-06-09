@@ -4,7 +4,7 @@ import * as Sentry from '@sentry/nextjs';
 import { supabaseAdmin } from '@/lib/db';
 import { nowInTimezone } from '@/server/telegram/checkin/dispatcher';
 import { enqueueJob } from '@/server/jobs/enqueue';
-import { onboardingSteps } from '@/server/telegram/onboarding';
+import { isOnboarded } from '@/server/telegram/onboarding';
 
 function authorized(req: Request): boolean {
   const secret = process.env.CRON_SECRET;
@@ -36,8 +36,12 @@ export async function GET(req: Request) {
       // and with the staging bot off between sessions there's no one to receive it.
       // See docs/testing-onboarding.md.
       if (String(a.telegram_chat_id).startsWith('-')) return false;
-      const step = (a.onboarding_state as { step?: number } | null)?.step ?? 0;
-      return step >= onboardingSteps.length;
+      // Both onboarding flows. v3 stores { flow:'v3', phase } with no `step`, so
+      // the old step-only check silently dropped every v3-onboarded athlete from
+      // daily coaching (the same predicate bot.ts uses for inbound commands).
+      return isOnboarded(
+        a.onboarding_state as { flow?: string; phase?: string; step?: number } | null,
+      );
     });
 
     if (onboarded.length === 0) {

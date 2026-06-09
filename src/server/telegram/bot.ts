@@ -9,6 +9,7 @@ import {
   labelForTap,
   onboardingSteps,
   hardResetOnboarding,
+  isOnboarded,
 } from './onboarding/index';
 import { handleCheckinCommand, handleWellnessMessage } from './checkin/dispatcher';
 import { handleV3Message, handleV3Callback } from './onboarding/engine/router';
@@ -478,14 +479,6 @@ export async function handleNextAction(
   }
 
   await ctx.answerCallbackQuery();
-}
-
-// Whether an athlete has finished onboarding, across both flows. v3 stores
-// { flow:'v3', phase } with no `step` (so a step-only check wrongly reports a
-// completed v3 athlete as still onboarding); v2 stores { step }.
-function isOnboarded(ob: { flow?: string; phase?: string; step?: number } | null): boolean {
-  if (ob?.flow === 'v3') return ob.phase === 'complete';
-  return (typeof ob?.step === 'number' ? ob.step : 0) >= onboardingSteps.length;
 }
 
 // Loads the athlete for a command, or replies with the standard guard message

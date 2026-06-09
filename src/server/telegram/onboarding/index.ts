@@ -18,6 +18,17 @@ export const onboardingSteps: OnboardingStep[] = [
   enrichmentStep, // C1 — optional freeform/voice dump (terminal + next-actions)
 ];
 
+// Whether an athlete has finished onboarding, across both flows. v3 stores
+// { flow:'v3', phase } with no `step` (so a step-only check wrongly reports a
+// completed v3 athlete as still onboarding — the daily-checkin cron used to do
+// exactly that and silently dropped every v3 athlete); v2 stores { step }.
+export function isOnboarded(
+  ob: { flow?: string; phase?: string; step?: number } | null,
+): boolean {
+  if (ob?.flow === 'v3') return ob.phase === 'complete';
+  return (typeof ob?.step === 'number' ? ob.step : 0) >= onboardingSteps.length;
+}
+
 export { handleOnboardingCallback, handleOnboardingMessage, labelForTap } from './dispatcher';
 export { advanceQuestion, resetOnboarding, hardResetOnboarding } from './state';
 export { resumeAfterStrava } from './strava-resume';
