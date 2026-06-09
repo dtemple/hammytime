@@ -9,6 +9,7 @@ import { supabaseAdmin } from '@/lib/db';
 import { COACH_MODEL, MAX_BUDGET_USD, MAX_TURNS } from './config';
 import { cleanup, hydrate, syncBack } from './folder';
 import { persistPlanEdit } from './plan-version';
+import { attemptPlanRepair } from './plan-repair';
 import { ALLOWED_TOOLS, makeIsolationGuard, scrubbedEnv } from './isolation';
 import { persistRun, type CapturedStep, type RunKind } from './persist';
 import { sendDavidAlert, sendReply, startTyping } from './send';
@@ -27,6 +28,13 @@ const SOURCE_TO_KIND: Record<RunSource, RunKind> = {
 
 const SOFT_FALLBACK =
   "Hit a snag pulling your update together — I'll sort it out and follow up. Nothing on your end to do.";
+
+// Appended to the coach's reply when a plan edit it described to the athlete
+// couldn't be saved (failed validation, then failed a repair pass). Without this
+// the athlete is left thinking the change landed while the calendar kept the old
+// version. Kept short and plain — no apology spiral.
+const PLAN_DROP_NOTICE =
+  "One thing — I couldn't get that calendar change to save, so it's still on the previous version for now. I'll fix it and confirm. Nothing for you to do.";
 
 export async function runAgent(
   athleteId: string,
@@ -52,6 +60,7 @@ export async function runAgent(
   let runError: string | null = null;
   let budgetStopped = false;
   let replyText = '';
+  let planDropped = false;
   const steps: CapturedStep[] = [];
 
   try {
@@ -110,17 +119,38 @@ export async function runAgent(
         console.error(`[run-agent] syncBack failed for ${athleteId}:`, e),
       );
       // Publish any coach edit to the plan as a new working version → calendar.
-      const planEdit = await persistPlanEdit(athleteId, folder).catch((e) => {
+      let planEdit = await persistPlanEdit(athleteId, folder).catch((e) => {
         console.error(`[run-agent] persistPlanEdit failed for ${athleteId}:`, e);
         return null;
       });
-      // A dropped edit means the coach may have told the athlete it changed the
-      // plan while the calendar kept the last good version — surface it to David.
+
+      // A dropped edit (bad JSON or schema-invalid) usually means one or two
+      // fields are malformed — exactly what an LLM fixes in one focused pass. Try
+      // a single repair, then re-validate.
+      if (
+        (planEdit?.outcome === 'dropped_invalid_json' ||
+          planEdit?.outcome === 'dropped_schema') &&
+        planEdit.detail
+      ) {
+        console.log(`[run-agent] athlete ${athleteId}: attempting one-shot plan repair`);
+        await attemptPlanRepair(folder.dir, planEdit.detail).catch((e) =>
+          console.error(`[run-agent] attemptPlanRepair failed for ${athleteId}:`, e),
+        );
+        planEdit = await persistPlanEdit(athleteId, folder).catch((e) => {
+          console.error(`[run-agent] persistPlanEdit (post-repair) failed for ${athleteId}:`, e);
+          return null;
+        });
+      }
+
+      // Still dropped after the repair pass. The coach may have told the athlete
+      // it changed the plan while the calendar kept the last good version — tell
+      // the athlete (PLAN_DROP_NOTICE below) and alert David.
       if (planEdit?.outcome === 'dropped_invalid_json' || planEdit?.outcome === 'dropped_schema') {
+        planDropped = true;
         const reason =
           planEdit.outcome === 'dropped_invalid_json' ? 'invalid JSON' : 'failed schema validation';
         const body =
-          `Plan edit dropped — kept the last good version.\n` +
+          `Plan edit dropped — kept the last good version (repair pass also failed).\n` +
           `Athlete: ${name} (${athleteId})\n` +
           `Run: ${source}\n` +
           `Reason: ${reason}` +
@@ -145,7 +175,13 @@ export async function runAgent(
 
     // Any error (incl. a budget stop) sends the fallback — never ship the partial
     // text streamed before the failure as if it were a clean answer.
-    const finalReply = runError ? SOFT_FALLBACK : replyText.trim() || SOFT_FALLBACK;
+    let finalReply = runError ? SOFT_FALLBACK : replyText.trim() || SOFT_FALLBACK;
+    // A plan edit the coach described to the athlete couldn't be saved — append a
+    // plain notice so they don't trust a calendar change that didn't land. Only on
+    // a clean run: a fallback message never claimed a change in the first place.
+    if (planDropped && !runError) {
+      finalReply = `${finalReply}\n\n${PLAN_DROP_NOTICE}`;
+    }
     await sendReply(athleteId, finalReply, runId ?? undefined);
   } finally {
     stopTyping();

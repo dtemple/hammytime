@@ -11,6 +11,11 @@ export const MAX_TURNS = numEnv('WORKER_MAX_TURNS', 20);
 // Bumped 0.5 -> 1.0: structural plan edits routinely land at $0.47-$0.56 and
 // were getting killed mid-write. Stopgap until the budget/persistence rework.
 export const MAX_BUDGET_USD = numEnv('WORKER_MAX_BUDGET_USD', 1);
+// The one-shot repair pass that runs when a coach plan edit fails schema
+// validation. It's a tiny, scoped job (read the file, fix the flagged fields),
+// so a low turn and budget ceiling is plenty — it must not become a second full run.
+export const PLAN_REPAIR_MAX_TURNS = numEnv('WORKER_PLAN_REPAIR_MAX_TURNS', 6);
+export const PLAN_REPAIR_MAX_BUDGET_USD = numEnv('WORKER_PLAN_REPAIR_MAX_BUDGET_USD', 0.25);
 export const POLL_INTERVAL_MS = numEnv('WORKER_POLL_INTERVAL_MS', 3000);
 export const MAX_ATTEMPTS = numEnv('WORKER_MAX_ATTEMPTS', 5);
 export const STALE_LOCK_MINUTES = numEnv('WORKER_STALE_LOCK_MINUTES', 15);

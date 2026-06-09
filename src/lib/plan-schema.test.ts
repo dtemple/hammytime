@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { PlanSchema } from './plan-schema';
+import { z } from 'zod';
+import { PlanSchema, DayTypeEnum, DaySchema } from './plan-schema';
+import { PLAN_SHAPE_REFERENCE, TUPLE_RANGE_FIELDS } from './plan-shape-reference';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -115,6 +117,38 @@ describe('PlanSchema — canonical plan (gold standard)', () => {
     for (const key of rawKeys) {
       expect(parsedKeys, `day-level key "${key}" should survive parse`).toContain(key);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Drift guard — the plan-shape reference handed to the coach (and the repair
+// pass) must stay in sync with the schema it describes. If a day type or a
+// tuple field changes here, this fails until the reference is updated.
+// ---------------------------------------------------------------------------
+
+describe('PLAN_SHAPE_REFERENCE — stays in sync with the schema', () => {
+  it('names every legal day type', () => {
+    for (const t of DayTypeEnum.options) {
+      expect(PLAN_SHAPE_REFERENCE, `day type "${t}" should appear in the reference`).toContain(t);
+    }
+  });
+
+  it('every field in TUPLE_RANGE_FIELDS is a [min, max] tuple on DaySchema', () => {
+    const shape = DaySchema.shape as Record<string, z.ZodTypeAny>;
+    for (const field of TUPLE_RANGE_FIELDS) {
+      const def = shape[field];
+      expect(def, `DaySchema should have a "${field}" field`).toBeDefined();
+      const inner = def instanceof z.ZodOptional ? def.unwrap() : def;
+      expect(inner instanceof z.ZodTuple, `"${field}" should be a tuple`).toBe(true);
+    }
+  });
+
+  it('strides.count is a tuple (the shape the reference documents)', () => {
+    const strides = DaySchema.shape.strides;
+    const inner = strides instanceof z.ZodOptional ? strides.unwrap() : strides;
+    expect(inner instanceof z.ZodObject).toBe(true);
+    const count = (inner as z.ZodObject<{ count: z.ZodTypeAny }>).shape.count;
+    expect(count instanceof z.ZodTuple).toBe(true);
   });
 });
 

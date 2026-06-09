@@ -10,6 +10,7 @@ import { loadAthleteData } from '@/server/agent/byo-plan';
 import { DRAFT_SAFETY_CAPS } from '@/lib/plan-templates/caps';
 import type { SafetyCaps } from '@/lib/plan-templates/types';
 import type { Plan } from '@/lib/plan-schema';
+import { PLAN_SHAPE_REFERENCE } from '@/lib/plan-shape-reference';
 import type { RunSource } from './run-agent';
 
 export type HistoryMsg = { direction: string; body: string };
@@ -263,6 +264,7 @@ export async function renderSystemPrompt(
     injury_history: injuryHistory(data.injuries),
     safety_caps: safetyCapsBlock(DRAFT_SAFETY_CAPS, data.goalRace?.distance_mi ?? null),
     ease_in_context: easeInContext(plan, today, data.goalRace),
+    plan_shape_reference: PLAN_SHAPE_REFERENCE,
   };
 
   return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {
