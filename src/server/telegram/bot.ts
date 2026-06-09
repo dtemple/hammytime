@@ -354,8 +354,7 @@ export async function handleConnectStravaCommand(ctx: CommandContext<Context>): 
     return;
   }
 
-  const obState = athlete.onboarding_state as { step?: number } | null;
-  if ((typeof obState?.step === 'number' ? obState.step : 0) < onboardingSteps.length) {
+  if (!isOnboarded(athlete.onboarding_state as Parameters<typeof isOnboarded>[0])) {
     await ctx.reply('Finish onboarding first.');
     return;
   }
@@ -395,8 +394,7 @@ async function handleCalendarCommand(ctx: CommandContext<Context>): Promise<void
     return;
   }
 
-  const obState = athlete.onboarding_state as { step?: number } | null;
-  if ((typeof obState?.step === 'number' ? obState.step : 0) < onboardingSteps.length) {
+  if (!isOnboarded(athlete.onboarding_state as Parameters<typeof isOnboarded>[0])) {
     await ctx.reply('Finish onboarding first.');
     return;
   }

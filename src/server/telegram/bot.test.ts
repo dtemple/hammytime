@@ -5,6 +5,8 @@ vi.mock('./onboarding/index', () => ({
   handleOnboardingMessage: vi.fn().mockResolvedValue(undefined),
   handleOnboardingCallback: vi.fn().mockResolvedValue(undefined),
   onboardingSteps: new Array(7),
+  isOnboarded: (ob: { flow?: string; phase?: string; step?: number } | null) =>
+    ob?.flow === 'v3' ? ob.phase === 'complete' : (typeof ob?.step === 'number' ? ob.step : 0) >= 7,
   hardResetOnboarding: vi.fn().mockResolvedValue(undefined),
   // Mirror the real label recovery: match the tapped button by callback_data.
   labelForTap: vi.fn(

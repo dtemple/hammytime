@@ -22,7 +22,7 @@
 
 import { supabaseAdmin } from '@/lib/db';
 import { enqueueJob } from '@/server/jobs/enqueue';
-import { onboardingSteps } from '@/server/telegram/onboarding';
+import { isOnboarded } from '@/server/telegram/onboarding';
 
 /**
  * How recently another post-activity push must have fired for this one to stand
@@ -80,9 +80,16 @@ export async function handleActivityCreate(
   const chatId = athlete.telegram_chat_id;
   if (!chatId || String(chatId).startsWith('-')) return;
 
-  // Onboarding must be complete (the daily cron uses the same check).
-  const step = (athlete.onboarding_state as { step?: number } | null)?.step ?? 0;
-  if (step < onboardingSteps.length) return;
+  // Onboarding must be complete (the daily cron uses the same predicate). Both
+  // flows: v3 stores { flow:'v3', phase } with no `step`, so a step-only check
+  // would silently skip every v3 athlete.
+  if (
+    !isOnboarded(
+      athlete.onboarding_state as { flow?: string; phase?: string; step?: number } | null,
+    )
+  ) {
+    return;
+  }
 
   // Cooldown: stand down only if another post-activity push fired recently. The
   // key prefix `tg_strava:<athlete>:` scopes this to our own pushes — the daily,

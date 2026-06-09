@@ -160,6 +160,22 @@ describe('handleActivityCreate', () => {
     expect(enqueueJob).not.toHaveBeenCalled();
   });
 
+  it('enqueues a push for a v3-complete athlete (no `step` field)', async () => {
+    (supabaseAdmin as AnyMock).mockReturnValue(
+      makeDb({ athleteRow: makeAthlete({ onboarding_state: { flow: 'v3', phase: 'complete' } }) }),
+    );
+    await handleActivityCreate(PROVIDER_ID, OBJECT_ID);
+    expect(enqueueJob).toHaveBeenCalledOnce();
+  });
+
+  it('skips a v3 athlete still mid-onboarding (phase !== complete)', async () => {
+    (supabaseAdmin as AnyMock).mockReturnValue(
+      makeDb({ athleteRow: makeAthlete({ onboarding_state: { flow: 'v3', phase: 'intake' } }) }),
+    );
+    await handleActivityCreate(PROVIDER_ID, OBJECT_ID);
+    expect(enqueueJob).not.toHaveBeenCalled();
+  });
+
   it('stands down when a prior post-activity push is within the cooldown', async () => {
     (supabaseAdmin as AnyMock).mockReturnValue(makeDb({ recentRow: { id: 'job-1' } }));
     await handleActivityCreate(PROVIDER_ID, OBJECT_ID);
