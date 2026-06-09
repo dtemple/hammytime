@@ -37,6 +37,7 @@ import {
   handleConnectStravaCommand,
   handleDisconnectStravaCommand,
   handleNextAction,
+  handleCalendarConfirm,
   _resetBotForTest,
 } from './bot';
 
@@ -538,5 +539,156 @@ describe('handleNextAction — inbound logging', () => {
     const inbound = messagesInserts.find((r) => r.direction === 'in');
     expect(inbound).toBeDefined();
     expect(inbound!.body).toBe("That's it for today");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Calendar-confirm taps (Specs/CALENDAR_CONFIRM.md)
+// ---------------------------------------------------------------------------
+
+describe('handleCalendarConfirm', () => {
+  type RpcResult = { data: string | null; error: { message: string } | null };
+
+  function makeCalDb(rpcResult: RpcResult, hasPlan = true) {
+    const messagesInserts: Array<{ direction: string; body: string }> = [];
+    const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const db = {
+      from: vi.fn().mockImplementation((table: string) => {
+        if (table === 'messages') {
+          return {
+            insert: vi.fn().mockImplementation((row: { direction: string; body: string }) => {
+              messagesInserts.push(row);
+              return Promise.resolve({ error: null });
+            }),
+          };
+        }
+        if (table === 'plans') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                order: vi.fn().mockReturnValue({
+                  limit: vi.fn().mockReturnValue({
+                    maybeSingle: vi.fn().mockResolvedValue({
+                      data: hasPlan ? { id: 'plan-1' } : null,
+                      error: null,
+                    }),
+                  }),
+                }),
+              }),
+            }),
+          };
+        }
+        return {};
+      }),
+      rpc: vi.fn().mockImplementation((name: string, args: Record<string, unknown>) => {
+        rpcCalls.push({ name, args });
+        return Promise.resolve(rpcResult);
+      }),
+    };
+    (supabaseAdmin as AnyMock).mockReturnValue(db);
+    return { messagesInserts, rpcCalls };
+  }
+
+  function makeCalCtx() {
+    return {
+      chat: { id: CHAT_ID },
+      answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+      editMessageText: vi.fn().mockResolvedValue(undefined),
+      callbackQuery: {
+        message: {
+          text: 'Update your calendar?',
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: 'Yes, update', callback_data: 'cal:y:tok1' },
+                { text: 'No, leave it', callback_data: 'cal:n:tok1' },
+              ],
+            ],
+          },
+        },
+      },
+    };
+  }
+
+  it('Yes tap promotes the candidate and resolves the message', async () => {
+    const { messagesInserts, rpcCalls } = makeCalDb({ data: 'promoted', error: null });
+    const ctx = makeCalCtx();
+
+    await handleCalendarConfirm(ctx as AnyMock, { id: ATHLETE_ID } as AnyMock, 'cal:y:tok1');
+
+    expect(rpcCalls).toEqual([
+      { name: 'promote_proposed_version', args: { p_plan_id: 'plan-1', p_token: 'tok1' } },
+    ]);
+    expect(ctx.editMessageText).toHaveBeenCalledWith('Update your calendar?\n\n✓ Calendar updated.');
+    expect(messagesInserts.find((r) => r.direction === 'in')?.body).toBe('Yes, update');
+    expect(messagesInserts.find((r) => r.direction === 'out')?.body).toBe('✓ Calendar updated.');
+  });
+
+  it('No tap discards the candidate and resolves the message', async () => {
+    const { rpcCalls } = makeCalDb({ data: 'discarded', error: null });
+    const ctx = makeCalCtx();
+
+    await handleCalendarConfirm(ctx as AnyMock, { id: ATHLETE_ID } as AnyMock, 'cal:n:tok1');
+
+    expect(rpcCalls).toEqual([
+      { name: 'discard_proposed_version', args: { p_plan_id: 'plan-1', p_token: 'tok1' } },
+    ]);
+    expect(ctx.editMessageText).toHaveBeenCalledWith('Update your calendar?\n\nLeft as-is.');
+  });
+
+  it.each(['expired', 'stale'])('%s candidate resolves with the expired copy', async (result) => {
+    makeCalDb({ data: result, error: null });
+    const ctx = makeCalCtx();
+
+    await handleCalendarConfirm(ctx as AnyMock, { id: ATHLETE_ID } as AnyMock, 'cal:y:tok1');
+
+    expect(ctx.editMessageText).toHaveBeenCalledWith(
+      'Update your calendar?\n\nThis one expired — ask me again if you still want the change.',
+    );
+  });
+
+  it('not_found (re-tap / webhook retry) resolves quietly without throwing', async () => {
+    makeCalDb({ data: 'not_found', error: null });
+    const ctx = makeCalCtx();
+
+    await handleCalendarConfirm(ctx as AnyMock, { id: ATHLETE_ID } as AnyMock, 'cal:y:tok1');
+
+    expect(ctx.editMessageText).toHaveBeenCalledWith('Update your calendar?\n\nAlready handled.');
+    expect(ctx.answerCallbackQuery).toHaveBeenCalled();
+  });
+
+  it('RPC error keeps the keyboard alive and surfaces a try-again toast', async () => {
+    makeCalDb({ data: null, error: { message: 'db down' } });
+    const ctx = makeCalCtx();
+
+    await handleCalendarConfirm(ctx as AnyMock, { id: ATHLETE_ID } as AnyMock, 'cal:y:tok1');
+
+    expect(ctx.editMessageText).not.toHaveBeenCalled();
+    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({
+      text: 'Something went wrong — try again in a moment.',
+    });
+  });
+
+  it('malformed cal: data answers the callback and does nothing else', async () => {
+    const { rpcCalls, messagesInserts } = makeCalDb({ data: 'promoted', error: null });
+    const ctx = makeCalCtx();
+
+    await handleCalendarConfirm(ctx as AnyMock, { id: ATHLETE_ID } as AnyMock, 'cal:y:');
+
+    expect(rpcCalls).toHaveLength(0);
+    expect(messagesInserts).toHaveLength(0);
+    expect(ctx.editMessageText).not.toHaveBeenCalled();
+    expect(ctx.answerCallbackQuery).toHaveBeenCalled();
+  });
+
+  it('no plan row answers the callback without calling an RPC', async () => {
+    const { rpcCalls } = makeCalDb({ data: 'promoted', error: null }, false);
+    const ctx = makeCalCtx();
+
+    await handleCalendarConfirm(ctx as AnyMock, { id: ATHLETE_ID } as AnyMock, 'cal:y:tok1');
+
+    expect(rpcCalls).toHaveLength(0);
+    expect(ctx.editMessageText).not.toHaveBeenCalled();
+    expect(ctx.answerCallbackQuery).toHaveBeenCalled();
   });
 });

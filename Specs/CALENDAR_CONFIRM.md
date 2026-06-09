@@ -55,17 +55,19 @@ It is orthogonal to the ICS-vs-OAuth decision: the calendar still renders `curre
 ## Open questions to finalize
 
 - Expiry window (end-of-week vs fixed ~72h vs both).
-- Exact button + confirm copy (voice pass).
-- Does "No" offer a tweak path, or just dismiss?
+- Exact button + confirm copy (voice pass). The bot-side resolved-message copy shipped 2026-06-09 is a draft.
+- ~~Does "No" offer a tweak path, or just dismiss?~~ **Decided (2026-06-09): just dismiss** ("Left as-is."). Replying to the coach in chat is the tweak path — no extra button, no nudge line.
 - Does promote send any message beyond editing the button message? (Lean: no — avoid noise.)
 
 ## Suggested build sequence
 
-1. C (backstop + the `persistPlanEdit` outcome enum) — already prompted.
-2. Migration + RPC split (`proposed` status, `proposed_version_id`/`proposed_token`/`proposed_expires_at`, `propose_plan_edit` / `promote_proposed_version` / `discard_proposed_version`).
+1. C (backstop + the `persistPlanEdit` outcome enum) — already prompted and built.
+2. Migration + RPC split (`proposed` status, `proposed_version_id`/`proposed_token`/`proposed_expires_at`, `propose_plan_edit` / `promote_proposed_version` / `discard_proposed_version`) — **built 2026-06-09** (CHANGELOG v0.7.26; plus `discarded` status and `proposed_message_id`, for the supersede/expiry message edits). Re-validation at tap = base-version + expiry only — no Strava fetch at the webhook.
 3. Worker propose path + PostToolUse validation hook.
-4. Send-side keyboard (message 2) + bot `cal:y|n` callback handler with re-validate, promote/discard, message edit, dedup.
+4. Send-side keyboard (message 2) + bot `cal:y|n` callback handler with re-validate, promote/discard, message edit, dedup — **bot half built 2026-06-09** (`handleCalendarConfirm`); the message-2 keyboard ships with the worker cutover.
 5. `coach.md` rewrite (propose-not-activate; when to propose; never claim saved).
-6. Expiry + one-outstanding handling (folded into 2 + 4).
+6. Expiry + one-outstanding handling (folded into 2 + 4). Expiry is passive — enforced at tap, no sweep cron.
+
+Steps 3 + 4's send half + 5 are the cutover and must land in one fly deploy: the moment edits stop activating, the coach must stop claiming saves and the button must exist.
 
 Tests at each step: RPC propose/promote/discard/idempotency; worker stages-not-activates; callback promotes/discards + dedups; coach.md behavior in `worker/__tests__`. Worker changes → `git push` + `fly deploy`; web/bot changes → `git push`. Confirm the tree is only your change before deploy (§10).

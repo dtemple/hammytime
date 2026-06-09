@@ -479,6 +479,88 @@ export async function handleNextAction(
   await ctx.answerCallbackQuery();
 }
 
+// Calendar-confirm taps (Specs/CALENDAR_CONFIRM.md). The worker stages a coach
+// plan edit as a 'proposed' plan_versions row and sends a confirm keyboard;
+// the tap lands here. Yes promotes the candidate to active (the calendar moves),
+// No discards it. No agent run on either path. Idempotency lives in the RPCs —
+// a cleared/mismatched token resolves to 'not_found', not an error — plus the
+// message edit below, which removes the keyboard so the tap can't repeat.
+export async function handleCalendarConfirm(
+  ctx: Context,
+  athlete: AthleteRow,
+  data: string,
+): Promise<void> {
+  const match = /^cal:(y|n):(.+)$/.exec(data);
+  if (!match) {
+    await ctx.answerCallbackQuery();
+    return;
+  }
+  const action = match[1] as 'y' | 'n';
+  const token = match[2]!;
+
+  const msg = ctx.callbackQuery?.message;
+  const rows = msg && 'reply_markup' in msg ? msg.reply_markup?.inline_keyboard : undefined;
+  const db = supabaseAdmin();
+  await db.from('messages').insert({
+    athlete_id: athlete.id,
+    channel: 'tg',
+    direction: 'in',
+    body: labelForTap(rows, data) ?? data,
+  });
+
+  const { data: plan } = await db
+    .from('plans')
+    .select('id')
+    .eq('athlete_id', athlete.id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!plan) {
+    await ctx.answerCallbackQuery();
+    return;
+  }
+
+  const { data: result, error } =
+    action === 'y'
+      ? await db.rpc('promote_proposed_version', { p_plan_id: plan.id, p_token: token })
+      : await db.rpc('discard_proposed_version', { p_plan_id: plan.id, p_token: token });
+
+  if (error) {
+    console.error('[cal] confirm tap failed', `athlete=${athlete.id}`, error);
+    // Leave the keyboard in place so the athlete can re-tap once we're healthy.
+    await ctx
+      .answerCallbackQuery({ text: 'Something went wrong — try again in a moment.' })
+      .catch(() => undefined);
+    return;
+  }
+
+  const resolvedLine =
+    result === 'promoted'
+      ? '✓ Calendar updated.'
+      : result === 'discarded'
+        ? 'Left as-is.'
+        : result === 'expired' || result === 'stale'
+          ? 'This one expired — ask me again if you still want the change.'
+          : 'Already handled.';
+
+  await ctx.answerCallbackQuery();
+
+  // Resolve the button message in place: keep the proposal text for context,
+  // append the outcome, drop the keyboard (an edit without reply_markup clears it).
+  const original = msg && 'text' in msg ? msg.text : undefined;
+  await ctx
+    .editMessageText(original ? `${original}\n\n${resolvedLine}` : resolvedLine)
+    .catch(() => undefined);
+
+  await db.from('messages').insert({
+    athlete_id: athlete.id,
+    channel: 'tg',
+    direction: 'out',
+    body: resolvedLine,
+  });
+}
+
 // Loads the athlete for a command, or replies with the standard guard message
 // and returns null. Mirrors the athlete/onboarding guards used by /checkin and
 // /calendar. Used by the on-demand coaching commands below.
@@ -827,6 +909,13 @@ function getBot(): Bot {
       // dismisses every callback once onboarding is complete).
       if (data.startsWith('next:')) {
         await handleNextAction(ctx, athlete, data);
+        return;
+      }
+
+      // Calendar-confirm taps arrive long after onboarding is terminal, so they
+      // also route ahead of the onboarding-state gates below.
+      if (data.startsWith('cal:')) {
+        await handleCalendarConfirm(ctx, athlete, data);
         return;
       }
 

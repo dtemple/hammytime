@@ -656,6 +656,10 @@ export type Database = {
           current_version_id: string | null
           goal_race_id: string | null
           id: string
+          proposed_expires_at: string | null
+          proposed_message_id: number | null
+          proposed_token: string | null
+          proposed_version_id: string | null
           start_date: string | null
           updated_at: string
           weeks: number | null
@@ -667,6 +671,10 @@ export type Database = {
           current_version_id?: string | null
           goal_race_id?: string | null
           id?: string
+          proposed_expires_at?: string | null
+          proposed_message_id?: number | null
+          proposed_token?: string | null
+          proposed_version_id?: string | null
           start_date?: string | null
           updated_at?: string
           weeks?: number | null
@@ -678,6 +686,10 @@ export type Database = {
           current_version_id?: string | null
           goal_race_id?: string | null
           id?: string
+          proposed_expires_at?: string | null
+          proposed_message_id?: number | null
+          proposed_token?: string | null
+          proposed_version_id?: string | null
           start_date?: string | null
           updated_at?: string
           weeks?: number | null
@@ -709,6 +721,13 @@ export type Database = {
             columns: ["goal_race_id"]
             isOneToOne: false
             referencedRelation: "races"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "plans_proposed_version_id_fkey"
+            columns: ["proposed_version_id"]
+            isOneToOne: false
+            referencedRelation: "plan_versions"
             referencedColumns: ["id"]
           },
         ]
@@ -805,6 +824,27 @@ export type Database = {
         }
         Relationships: []
       }
+      waitlist: {
+        Row: {
+          created_at: string
+          email: string
+          goal: string | null
+          id: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          goal?: string | null
+          id?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          goal?: string | null
+          id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       athlete_cost_daily: {
@@ -888,9 +928,27 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      discard_proposed_version: {
+        Args: { p_plan_id: string; p_token: string }
+        Returns: string
+      }
       link_start_handshake: {
         Args: { p_telegram_chat_id: string; p_token: string }
         Returns: Json
+      }
+      promote_proposed_version: {
+        Args: { p_plan_id: string; p_token: string }
+        Returns: string
+      }
+      propose_plan_edit: {
+        Args: {
+          p_based_on_version_id: string
+          p_expires_at: string
+          p_plan_id: string
+          p_plan_json: Json
+          p_token: string
+        }
+        Returns: string
       }
       record_plan_edit: {
         Args: {
