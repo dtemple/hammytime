@@ -75,7 +75,7 @@ So: **Apple stays fully supported via the ICS feed it already uses, and is argua
 
 ## Open questions — resolved (build session 2026-06-09, CHANGELOG v0.7.30)
 
-- **Confirm `calendar.app.created` is sensitive (not restricted)** on the live consent screen — **still open; the Part 0 gate.** The build landed inert behind the missing env vars, so the gate check happens before anything activates. If Google has reclassified it restricted, stop and reconsider.
+- **Confirm `calendar.app.created` is sensitive (not restricted)** on the live consent screen — **resolved 2026-06-09, better than expected: the scope picker shows it as *non-sensitive*** (David, live console check during Part 0). That means no scope verification at all, no unverified-app warning screen, and no 100-user cap — verification drops out of the plan entirely. Publishing to **Production** still matters: the 7-day refresh-token expiry is tied to Testing publishing status, not scope tier.
 - **Routing at "add to calendar"** — **decided: present both.** `/calendar` (and the onboarding next-action) sends a "Connect Google Calendar" button plus the ICS subscribe link; no platform detection.
 - **Existing Google ICS subscribers** — **decided: opt-in.** A working subscription is never broken; connecting via `/calendar` is the migration.
 - **Reconcile trigger** — **decided: both.** Event-driven `calendar_sync` on promotion / plan-gen / strength-zero, plus a nightly full reconcile (2am PT) as the self-healing net.
