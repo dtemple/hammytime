@@ -19,17 +19,28 @@ import type { Json } from '@/lib/db-types';
 import { PlanSchema } from '@/lib/plan-schema';
 import { hash, type HydratedFolder } from './folder';
 
-export async function persistPlanEdit(athleteId: string, folder: HydratedFolder): Promise<void> {
-  if (folder.planHash === undefined) return; // athlete had no plan at hydrate
+// The result of trying to publish a coach plan edit. A `dropped_*` outcome
+// carries a short, already-formatted `detail` for the David alert in run-agent —
+// the raw Zod error never leaves this module.
+export type PlanEditOutcome = {
+  outcome: 'no_plan' | 'unchanged' | 'published' | 'dropped_invalid_json' | 'dropped_schema';
+  detail?: string;
+};
+
+export async function persistPlanEdit(
+  athleteId: string,
+  folder: HydratedFolder,
+): Promise<PlanEditOutcome> {
+  if (folder.planHash === undefined) return { outcome: 'no_plan' }; // no plan at hydrate
 
   let raw: string;
   try {
     raw = await readFile(path.join(folder.dir, 'marathon_training_plan.json'), 'utf8');
   } catch {
-    return; // file gone — nothing to persist
+    return { outcome: 'no_plan' }; // file gone — nothing to persist
   }
 
-  if (hash(raw) === folder.planHash) return; // unchanged
+  if (hash(raw) === folder.planHash) return { outcome: 'unchanged' };
 
   let parsed: unknown;
   try {
@@ -39,17 +50,21 @@ export async function persistPlanEdit(athleteId: string, folder: HydratedFolder)
       `[plan-version] athlete ${athleteId}: edited plan is not valid JSON, dropping`,
       e,
     );
-    return;
+    return { outcome: 'dropped_invalid_json', detail: e instanceof Error ? e.message : String(e) };
   }
 
   const result = PlanSchema.safeParse(parsed);
   if (!result.success) {
+    const issues = result.error.issues.slice(0, 5);
     console.error(
       `[plan-version] athlete ${athleteId}: edited plan failed schema validation, dropping ` +
         `(calendar keeps the last good version):`,
-      result.error.issues.slice(0, 5),
+      issues,
     );
-    return;
+    const detail = issues
+      .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+      .join('\n');
+    return { outcome: 'dropped_schema', detail };
   }
   const plan = result.data;
 
@@ -64,7 +79,7 @@ export async function persistPlanEdit(athleteId: string, folder: HydratedFolder)
 
   if (!planRow?.id) {
     console.warn(`[plan-version] athlete ${athleteId}: no plan row to attach the edit to`);
-    return;
+    return { outcome: 'no_plan' };
   }
 
   const { error } = await db.rpc('record_plan_edit', {
@@ -77,9 +92,10 @@ export async function persistPlanEdit(athleteId: string, folder: HydratedFolder)
 
   if (error) {
     console.error(`[plan-version] athlete ${athleteId}: record_plan_edit failed: ${error.message}`);
-    return;
+    return { outcome: 'no_plan' };
   }
   console.log(
     `[plan-version] athlete ${athleteId}: published a new working plan version (${plan.weeks.length}w)`,
   );
+  return { outcome: 'published' };
 }

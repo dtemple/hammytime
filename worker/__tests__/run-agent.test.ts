@@ -10,6 +10,7 @@ vi.mock('../folder', () => ({
 vi.mock('../send', () => ({
   sendReply: vi.fn().mockResolvedValue(undefined),
   startTyping: vi.fn().mockResolvedValue(() => {}),
+  sendDavidAlert: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('../persist', () => ({ persistRun: vi.fn().mockResolvedValue('run-1') }));
 vi.mock('../plan-version', () => ({ persistPlanEdit: vi.fn().mockResolvedValue(undefined) }));
@@ -23,7 +24,7 @@ vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
 import { runAgent } from '../run-agent';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { hydrate, syncBack, cleanup } from '../folder';
-import { sendReply } from '../send';
+import { sendReply, sendDavidAlert } from '../send';
 import { persistRun } from '../persist';
 import { persistPlanEdit } from '../plan-version';
 import { buildPrompt } from '../system-prompt';
@@ -181,6 +182,48 @@ describe('runAgent — budget stop is non-destructive', () => {
   it('records the budget-stop subtype as the run error', async () => {
     await runAgent(ATHLETE, 'daily_checkin');
     expect((persistRun as AnyMock).mock.calls[0][0].error).toMatch(/error_max_budget_usd/);
+  });
+});
+
+describe('runAgent — dropped plan edit alerts David', () => {
+  beforeEach(() => {
+    (query as AnyMock).mockReturnValue(stream([successResult('done')]));
+  });
+
+  it('fires a David alert naming the athlete and reason on a schema-invalid drop', async () => {
+    (persistPlanEdit as AnyMock).mockResolvedValue({
+      outcome: 'dropped_schema',
+      detail: 'weeks: too short',
+    });
+
+    await runAgent(ATHLETE, 'tg_message', 'move the long run');
+
+    expect(sendDavidAlert).toHaveBeenCalledOnce();
+    const body = (sendDavidAlert as AnyMock).mock.calls[0][0] as string;
+    expect(body).toContain(ATHLETE);
+    expect(body).toContain('failed schema validation');
+    expect(body).toContain('Run: tg_message');
+  });
+
+  it('fires a David alert with the invalid-JSON reason on a JSON drop', async () => {
+    (persistPlanEdit as AnyMock).mockResolvedValue({ outcome: 'dropped_invalid_json' });
+
+    await runAgent(ATHLETE, 'daily_checkin');
+
+    expect(sendDavidAlert).toHaveBeenCalledOnce();
+    expect((sendDavidAlert as AnyMock).mock.calls[0][0]).toContain('invalid JSON');
+  });
+
+  it('does not alert when the edit publishes', async () => {
+    (persistPlanEdit as AnyMock).mockResolvedValue({ outcome: 'published' });
+    await runAgent(ATHLETE, 'daily_checkin');
+    expect(sendDavidAlert).not.toHaveBeenCalled();
+  });
+
+  it('does not alert when the plan is unchanged', async () => {
+    (persistPlanEdit as AnyMock).mockResolvedValue({ outcome: 'unchanged' });
+    await runAgent(ATHLETE, 'daily_checkin');
+    expect(sendDavidAlert).not.toHaveBeenCalled();
   });
 });
 

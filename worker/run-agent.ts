@@ -11,7 +11,7 @@ import { cleanup, hydrate, syncBack } from './folder';
 import { persistPlanEdit } from './plan-version';
 import { ALLOWED_TOOLS, makeIsolationGuard, scrubbedEnv } from './isolation';
 import { persistRun, type CapturedStep, type RunKind } from './persist';
-import { sendReply, startTyping } from './send';
+import { sendDavidAlert, sendReply, startTyping } from './send';
 import { buildPrompt, loadRecentHistory, renderSystemPrompt } from './system-prompt';
 
 export type RunSource = 'daily_checkin' | 'tg_message' | 'post_activity';
@@ -35,7 +35,7 @@ export async function runAgent(
   activityId?: number,
 ): Promise<void> {
   const startedAt = new Date().toISOString();
-  const timezone = await loadTimezone(athleteId);
+  const { timezone, name } = await loadAthleteMeta(athleteId);
   const folder = await hydrate(athleteId);
 
   // Only for athlete-initiated messages — daily check-ins are proactive, so
@@ -110,9 +110,25 @@ export async function runAgent(
         console.error(`[run-agent] syncBack failed for ${athleteId}:`, e),
       );
       // Publish any coach edit to the plan as a new working version → calendar.
-      await persistPlanEdit(athleteId, folder).catch((e) =>
-        console.error(`[run-agent] persistPlanEdit failed for ${athleteId}:`, e),
-      );
+      const planEdit = await persistPlanEdit(athleteId, folder).catch((e) => {
+        console.error(`[run-agent] persistPlanEdit failed for ${athleteId}:`, e);
+        return null;
+      });
+      // A dropped edit means the coach may have told the athlete it changed the
+      // plan while the calendar kept the last good version — surface it to David.
+      if (planEdit?.outcome === 'dropped_invalid_json' || planEdit?.outcome === 'dropped_schema') {
+        const reason =
+          planEdit.outcome === 'dropped_invalid_json' ? 'invalid JSON' : 'failed schema validation';
+        const body =
+          `Plan edit dropped — kept the last good version.\n` +
+          `Athlete: ${name} (${athleteId})\n` +
+          `Run: ${source}\n` +
+          `Reason: ${reason}` +
+          (planEdit.detail ? `\n${planEdit.detail}` : '');
+        await sendDavidAlert(body).catch((e) =>
+          console.error(`[run-agent] David alert failed for ${athleteId}:`, e),
+        );
+      }
     }
 
     const runId = await persistRun({
@@ -139,13 +155,16 @@ export async function runAgent(
   }
 }
 
-async function loadTimezone(athleteId: string): Promise<string> {
+async function loadAthleteMeta(athleteId: string): Promise<{ timezone: string; name: string }> {
   const { data } = await supabaseAdmin()
     .from('athletes')
-    .select('timezone')
+    .select('timezone, name')
     .eq('id', athleteId)
     .maybeSingle();
-  return data?.timezone ?? 'America/Los_Angeles';
+  return {
+    timezone: data?.timezone ?? 'America/Los_Angeles',
+    name: data?.name ?? athleteId,
+  };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

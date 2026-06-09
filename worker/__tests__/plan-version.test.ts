@@ -70,20 +70,37 @@ afterEach(() => {
 
 describe('persistPlanEdit', () => {
   it('no-ops when the athlete had no plan at hydrate', async () => {
-    await persistPlanEdit(ATHLETE, { dir, memoryHashes: {}, planHash: undefined, plan: null });
+    const r = await persistPlanEdit(ATHLETE, {
+      dir,
+      memoryHashes: {},
+      planHash: undefined,
+      plan: null,
+    });
+    expect(r.outcome).toBe('no_plan');
     expect(rpcCalls).toHaveLength(0);
   });
 
   it('no-ops when the plan file is unchanged', async () => {
     const folder = folderWithPlan(seedJson);
-    await persistPlanEdit(ATHLETE, folder);
+    const r = await persistPlanEdit(ATHLETE, folder);
+    expect(r.outcome).toBe('unchanged');
     expect(rpcCalls).toHaveLength(0);
   });
 
   it('drops a schema-invalid edit without writing a version', async () => {
     const folder = folderWithPlan(seedJson);
     writeFileSync(path.join(dir, 'marathon_training_plan.json'), '{"weeks":[]}');
-    await persistPlanEdit(ATHLETE, folder);
+    const r = await persistPlanEdit(ATHLETE, folder);
+    expect(r.outcome).toBe('dropped_schema');
+    expect(r.detail).toBeTruthy();
+    expect(rpcCalls).toHaveLength(0);
+  });
+
+  it('drops an edit that is not valid JSON without writing a version', async () => {
+    const folder = folderWithPlan(seedJson);
+    writeFileSync(path.join(dir, 'marathon_training_plan.json'), '{not json');
+    const r = await persistPlanEdit(ATHLETE, folder);
+    expect(r.outcome).toBe('dropped_invalid_json');
     expect(rpcCalls).toHaveLength(0);
   });
 
@@ -94,8 +111,9 @@ describe('persistPlanEdit', () => {
     edited.weeks[0].days[0].planned_distance_miles = 99; // change content, stay schema-valid
     writeFileSync(path.join(dir, 'marathon_training_plan.json'), JSON.stringify(edited));
 
-    await persistPlanEdit(ATHLETE, folder);
+    const r = await persistPlanEdit(ATHLETE, folder);
 
+    expect(r.outcome).toBe('published');
     expect(rpcCalls).toHaveLength(1);
     expect(rpcCalls[0]!.name).toBe('record_plan_edit');
     expect(rpcCalls[0]!.args.p_plan_id).toBe('plan-1');

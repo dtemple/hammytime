@@ -82,6 +82,21 @@ export async function startTyping(athleteId: string): Promise<() => void> {
   return () => clearInterval(timer);
 }
 
+/**
+ * Sends an internal alert to David via the worker's own outbound bot. Mirrors
+ * src/server/admin/alerts.ts but deliberately does NOT import the inbound bot
+ * (which registers command handlers) — see the file header. Plain text, no parse
+ * mode. Safe no-op when DAVID_TELEGRAM_CHAT_ID is unset.
+ */
+export async function sendDavidAlert(message: string): Promise<void> {
+  const chatId = process.env.DAVID_TELEGRAM_CHAT_ID;
+  if (!chatId) {
+    console.warn('[worker] DAVID_TELEGRAM_CHAT_ID not set — skipping David alert');
+    return;
+  }
+  await bot().api.sendMessage(chatId, message);
+}
+
 export function chunk(text: string, size = TELEGRAM_MAX_CHARS): string[] {
   const trimmed = text.trim();
   if (trimmed.length === 0) return [];
