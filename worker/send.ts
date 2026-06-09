@@ -2,7 +2,7 @@
 // telegram/bot.ts) so the worker process doesn't register command handlers —
 // it only sends. Chunks at Telegram's 4096-char limit.
 
-import { Bot } from 'grammy';
+import { Bot, InlineKeyboard } from 'grammy';
 import { supabaseAdmin } from '@/lib/db';
 import { resolveExercise } from '@/lib/exercise-library';
 
@@ -95,6 +95,78 @@ export async function sendDavidAlert(message: string): Promise<void> {
     return;
   }
   await bot().api.sendMessage(chatId, message);
+}
+
+// Message 2 of a plan proposal (Specs/CALENDAR_CONFIRM.md): terse and
+// system-like on purpose — the coach's prose (message 1) already explained the
+// change. Copy is a draft pending David's voice pass.
+const CALENDAR_CONFIRM_TEXT = 'Update your calendar?';
+
+/**
+ * Sends the confirm keyboard for a staged plan proposal: one row, Yes/No,
+ * callback data `cal:y:<token>` / `cal:n:<token>` (handled bot-side by
+ * handleCalendarConfirm). Logs the message and stores its message_id on the
+ * plans row — keyed on the token, so a raced supersede can't attach the id to
+ * the wrong proposal.
+ */
+export async function sendCalendarConfirm(athleteId: string, token: string): Promise<void> {
+  const db = supabaseAdmin();
+  const { data: athlete } = await db
+    .from('athletes')
+    .select('telegram_chat_id')
+    .eq('id', athleteId)
+    .maybeSingle();
+
+  if (!athlete?.telegram_chat_id) {
+    throw new Error(`sendCalendarConfirm: athlete ${athleteId} has no telegram_chat_id`);
+  }
+
+  const keyboard = new InlineKeyboard()
+    .text('Yes, update', `cal:y:${token}`)
+    .text('No, leave it', `cal:n:${token}`);
+
+  const sent = await bot().api.sendMessage(athlete.telegram_chat_id, CALENDAR_CONFIRM_TEXT, {
+    reply_markup: keyboard,
+  });
+
+  await db.from('messages').insert({
+    athlete_id: athleteId,
+    channel: 'tg',
+    direction: 'out',
+    body: CALENDAR_CONFIRM_TEXT,
+  });
+
+  await db
+    .from('plans')
+    .update({ proposed_message_id: sent.message_id })
+    .eq('proposed_token', token);
+}
+
+/**
+ * Resolves a superseded proposal's keyboard message so it can't be tapped —
+ * cosmetic honesty; a tap on it would be a harmless not_found anyway.
+ * Best-effort: failures log, never throw into the caller. Copy is a draft.
+ */
+export async function resolveStaleProposalMessage(
+  athleteId: string,
+  messageId: number,
+): Promise<void> {
+  try {
+    const { data: athlete } = await supabaseAdmin()
+      .from('athletes')
+      .select('telegram_chat_id')
+      .eq('id', athleteId)
+      .maybeSingle();
+    if (!athlete?.telegram_chat_id) return;
+
+    await bot().api.editMessageText(
+      athlete.telegram_chat_id,
+      messageId,
+      `${CALENDAR_CONFIRM_TEXT}\n\nReplaced by a newer proposal — see below.`,
+    );
+  } catch (e) {
+    console.warn(`[worker] resolveStaleProposalMessage failed for ${athleteId}:`, e);
+  }
 }
 
 export function chunk(text: string, size = TELEGRAM_MAX_CHARS): string[] {

@@ -9,10 +9,17 @@ import { supabaseAdmin } from '@/lib/db';
 import { COACH_MODEL, MAX_BUDGET_USD, MAX_TURNS } from './config';
 import { cleanup, hydrate, syncBack } from './folder';
 import { persistPlanEdit } from './plan-version';
+import { makePlanEditHook } from './plan-edit-hook';
 import { attemptPlanRepair } from './plan-repair';
 import { ALLOWED_TOOLS, makeIsolationGuard, scrubbedEnv } from './isolation';
 import { persistRun, type CapturedStep, type RunKind } from './persist';
-import { sendDavidAlert, sendReply, startTyping } from './send';
+import {
+  resolveStaleProposalMessage,
+  sendCalendarConfirm,
+  sendDavidAlert,
+  sendReply,
+  startTyping,
+} from './send';
 import { buildPrompt, loadRecentHistory, renderSystemPrompt } from './system-prompt';
 
 export type RunSource = 'daily_checkin' | 'tg_message' | 'post_activity';
@@ -61,6 +68,9 @@ export async function runAgent(
   let budgetStopped = false;
   let replyText = '';
   let planDropped = false;
+  // Set when this run staged a plan proposal (Specs/CALENDAR_CONFIRM.md) — the
+  // confirm keyboard goes out after the coach's prose, clean runs only.
+  let planProposal: { token: string; supersededMessageId?: number } | null = null;
   const steps: CapturedStep[] = [];
 
   try {
@@ -80,6 +90,9 @@ export async function runAgent(
         maxTurns: MAX_TURNS,
         maxBudgetUsd: MAX_BUDGET_USD,
         env: scrubbedEnv(),
+        // Re-validate marathon_training_plan.json after every Write/Edit so a
+        // broken candidate is fixed in-loop, not staged and dropped.
+        hooks: makePlanEditHook(folder.dir),
       },
     });
 
@@ -118,8 +131,9 @@ export async function runAgent(
       await syncBack(athleteId, folder).catch((e) =>
         console.error(`[run-agent] syncBack failed for ${athleteId}:`, e),
       );
-      // Publish any coach edit to the plan as a new working version → calendar.
-      let planEdit = await persistPlanEdit(athleteId, folder).catch((e) => {
+      // Stage any coach edit to the plan as a proposed candidate — the calendar
+      // moves only when the athlete confirms (Specs/CALENDAR_CONFIRM.md).
+      let planEdit = await persistPlanEdit(athleteId, folder, timezone).catch((e) => {
         console.error(`[run-agent] persistPlanEdit failed for ${athleteId}:`, e);
         return null;
       });
@@ -136,10 +150,17 @@ export async function runAgent(
         await attemptPlanRepair(folder.dir, planEdit.detail).catch((e) =>
           console.error(`[run-agent] attemptPlanRepair failed for ${athleteId}:`, e),
         );
-        planEdit = await persistPlanEdit(athleteId, folder).catch((e) => {
+        planEdit = await persistPlanEdit(athleteId, folder, timezone).catch((e) => {
           console.error(`[run-agent] persistPlanEdit (post-repair) failed for ${athleteId}:`, e);
           return null;
         });
+      }
+
+      if (planEdit?.outcome === 'proposed' && planEdit.token) {
+        planProposal = {
+          token: planEdit.token,
+          supersededMessageId: planEdit.supersededMessageId,
+        };
       }
 
       // Still dropped after the repair pass. The coach may have told the athlete
@@ -183,6 +204,23 @@ export async function runAgent(
       finalReply = `${finalReply}\n\n${PLAN_DROP_NOTICE}`;
     }
     await sendReply(athleteId, finalReply, runId ?? undefined);
+
+    // The confirm keyboard (message 2) follows the coach's prose, clean runs
+    // only — an errored or budget-stopped run sent the fallback, and "Update
+    // your calendar?" must never pair with "hit a snag". Its invisible
+    // candidate is superseded by the next clean run or expires on its own.
+    // Best-effort: a failed keyboard send must not fail the run — the
+    // candidate just expires.
+    if (planProposal && !runError) {
+      if (planProposal.supersededMessageId !== undefined) {
+        await resolveStaleProposalMessage(athleteId, planProposal.supersededMessageId).catch((e) =>
+          console.error(`[run-agent] resolveStaleProposalMessage failed for ${athleteId}:`, e),
+        );
+      }
+      await sendCalendarConfirm(athleteId, planProposal.token).catch((e) =>
+        console.error(`[run-agent] sendCalendarConfirm failed for ${athleteId}:`, e),
+      );
+    }
   } finally {
     stopTyping();
     await cleanup(folder.dir).catch((e) =>

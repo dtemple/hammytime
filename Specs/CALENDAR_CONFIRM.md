@@ -54,8 +54,8 @@ It is orthogonal to the ICS-vs-OAuth decision: the calendar still renders `curre
 
 ## Open questions to finalize
 
-- Expiry window (end-of-week vs fixed ~72h vs both).
-- Exact button + confirm copy (voice pass). The bot-side resolved-message copy shipped 2026-06-09 is a draft.
+- ~~Expiry window (end-of-week vs fixed ~72h vs both).~~ **Decided (2026-06-09): both** — `min(end of the week containing the earliest changed future day, athlete tz; propose-time + 72h)`. No changed future day → 72h. Built as `proposalExpiry` in `worker/plan-version.ts`.
+- Exact button + confirm copy (voice pass). All of it is draft as of the 2026-06-09 cutover: the bot-side resolved messages, the `Update your calendar?` keyboard text + button labels, and the superseded-keyboard edit.
 - ~~Does "No" offer a tweak path, or just dismiss?~~ **Decided (2026-06-09): just dismiss** ("Left as-is."). Replying to the coach in chat is the tweak path — no extra button, no nudge line.
 - Does promote send any message beyond editing the button message? (Lean: no — avoid noise.)
 
@@ -63,11 +63,11 @@ It is orthogonal to the ICS-vs-OAuth decision: the calendar still renders `curre
 
 1. C (backstop + the `persistPlanEdit` outcome enum) — already prompted and built.
 2. Migration + RPC split (`proposed` status, `proposed_version_id`/`proposed_token`/`proposed_expires_at`, `propose_plan_edit` / `promote_proposed_version` / `discard_proposed_version`) — **built 2026-06-09** (CHANGELOG v0.7.26; plus `discarded` status and `proposed_message_id`, for the supersede/expiry message edits). Re-validation at tap = base-version + expiry only — no Strava fetch at the webhook.
-3. Worker propose path + PostToolUse validation hook.
-4. Send-side keyboard (message 2) + bot `cal:y|n` callback handler with re-validate, promote/discard, message edit, dedup — **bot half built 2026-06-09** (`handleCalendarConfirm`); the message-2 keyboard ships with the worker cutover.
-5. `coach.md` rewrite (propose-not-activate; when to propose; never claim saved).
-6. Expiry + one-outstanding handling (folded into 2 + 4). Expiry is passive — enforced at tap, no sweep cron.
+3. Worker propose path + PostToolUse validation hook — **built 2026-06-09** (the cutover deploy, CHANGELOG v0.7.28; `worker/plan-version.ts` + new `worker/plan-edit-hook.ts`).
+4. Send-side keyboard (message 2) + bot `cal:y|n` callback handler with re-validate, promote/discard, message edit, dedup — **bot half built 2026-06-09** (`handleCalendarConfirm`); **message-2 keyboard built 2026-06-09 with the cutover** (`sendCalendarConfirm` / `resolveStaleProposalMessage` in `worker/send.ts`).
+5. `coach.md` rewrite (propose-not-activate; when to propose; never claim saved) — **built 2026-06-09** (the cutover deploy).
+6. Expiry + one-outstanding handling (folded into 2 + 4) — **built 2026-06-09**. Expiry is passive — enforced at tap, no sweep cron — and the window is `min(end of affected week, 72h)` (see the closed open question below). Error/budget-stopped runs stage the candidate but suppress the keyboard, so the fallback message never pairs with a confirm button.
 
-Steps 3 + 4's send half + 5 are the cutover and must land in one fly deploy: the moment edits stop activating, the coach must stop claiming saves and the button must exist.
+Steps 3 + 4's send half + 5 are the cutover and landed in one fly deploy (2026-06-09): the moment edits stopped activating, the coach stopped claiming saves and the button existed. Remaining: David's voice pass on all the draft copy.
 
 Tests at each step: RPC propose/promote/discard/idempotency; worker stages-not-activates; callback promotes/discards + dedups; coach.md behavior in `worker/__tests__`. Worker changes → `git push` + `fly deploy`; web/bot changes → `git push`. Confirm the tree is only your change before deploy (§10).

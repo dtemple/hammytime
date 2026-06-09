@@ -11,6 +11,8 @@ vi.mock('../send', () => ({
   sendReply: vi.fn().mockResolvedValue(undefined),
   startTyping: vi.fn().mockResolvedValue(() => {}),
   sendDavidAlert: vi.fn().mockResolvedValue(undefined),
+  sendCalendarConfirm: vi.fn().mockResolvedValue(undefined),
+  resolveStaleProposalMessage: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('../persist', () => ({ persistRun: vi.fn().mockResolvedValue('run-1') }));
 vi.mock('../plan-version', () => ({ persistPlanEdit: vi.fn().mockResolvedValue(undefined) }));
@@ -24,7 +26,7 @@ vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
 import { runAgent } from '../run-agent';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { hydrate, syncBack, cleanup } from '../folder';
-import { sendReply, sendDavidAlert } from '../send';
+import { sendReply, sendDavidAlert, sendCalendarConfirm, resolveStaleProposalMessage } from '../send';
 import { persistRun } from '../persist';
 import { persistPlanEdit } from '../plan-version';
 import { buildPrompt } from '../system-prompt';
@@ -98,6 +100,13 @@ describe('runAgent — happy path', () => {
     expect(opts.allowedTools).toEqual([...ALLOWED_TOOLS]);
     expect(opts.settingSources).toEqual([]);
     expect(typeof opts.canUseTool).toBe('function');
+  });
+
+  it('registers the plan-edit PostToolUse hook on the query', async () => {
+    await runAgent(ATHLETE, 'daily_checkin');
+    const opts = (query as AnyMock).mock.calls[0][0].options;
+    expect(opts.hooks?.PostToolUse).toHaveLength(1);
+    expect(opts.hooks.PostToolUse[0].matcher).toBe('Write|Edit');
   });
 
   it('persists an allowed kind with non-zero tokens and one step per tool call', async () => {
@@ -214,8 +223,8 @@ describe('runAgent — dropped plan edit alerts David', () => {
     expect((sendDavidAlert as AnyMock).mock.calls[0][0]).toContain('invalid JSON');
   });
 
-  it('does not alert when the edit publishes', async () => {
-    (persistPlanEdit as AnyMock).mockResolvedValue({ outcome: 'published' });
+  it('does not alert when the edit stages a proposal', async () => {
+    (persistPlanEdit as AnyMock).mockResolvedValue({ outcome: 'proposed', token: 'tok123abc456' });
     await runAgent(ATHLETE, 'daily_checkin');
     expect(sendDavidAlert).not.toHaveBeenCalled();
   });
@@ -224,6 +233,72 @@ describe('runAgent — dropped plan edit alerts David', () => {
     (persistPlanEdit as AnyMock).mockResolvedValue({ outcome: 'unchanged' });
     await runAgent(ATHLETE, 'daily_checkin');
     expect(sendDavidAlert).not.toHaveBeenCalled();
+  });
+});
+
+describe('runAgent — proposal confirm keyboard', () => {
+  beforeEach(() => {
+    (query as AnyMock).mockReturnValue(stream([successResult('Moved it — confirm below.')]));
+  });
+
+  it('sends the keyboard with the token after the reply on a clean run', async () => {
+    (persistPlanEdit as AnyMock).mockResolvedValue({ outcome: 'proposed', token: 'tok123abc456' });
+
+    await runAgent(ATHLETE, 'tg_message', 'move my long run to wednesday');
+
+    expect(sendCalendarConfirm).toHaveBeenCalledWith(ATHLETE, 'tok123abc456');
+    const replyOrder = (sendReply as AnyMock).mock.invocationCallOrder[0];
+    const keyboardOrder = (sendCalendarConfirm as AnyMock).mock.invocationCallOrder[0];
+    expect(keyboardOrder).toBeGreaterThan(replyOrder);
+    expect(resolveStaleProposalMessage).not.toHaveBeenCalled();
+  });
+
+  it('passes the athlete timezone into persistPlanEdit', async () => {
+    (persistPlanEdit as AnyMock).mockResolvedValue({ outcome: 'unchanged' });
+    await runAgent(ATHLETE, 'daily_checkin');
+    expect((persistPlanEdit as AnyMock).mock.calls[0][2]).toBe('America/Los_Angeles');
+  });
+
+  it('resolves a superseded keyboard before sending the new one', async () => {
+    (persistPlanEdit as AnyMock).mockResolvedValue({
+      outcome: 'proposed',
+      token: 'tok223abc456',
+      supersededMessageId: 777,
+    });
+
+    await runAgent(ATHLETE, 'tg_message', 'actually make it 8');
+
+    expect(resolveStaleProposalMessage).toHaveBeenCalledWith(ATHLETE, 777);
+    const staleOrder = (resolveStaleProposalMessage as AnyMock).mock.invocationCallOrder[0];
+    const keyboardOrder = (sendCalendarConfirm as AnyMock).mock.invocationCallOrder[0];
+    expect(keyboardOrder).toBeGreaterThan(staleOrder);
+  });
+
+  it('suppresses the keyboard on a budget-stopped run even though the candidate staged', async () => {
+    (query as AnyMock).mockReturnValue(stream([assistantText('partial'), budgetResult()]));
+    (persistPlanEdit as AnyMock).mockResolvedValue({ outcome: 'proposed', token: 'tok323abc456' });
+
+    await runAgent(ATHLETE, 'daily_checkin');
+
+    expect(persistPlanEdit).toHaveBeenCalled(); // the candidate still stages
+    expect(sendCalendarConfirm).not.toHaveBeenCalled();
+    expect(resolveStaleProposalMessage).not.toHaveBeenCalled();
+  });
+
+  it('sends no keyboard on an unchanged or dropped outcome', async () => {
+    (persistPlanEdit as AnyMock).mockResolvedValue({ outcome: 'unchanged' });
+    await runAgent(ATHLETE, 'daily_checkin');
+    (persistPlanEdit as AnyMock).mockResolvedValue({ outcome: 'dropped_schema', detail: 'x' });
+    await runAgent(ATHLETE, 'daily_checkin');
+    expect(sendCalendarConfirm).not.toHaveBeenCalled();
+    expect(resolveStaleProposalMessage).not.toHaveBeenCalled();
+  });
+
+  it('a failed keyboard send does not fail the run', async () => {
+    (persistPlanEdit as AnyMock).mockResolvedValue({ outcome: 'proposed', token: 'tok423abc456' });
+    (sendCalendarConfirm as AnyMock).mockRejectedValue(new Error('telegram down'));
+
+    await expect(runAgent(ATHLETE, 'tg_message', 'move it')).resolves.toBeUndefined();
   });
 });
 

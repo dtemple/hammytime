@@ -1,13 +1,33 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// send.ts pulls in grammy + the db client at import; neither is exercised by
-// renderTelegramHtml, so stub them to keep the unit test hermetic. The corpus
-// lookup (resolveExercise) is intentionally NOT mocked — these assert against
-// the real worker/knowledge/exercises.md entries.
+// send.ts pulls in grammy + the db client at import. Bot is stubbed (its api
+// recorded via mockApi); InlineKeyboard stays real so the confirm-keyboard
+// tests assert the actual callback_data layout. The corpus lookup
+// (resolveExercise) is intentionally NOT mocked — the render tests assert
+// against the real worker/knowledge/exercises.md entries.
+const { mockApi } = vi.hoisted(() => ({
+  mockApi: {
+    sendMessage: vi.fn(),
+    editMessageText: vi.fn(),
+  },
+}));
 vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
-vi.mock('grammy', () => ({ Bot: vi.fn() }));
+vi.mock('grammy', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('grammy')>();
+  // A constructor (new Bot(...)) returning the stubbed api — arrows can't be new'd.
+  return {
+    ...actual,
+    Bot: vi.fn(function Bot() {
+      return { api: mockApi };
+    }),
+  };
+});
 
-import { renderTelegramHtml } from '../send';
+import { renderTelegramHtml, sendCalendarConfirm } from '../send';
+import { supabaseAdmin } from '@/lib/db';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyMock = any;
 
 describe('renderTelegramHtml', () => {
   it('escapes HTML-special characters in prose', () => {
@@ -52,5 +72,93 @@ describe('renderTelegramHtml', () => {
     expect(renderTelegramHtml('noted in race_calendar.md and *keep* easy')).toBe(
       'noted in race_calendar.md and *keep* easy',
     );
+  });
+});
+
+describe('sendCalendarConfirm', () => {
+  const ATHLETE = '11111111-2222-3333-4444-555555555555';
+  const TOKEN = 'tok123abc456';
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let inserted: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let planUpdates: { values: any; field: string; value: any }[];
+
+  function makeDb() {
+    return {
+      from(table: string) {
+        if (table === 'athletes') {
+          return {
+            select: () => ({
+              eq: () => ({ maybeSingle: () => ({ data: { telegram_chat_id: '12345' } }) }),
+            }),
+          };
+        }
+        if (table === 'messages') {
+          return {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            insert: (row: any) => {
+              inserted.push(row);
+              return Promise.resolve({ error: null });
+            },
+          };
+        }
+        if (table === 'plans') {
+          return {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            update: (values: any) => ({
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              eq: (field: string, value: any) => {
+                planUpdates.push({ values, field, value });
+                return Promise.resolve({ error: null });
+              },
+            }),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      },
+    };
+  }
+
+  beforeEach(() => {
+    inserted = [];
+    planUpdates = [];
+    process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+    mockApi.sendMessage.mockReset().mockResolvedValue({ message_id: 4242 });
+    mockApi.editMessageText.mockReset().mockResolvedValue(true);
+    (supabaseAdmin as AnyMock).mockImplementation(() => makeDb());
+  });
+
+  it('sends the Yes/No keyboard with cal:y/cal:n callback data', async () => {
+    await sendCalendarConfirm(ATHLETE, TOKEN);
+
+    expect(mockApi.sendMessage).toHaveBeenCalledOnce();
+    const [chatId, text, opts] = mockApi.sendMessage.mock.calls[0]!;
+    expect(chatId).toBe('12345');
+    expect(text).toBe('Update your calendar?');
+    expect(opts.reply_markup.inline_keyboard).toEqual([
+      [
+        { text: 'Yes, update', callback_data: `cal:y:${TOKEN}` },
+        { text: 'No, leave it', callback_data: `cal:n:${TOKEN}` },
+      ],
+    ]);
+  });
+
+  it('logs the keyboard message to messages', async () => {
+    await sendCalendarConfirm(ATHLETE, TOKEN);
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]).toMatchObject({
+      athlete_id: ATHLETE,
+      channel: 'tg',
+      direction: 'out',
+      body: 'Update your calendar?',
+    });
+  });
+
+  it('stores the sent message_id on the plans row keyed on the token', async () => {
+    await sendCalendarConfirm(ATHLETE, TOKEN);
+    expect(planUpdates).toEqual([
+      { values: { proposed_message_id: 4242 }, field: 'proposed_token', value: TOKEN },
+    ]);
   });
 });
