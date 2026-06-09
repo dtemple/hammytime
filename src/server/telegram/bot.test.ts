@@ -22,20 +22,42 @@ vi.mock('./checkin/dispatcher', () => ({
   handleWellnessMessage: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('child_process', () => ({ execSync: vi.fn().mockReturnValue('abc1234 — test commit') }));
-vi.mock('grammy', () => ({ Bot: vi.fn(), Context: vi.fn() }));
+vi.mock('grammy', () => ({
+  Bot: vi.fn(),
+  Context: vi.fn(),
+  InlineKeyboard: class {
+    inline_keyboard: { text: string; url: string }[][] = [];
+    url(text: string, url: string) {
+      this.inline_keyboard.push([{ text, url }]);
+      return this;
+    }
+  },
+}));
 vi.mock('@/server/jobs/enqueue', () => ({ enqueueJob: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('@/server/strava/disconnect', () => ({ disconnectStrava: vi.fn() }));
+vi.mock('@/server/google/disconnect', () => ({ disconnectGoogleCalendar: vi.fn() }));
+vi.mock('@/server/google/enqueue-sync', () => ({
+  enqueueCalendarSyncIfConnected: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('@/lib/calendar-token', () => ({
+  getOrCreateCalendarToken: vi
+    .fn()
+    .mockResolvedValue({ token: 'cal-tok', url: 'https://daybreak.run/api/calendar/cal-tok.ics' }),
+}));
 
 import { supabaseAdmin } from '@/lib/db';
 import { Bot } from 'grammy';
 import { handleWellnessMessage } from './checkin/dispatcher';
 import { enqueueJob } from '@/server/jobs/enqueue';
 import { disconnectStrava } from '@/server/strava/disconnect';
+import { disconnectGoogleCalendar } from '@/server/google/disconnect';
+import { enqueueCalendarSyncIfConnected } from '@/server/google/enqueue-sync';
 import {
   handleInboundText,
   handleInboundMedia,
   handleConnectStravaCommand,
   handleDisconnectStravaCommand,
+  handleDisconnectCalendarCommand,
   handleNextAction,
   handleCalendarConfirm,
   _resetBotForTest,
@@ -490,6 +512,105 @@ describe('/disconnect_strava command', () => {
   });
 });
 
+describe('/disconnect_calendar command', () => {
+  beforeEach(() => {
+    _resetBotForTest();
+    vi.clearAllMocks();
+    process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+  });
+
+  afterEach(() => {
+    delete process.env.TELEGRAM_BOT_TOKEN;
+  });
+
+  function setup(athleteRow: object | null) {
+    const sendMessageMock = vi.fn().mockResolvedValue(undefined);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (Bot as AnyMock).mockImplementation(function (this: any) {
+      return {
+        api: { sendMessage: sendMessageMock },
+        command: vi.fn(),
+        on: vi.fn(),
+        catch: vi.fn(),
+      };
+    });
+
+    (supabaseAdmin as AnyMock).mockReturnValue({
+      from: vi.fn().mockImplementation((table: string) => {
+        if (table === 'athletes') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({ data: athleteRow, error: null }),
+              }),
+            }),
+          };
+        }
+        if (table === 'messages') {
+          return { insert: vi.fn().mockResolvedValue({ error: null }) };
+        }
+        return {};
+      }),
+    });
+
+    return { sendMessageMock };
+  }
+
+  it('replies with no-record message when athlete is not found', async () => {
+    setup(null);
+    const ctx = makeCtx();
+
+    await handleDisconnectCalendarCommand(ctx as AnyMock);
+
+    expect(ctx.reply).toHaveBeenCalledWith('No athlete record found for this chat.');
+    expect(disconnectGoogleCalendar).not.toHaveBeenCalled();
+  });
+
+  it('disconnects, removes the calendar, and confirms', async () => {
+    const { sendMessageMock } = setup({ id: ATHLETE_ID });
+    (disconnectGoogleCalendar as AnyMock).mockResolvedValue({
+      hadConnection: true,
+      calendarDeleted: true,
+    });
+    const ctx = makeCtx();
+
+    await handleDisconnectCalendarCommand(ctx as AnyMock);
+
+    expect(disconnectGoogleCalendar).toHaveBeenCalledWith(ATHLETE_ID);
+    const [, sentText] = (sendMessageMock as AnyMock).mock.calls[0] as [unknown, string];
+    expect(sentText).toContain('Disconnected');
+    expect(sentText).toContain('gone from your Google account');
+  });
+
+  it('notes the leftover calendar when the remote delete could not run', async () => {
+    const { sendMessageMock } = setup({ id: ATHLETE_ID });
+    (disconnectGoogleCalendar as AnyMock).mockResolvedValue({
+      hadConnection: true,
+      calendarDeleted: false,
+    });
+    const ctx = makeCtx();
+
+    await handleDisconnectCalendarCommand(ctx as AnyMock);
+
+    const [, sentText] = (sendMessageMock as AnyMock).mock.calls[0] as [unknown, string];
+    expect(sentText).toContain("couldn't remove");
+  });
+
+  it('tells the athlete when there is no connection on file', async () => {
+    const { sendMessageMock } = setup({ id: ATHLETE_ID });
+    (disconnectGoogleCalendar as AnyMock).mockResolvedValue({
+      hadConnection: false,
+      calendarDeleted: false,
+    });
+    const ctx = makeCtx();
+
+    await handleDisconnectCalendarCommand(ctx as AnyMock);
+
+    const [, sentText] = (sendMessageMock as AnyMock).mock.calls[0] as [unknown, string];
+    expect(sentText).toContain("don't have Google Calendar connected");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Phase D next-actions — inbound logging (V3-W0)
 // ---------------------------------------------------------------------------
@@ -539,6 +660,99 @@ describe('handleNextAction — inbound logging', () => {
     const inbound = messagesInserts.find((r) => r.direction === 'in');
     expect(inbound).toBeDefined();
     expect(inbound!.body).toBe("That's it for today");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Calendar message — Google connect button vs connected state (CALENDAR_OAUTH)
+// ---------------------------------------------------------------------------
+
+describe('calendar message via next:calendar', () => {
+  beforeEach(() => {
+    _resetBotForTest();
+    vi.clearAllMocks();
+    process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+    process.env.NEXT_PUBLIC_APP_URL = 'https://daybreak.run';
+  });
+
+  afterEach(() => {
+    delete process.env.TELEGRAM_BOT_TOKEN;
+  });
+
+  function setup(googleConnected: boolean) {
+    const sendMessageMock = vi.fn().mockResolvedValue(undefined);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (Bot as AnyMock).mockImplementation(function (this: any) {
+      return { api: { sendMessage: sendMessageMock }, command: vi.fn(), on: vi.fn(), catch: vi.fn() };
+    });
+
+    (supabaseAdmin as AnyMock).mockReturnValue({
+      from: vi.fn().mockImplementation((table: string) => {
+        if (table === 'messages') {
+          return { insert: vi.fn().mockResolvedValue({ error: null }) };
+        }
+        if (table === 'oauth_tokens') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                eq: vi.fn().mockReturnValue({
+                  maybeSingle: vi.fn().mockResolvedValue({
+                    data: googleConnected ? { id: 'tok-1' } : null,
+                    error: null,
+                  }),
+                }),
+              }),
+            }),
+          };
+        }
+        return {};
+      }),
+    });
+
+    return { sendMessageMock };
+  }
+
+  function calCtx() {
+    return makeCtx({
+      answerCallbackQuery: vi.fn().mockResolvedValue(undefined),
+      callbackQuery: {
+        message: {
+          reply_markup: {
+            inline_keyboard: [[{ text: 'Add to calendar', callback_data: 'next:calendar' }]],
+          },
+        },
+      },
+    });
+  }
+
+  it('offers the Connect Google Calendar button plus the ICS link when not connected', async () => {
+    const { sendMessageMock } = setup(false);
+
+    await handleNextAction(calCtx() as AnyMock, { id: ATHLETE_ID } as AnyMock, 'next:calendar');
+
+    expect(sendMessageMock).toHaveBeenCalledOnce();
+    const [, text, opts] = (sendMessageMock as AnyMock).mock.calls[0];
+    expect(text).toContain('https://daybreak.run/api/calendar/cal-tok.ics');
+    expect(text).toContain('Apple Calendar');
+    const buttons = opts.reply_markup.inline_keyboard.flat();
+    expect(buttons).toEqual([
+      {
+        text: 'Connect Google Calendar',
+        url: `https://daybreak.run/google/connect?athlete_id=${ATHLETE_ID}`,
+      },
+    ]);
+  });
+
+  it('shows connected state (no button) once Google is connected', async () => {
+    const { sendMessageMock } = setup(true);
+
+    await handleNextAction(calCtx() as AnyMock, { id: ATHLETE_ID } as AnyMock, 'next:calendar');
+
+    const [, text, opts] = (sendMessageMock as AnyMock).mock.calls[0];
+    expect(text).toContain('Google Calendar: connected');
+    expect(text).toContain('https://daybreak.run/api/calendar/cal-tok.ics');
+    expect(text).toContain('/disconnect_calendar');
+    expect(opts).toBeUndefined();
   });
 });
 
@@ -622,6 +836,9 @@ describe('handleCalendarConfirm', () => {
     expect(ctx.editMessageText).toHaveBeenCalledWith('Update your calendar?\n\n✓ Calendar updated.');
     expect(messagesInserts.find((r) => r.direction === 'in')?.body).toBe('Yes, update');
     expect(messagesInserts.find((r) => r.direction === 'out')?.body).toBe('✓ Calendar updated.');
+    // The promoted version is an active-plan change — the Google calendar
+    // sync rides on it (no-op for unconnected athletes).
+    expect(enqueueCalendarSyncIfConnected).toHaveBeenCalledWith(ATHLETE_ID, 'promotion');
   });
 
   it('No tap discards the candidate and resolves the message', async () => {
@@ -634,6 +851,7 @@ describe('handleCalendarConfirm', () => {
       { name: 'discard_proposed_version', args: { p_plan_id: 'plan-1', p_token: 'tok1' } },
     ]);
     expect(ctx.editMessageText).toHaveBeenCalledWith('Update your calendar?\n\nLeft as-is.');
+    expect(enqueueCalendarSyncIfConnected).not.toHaveBeenCalled();
   });
 
   it.each(['expired', 'stale'])('%s candidate resolves with the expired copy', async (result) => {
@@ -645,6 +863,7 @@ describe('handleCalendarConfirm', () => {
     expect(ctx.editMessageText).toHaveBeenCalledWith(
       'Update your calendar?\n\nThis one expired — ask me again if you still want the change.',
     );
+    expect(enqueueCalendarSyncIfConnected).not.toHaveBeenCalled();
   });
 
   it('not_found (re-tap / webhook retry) resolves quietly without throwing', async () => {

@@ -10,6 +10,7 @@
 // while the template baseline stays put. Deterministic, no LLM, inline.
 
 import { supabaseAdmin } from '@/lib/db';
+import { enqueueCalendarSyncIfConnected } from '@/server/google/enqueue-sync';
 import { PlanSchema, type Plan } from '@/lib/plan-schema';
 import {
   selectPlan,
@@ -183,6 +184,9 @@ export async function generateAndPersistPlan(athleteId: string): Promise<Generat
   }
 
   const { planId, versionId } = await persistTemplatePlan(athleteId, plan);
+  // A connected athlete re-onboarding gets the fresh plan on their Google
+  // calendar; for the common first-time case (no connection yet) this no-ops.
+  await enqueueCalendarSyncIfConnected(athleteId, 'plan_gen', versionId);
   return { planId, versionId, plan, params };
 }
 
@@ -208,6 +212,10 @@ export async function setPlanStrengthToZero(
     .update({ plan_json: plan })
     .eq('id', versionId);
   if (error) throw new Error(`setPlanStrengthToZero: update failed: ${error.message}`);
+
+  // The in-place plan_json overwrite changes calendar content without moving
+  // current_version_id — it needs its own sync trigger.
+  await enqueueCalendarSyncIfConnected(athleteId, 'strength_zero', versionId);
 
   return { plan, params };
 }

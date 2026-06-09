@@ -15,6 +15,8 @@ import { handleCheckinCommand, handleWellnessMessage } from './checkin/dispatche
 import { handleV3Message, handleV3Callback } from './onboarding/engine/router';
 import { fetchRecentActivities, hasStravaConnection } from '@/server/strava/activities';
 import { disconnectStrava } from '@/server/strava/disconnect';
+import { disconnectGoogleCalendar } from '@/server/google/disconnect';
+import { enqueueCalendarSyncIfConnected } from '@/server/google/enqueue-sync';
 import { getOrCreateCalendarToken } from '@/lib/calendar-token';
 import { enqueueJob } from '@/server/jobs/enqueue';
 import { transcribeOgg } from '@/lib/transcribe';
@@ -56,6 +58,10 @@ export function appBaseUrl(): string {
 
 export function stravaConnectUrl(athleteId: string): string {
   return `${appBaseUrl()}/strava/connect?athlete_id=${athleteId}`;
+}
+
+export function googleConnectUrl(athleteId: string): string {
+  return `${appBaseUrl()}/google/connect?athlete_id=${athleteId}`;
 }
 
 // Beat A0 (onboarding v2): welcome + the Connect Strava unlock. Seeds the
@@ -406,23 +412,61 @@ async function handleCalendarCommand(ctx: CommandContext<Context>): Promise<void
     body: '/calendar',
   });
 
-  const { url } = await getOrCreateCalendarToken(athlete.id);
-  await sendAndLog(athlete.id, ctx.chat.id, calendarSubscribeText(url));
+  await sendCalendarMessage(athlete.id, ctx.chat.id);
 }
 
 // Shared by the /calendar command and the onboarding next-action [Add to calendar].
-function calendarSubscribeText(url: string): string {
-  return [
-    'Your training calendar:',
-    url,
+// Two paths to a synced calendar: Google OAuth direct-write (real-time, one tap)
+// and the ICS subscribe link for everyone else (Specs/CALENDAR_OAUTH.md). Both
+// are offered; the athlete picks. An existing Google ICS subscription keeps
+// working — connecting is opt-in.
+async function sendCalendarMessage(athleteId: string, chatId: number | string): Promise<void> {
+  const { url } = await getOrCreateCalendarToken(athleteId);
+
+  const { data: googleRow } = await supabaseAdmin()
+    .from('oauth_tokens')
+    .select('id')
+    .eq('athlete_id', athleteId)
+    .eq('provider', 'google_calendar')
+    .maybeSingle();
+
+  if (googleRow) {
+    await sendAndLog(
+      athleteId,
+      chatId,
+      [
+        'Google Calendar: connected. Your "Daybreak — training" calendar updates on its own — plan changes land within seconds.',
+        '',
+        'On another device (Apple Calendar, Outlook), subscribe to this link:',
+        url,
+        '',
+        'Run /disconnect_calendar to disconnect Google.',
+      ].join('\n'),
+    );
+    return;
+  }
+
+  const text = [
+    'Two ways to get your plan on a calendar:',
     '',
-    'Subscribe in:',
+    'Google Calendar — tap the button below. A "Daybreak — training" calendar appears in your Google account and plan changes land within seconds.',
+    '',
+    'Apple Calendar, Outlook, anything else — subscribe to this link:',
+    url,
     '• Apple Calendar — File → New Calendar Subscription → paste URL',
-    '• Google Calendar — Other calendars → + → From URL → paste URL',
     '• Outlook — Add calendar → Subscribe from web → paste URL',
     '',
-    'Workouts will appear on their day. Updates automatically when your plan changes.',
+    'Workouts appear on their day. Both update automatically when your plan changes.',
   ].join('\n');
+
+  const keyboard = new InlineKeyboard().url('Connect Google Calendar', googleConnectUrl(athleteId));
+  await getBot().api.sendMessage(chatId, text, { reply_markup: keyboard });
+  await supabaseAdmin().from('messages').insert({
+    athlete_id: athleteId,
+    channel: 'tg',
+    direction: 'out',
+    body: text,
+  });
 }
 
 // Phase D next-actions, tapped after onboarding is terminal (so they can't route
@@ -449,9 +493,8 @@ export async function handleNextAction(
     });
 
   if (data === 'next:calendar') {
-    const { url } = await getOrCreateCalendarToken(athlete.id);
     await ctx.answerCallbackQuery();
-    await sendAndLog(athlete.id, chatId, calendarSubscribeText(url));
+    await sendCalendarMessage(athlete.id, chatId);
     return;
   }
 
@@ -533,6 +576,13 @@ export async function handleCalendarConfirm(
       .answerCallbackQuery({ text: 'Something went wrong — try again in a moment.' })
       .catch(() => undefined);
     return;
+  }
+
+  // A promoted version is the active plan changing — push it to the athlete's
+  // Google calendar if they have one. Best-effort inside; the ICS feed picks
+  // up the change regardless.
+  if (action === 'y' && result === 'promoted') {
+    await enqueueCalendarSyncIfConnected(athlete.id, 'promotion');
   }
 
   const resolvedLine =
@@ -801,6 +851,48 @@ export async function handleDisconnectStravaCommand(ctx: CommandContext<Context>
   );
 }
 
+export async function handleDisconnectCalendarCommand(ctx: CommandContext<Context>): Promise<void> {
+  const db = supabaseAdmin();
+  const chatId = String(ctx.chat.id);
+
+  const { data: athlete } = await db
+    .from('athletes')
+    .select('id')
+    .eq('telegram_chat_id', chatId)
+    .maybeSingle();
+
+  if (!athlete) {
+    await ctx.reply('No athlete record found for this chat.');
+    return;
+  }
+
+  await db.from('messages').insert({
+    athlete_id: athlete.id,
+    channel: 'tg',
+    direction: 'in',
+    body: '/disconnect_calendar',
+  });
+
+  const { hadConnection, calendarDeleted } = await disconnectGoogleCalendar(athlete.id);
+
+  if (!hadConnection) {
+    await sendAndLog(
+      athlete.id,
+      ctx.chat.id,
+      "You don't have Google Calendar connected. If you subscribed by link, that runs without a connection — nothing to disconnect.",
+    );
+    return;
+  }
+
+  await sendAndLog(
+    athlete.id,
+    ctx.chat.id,
+    calendarDeleted
+      ? 'Disconnected. The "Daybreak — training" calendar is gone from your Google account. Run /calendar whenever you want it back — or grab the subscribe link there instead.'
+      : 'Disconnected on my side. I couldn\'t remove the "Daybreak — training" calendar from your Google account (the connection was already dead) — you can delete it in Google Calendar settings. Run /calendar to set it up again.',
+  );
+}
+
 function getBot(): Bot {
   if (!_bot) {
     const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -833,6 +925,7 @@ function getBot(): Bot {
     });
     _bot.command('connect_strava', handleConnectStravaCommand);
     _bot.command('disconnect_strava', handleDisconnectStravaCommand);
+    _bot.command('disconnect_calendar', handleDisconnectCalendarCommand);
     _bot.command('strava_status', handleStravaStatusCommand);
     _bot.command('calendar', handleCalendarCommand);
     _bot.command('fresh_update', handleFreshUpdateCommand);
