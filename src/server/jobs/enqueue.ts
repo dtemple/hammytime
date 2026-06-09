@@ -8,7 +8,7 @@
 import { supabaseAdmin } from '@/lib/db';
 import type { Json } from '@/lib/db-types';
 
-export type JobKind = 'daily_checkin' | 'tg_message';
+export type JobKind = 'daily_checkin' | 'tg_message' | 'calendar_sync';
 
 export async function enqueueJob(
   kind: JobKind,

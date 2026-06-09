@@ -7,6 +7,7 @@ import { sendDavidAlert } from '@/server/admin/alerts';
 import { runDailyCheckin } from './jobs/daily-checkin';
 import { runPostActivity } from './jobs/post-activity';
 import { runTgMessage } from './jobs/tg-message';
+import { runCalendarSync } from './jobs/calendar-sync';
 
 export type Job = Database['public']['Tables']['job_queue']['Row'];
 
@@ -44,6 +45,9 @@ export async function dispatch(job: Job): Promise<void> {
       } else {
         await runTgMessage(athleteId, String(payload.text ?? ''));
       }
+      return;
+    case 'calendar_sync':
+      await runCalendarSync(athleteId);
       return;
     default:
       throw new Error(`dispatch: unknown job kind ${job.kind}`);

@@ -5,6 +5,7 @@ vi.mock('@/server/admin/alerts', () => ({ sendDavidAlert: vi.fn().mockResolvedVa
 vi.mock('../jobs/daily-checkin', () => ({ runDailyCheckin: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../jobs/post-activity', () => ({ runPostActivity: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../jobs/tg-message', () => ({ runTgMessage: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('../jobs/calendar-sync', () => ({ runCalendarSync: vi.fn().mockResolvedValue(undefined) }));
 
 import { claimJob, dispatch, completeJob, failJob, type Job } from '../poll';
 import { supabaseAdmin } from '@/lib/db';
@@ -12,6 +13,7 @@ import { sendDavidAlert } from '@/server/admin/alerts';
 import { runDailyCheckin } from '../jobs/daily-checkin';
 import { runPostActivity } from '../jobs/post-activity';
 import { runTgMessage } from '../jobs/tg-message';
+import { runCalendarSync } from '../jobs/calendar-sync';
 import { MAX_ATTEMPTS } from '../config';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -124,6 +126,11 @@ describe('dispatch', () => {
       }),
     );
     expect(runPostActivity).toHaveBeenCalledWith('ath-9', undefined);
+  });
+
+  it('routes calendar_sync to the calendar-sync handler', async () => {
+    await dispatch(makeJob({ kind: 'calendar_sync', payload: { athlete_id: 'ath-9', reason: 'connect' } }));
+    expect(runCalendarSync).toHaveBeenCalledWith('ath-9');
   });
 
   it('throws when athlete_id is missing', async () => {

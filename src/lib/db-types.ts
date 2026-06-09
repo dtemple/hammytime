@@ -559,6 +559,7 @@ export type Database = {
           id: string
           provider: string
           provider_athlete_id: string | null
+          provider_calendar_id: string | null
           refresh_token_enc: string
           updated_at: string
         }
@@ -570,6 +571,7 @@ export type Database = {
           id?: string
           provider: string
           provider_athlete_id?: string | null
+          provider_calendar_id?: string | null
           refresh_token_enc: string
           updated_at?: string
         }
@@ -581,6 +583,7 @@ export type Database = {
           id?: string
           provider?: string
           provider_athlete_id?: string | null
+          provider_calendar_id?: string | null
           refresh_token_enc?: string
           updated_at?: string
         }
