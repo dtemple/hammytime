@@ -1,8 +1,9 @@
 # Prehab v2 — standing program + load-aware contextual layer
 
-**Status: built 2026-06-09 (CHANGELOG v0.7.29) — deployed pending David's P1 sign-off on
-`worker/knowledge/prehab-principles.md` (§4 science), then `fly deploy`.** This doc is the design
-record and implementation plan; the v0.7.27 entry recorded the design, v0.7.29 the build.
+**Status: built + deployed 2026-06-09 (CHANGELOG v0.7.29). David vetted the §4 science
+(P1 sign-off) the same day; the worker is live on Fly.** This doc is the design record and
+implementation plan; the v0.7.27 entry recorded the design, v0.7.29 the build. Remaining: the §6
+observation week against David's own transcript.
 
 ---
 

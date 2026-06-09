@@ -24,7 +24,7 @@ Conservative, mainstream sports science only: heavy-slow resistance and eccentri
 tendon adaptation (Achilles, patellar), eccentric hamstring strength for strain-risk reduction,
 and standard run-training load management. Anything contested is cut from this file, not hedged.
 
-Content last verified by David: PENDING SIGN-OFF (drafted 2026-06-09).
+Content last verified by David: 2026-06-09.
 
 ## 1. Load → tissue map
 
