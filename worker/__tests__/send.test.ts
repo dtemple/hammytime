@@ -42,7 +42,7 @@ describe('renderTelegramHtml', () => {
 
   it('links a known slug token to its corpus source', () => {
     expect(renderTelegramHtml('try [single-leg calf raises](single-leg-calf-raise) tonight')).toBe(
-      'try <a href="https://e3rehab.com/calves/">single-leg calf raises</a> tonight',
+      'try <a href="https://www.youtube.com/watch?v=2fiF2Ku8Y_U">single-leg calf raises</a> tonight',
     );
   });
 
@@ -68,7 +68,7 @@ describe('renderTelegramHtml', () => {
 
   it('nests a bolded link as <b><a>', () => {
     expect(renderTelegramHtml('**[single-leg calf raises](single-leg-calf-raise)**')).toBe(
-      '<b><a href="https://e3rehab.com/calves/">single-leg calf raises</a></b>',
+      '<b><a href="https://www.youtube.com/watch?v=2fiF2Ku8Y_U">single-leg calf raises</a></b>',
     );
   });
 
