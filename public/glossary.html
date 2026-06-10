@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Glossary — Daybreak</title>
+    <meta
+      name="description"
+      content="Plain-language definitions of the running and training terms your Daybreak coach uses — RPE, DOMS, taper, fartlek, and more."
+    />
+    <style>
+      :root {
+        --bg: #faf8f4;
+        --ink: #1a1815;
+        --ink-2: #5b5751;
+        --ink-3: #908a82;
+        --hair: #e7e1d6;
+        --accent: #2d5a3d;
+        --accent-soft: #e4ebe4;
+        --bubble: #ffffff;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+          sans-serif;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      a {
+        color: var(--accent);
+      }
+
+      /* Header */
+      .gl-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 22px 24px;
+      }
+      .gl-brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 700;
+        font-size: 17px;
+        letter-spacing: -0.01em;
+        color: var(--ink);
+        text-decoration: none;
+      }
+      .gl-brand-mark {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 50% 115%, #f0c969 0%, #e7a23c 42%, var(--accent) 95%);
+        display: inline-block;
+      }
+      .gl-nav a {
+        color: var(--ink-2);
+        text-decoration: none;
+        font-size: 14px;
+      }
+      .gl-nav a:hover {
+        color: var(--ink);
+      }
+
+      /* Layout */
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 8px 24px 96px;
+      }
+
+      .gl-intro h1 {
+        font-size: 32px;
+        letter-spacing: -0.02em;
+        margin: 16px 0 8px;
+      }
+      .gl-intro p {
+        color: var(--ink-2);
+        font-size: 16px;
+        max-width: 60ch;
+        margin: 0 0 4px;
+      }
+
+      /* Jump index */
+      .gl-index {
+        margin: 28px 0 8px;
+        padding: 18px 20px;
+        background: var(--bubble);
+        border: 1px solid var(--hair);
+        border-radius: 14px;
+      }
+      .gl-index h2 {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--ink-3);
+        margin: 0 0 10px;
+      }
+      .gl-index ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 8px;
+      }
+      .gl-index a {
+        display: inline-block;
+        padding: 4px 11px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        text-decoration: none;
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .gl-index a:hover {
+        background: #d6e2d6;
+      }
+
+      /* Sections */
+      .gl-section {
+        margin-top: 40px;
+      }
+      .gl-section > h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+        color: var(--accent);
+        font-weight: 700;
+        margin: 0 0 4px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--hair);
+      }
+
+      /* Terms */
+      .gl-term {
+        padding: 22px 0;
+        border-bottom: 1px solid var(--hair);
+        scroll-margin-top: 16px;
+      }
+      .gl-term:last-child {
+        border-bottom: none;
+      }
+      .gl-term h3 {
+        margin: 0 0 6px;
+        font-size: 19px;
+        letter-spacing: -0.01em;
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+      .gl-term h3 .gl-anchor {
+        opacity: 0;
+        text-decoration: none;
+        color: var(--ink-3);
+        font-size: 15px;
+        transition: opacity 0.12s ease;
+      }
+      .gl-term:hover h3 .gl-anchor,
+      .gl-term:focus-within h3 .gl-anchor {
+        opacity: 1;
+      }
+      .gl-term p {
+        margin: 0;
+        color: var(--ink-2);
+        font-size: 16px;
+      }
+      .gl-term .gl-also {
+        display: inline-block;
+        margin-top: 8px;
+        font-size: 13px;
+        color: var(--ink-3);
+      }
+
+      /* Highlight the deep-linked term */
+      .gl-term:target {
+        background: var(--bubble);
+        border-radius: 14px;
+        border-bottom-color: transparent;
+        margin: 0 -18px;
+        padding: 22px 18px;
+        box-shadow:
+          0 1px 0 rgba(26, 24, 21, 0.04),
+          0 10px 30px -16px rgba(26, 24, 21, 0.22);
+        animation: gl-flash 1.6s ease;
+      }
+      .gl-term:target h3 {
+        color: var(--accent);
+      }
+      @keyframes gl-flash {
+        0% {
+          box-shadow: 0 0 0 2px var(--accent);
+        }
+        100% {
+          box-shadow:
+            0 1px 0 rgba(26, 24, 21, 0.04),
+            0 10px 30px -16px rgba(26, 24, 21, 0.22);
+        }
+      }
+
+      footer {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 28px 24px 48px;
+        border-top: 1px solid var(--hair);
+        color: var(--ink-3);
+        font-size: 13px;
+        display: flex;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      footer a {
+        color: var(--ink-3);
+        text-decoration: none;
+        margin-left: 16px;
+      }
+      footer a:hover {
+        color: var(--ink-2);
+      }
+
+      @media (max-width: 540px) {
+        .gl-intro h1 {
+          font-size: 27px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="gl-header">
+      <a class="gl-brand" href="/">
+        <span class="gl-brand-mark" aria-hidden="true"></span>
+        Daybreak
+      </a>
+      <nav class="gl-nav"><a href="/login">Log in</a></nav>
+    </header>
+
+    <main>
+      <section class="gl-intro">
+        <h1>Glossary</h1>
+        <p>
+          Plain-language definitions of the running and training terms your coach uses. If a word in
+          a message ever sends you here, this is the spot — no coaching background required.
+        </p>
+      </section>
+
+      <nav class="gl-index" aria-label="Jump to a term">
+        <h2>Jump to</h2>
+        <ul>
+          <li><a href="#rpe">RPE</a></li>
+          <li><a href="#conversational-pace">Conversational pace</a></li>
+          <li><a href="#strides">Strides</a></li>
+          <li><a href="#tempo">Tempo</a></li>
+          <li><a href="#fartlek">Fartlek</a></li>
+          <li><a href="#intervals">Intervals</a></li>
+          <li><a href="#long-run">Long run</a></li>
+          <li><a href="#easy-run">Easy / recovery run</a></li>
+          <li><a href="#base">Base</a></li>
+          <li><a href="#build-phase">Build</a></li>
+          <li><a href="#peak">Peak</a></li>
+          <li><a href="#taper">Taper</a></li>
+          <li><a href="#cutback-week">Cutback week</a></li>
+          <li><a href="#shakeout">Shakeout</a></li>
+          <li><a href="#tune-up-race">Tune-up race</a></li>
+          <li><a href="#doms">DOMS</a></li>
+          <li><a href="#itb">ITB</a></li>
+          <li><a href="#niggle">Niggle</a></li>
+          <li><a href="#prehab">Prehab</a></li>
+          <li><a href="#readiness">Readiness &amp; soreness</a></li>
+          <li><a href="#eccentric">Eccentric</a></li>
+          <li><a href="#cadence">Cadence</a></li>
+          <li><a href="#vert">Vert</a></li>
+          <li><a href="#fueling">Fueling</a></li>
+        </ul>
+      </nav>
+
+      <section class="gl-section">
+        <h2>Effort &amp; workouts</h2>
+
+        <article class="gl-term" id="rpe">
+          <h3>RPE <a class="gl-anchor" href="#rpe" aria-label="Link to RPE">#</a></h3>
+          <p>
+            Rate of Perceived Exertion — a 1–10 scale for how hard a run feels from the inside, where
+            1 is barely moving and 10 is an all-out sprint you couldn't hold for more than a few
+            seconds. Daybreak prescribes effort in RPE instead of pace because it adjusts itself to
+            heat, hills, fatigue, and how you slept. Easy and long runs sit at RPE 3–5, where you can
+            hold a conversation; a tempo runs at RPE 6–7, short phrases but not gasping.
+          </p>
+        </article>
+
+        <article class="gl-term" id="conversational-pace">
+          <h3>
+            Conversational pace
+            <a class="gl-anchor" href="#conversational-pace" aria-label="Link to Conversational pace"
+              >#</a
+            >
+          </h3>
+          <p>
+            An effort easy enough that you could speak in full sentences without pausing for breath —
+            roughly RPE 3–5. It's the target for most easy and long runs. If you're breathing too hard
+            to recite a sentence, you're going too fast. Most runners run their easy days too hard,
+            then can't hit the quality on their hard days.
+          </p>
+        </article>
+
+        <article class="gl-term" id="strides">
+          <h3>Strides <a class="gl-anchor" href="#strides" aria-label="Link to Strides">#</a></h3>
+          <p>
+            Short, smooth accelerations — about 20 seconds building to roughly 80% effort, then a full
+            jog or walk to recover before the next. Usually 4–6 of them tacked onto the end of an easy
+            run. They wake the legs up and sharpen form without adding real fatigue. Not sprints.
+          </p>
+        </article>
+
+        <article class="gl-term" id="tempo">
+          <h3>Tempo <a class="gl-anchor" href="#tempo" aria-label="Link to Tempo">#</a></h3>
+          <p>
+            A sustained, comfortably-hard effort at about RPE 6–7 — the pace where you can manage short
+            phrases but not full sentences. Tempo work trains you to hold a strong effort for longer.
+            It should feel controlled, not like a race.
+          </p>
+        </article>
+
+        <article class="gl-term" id="fartlek">
+          <h3>Fartlek <a class="gl-anchor" href="#fartlek" aria-label="Link to Fartlek">#</a></h3>
+          <p>
+            Swedish for "speed play." An easy run with surges thrown in whenever you feel like it —
+            30–60 seconds faster on a straight stretch, a hill, or a good song, then back to easy. No
+            timer, no structure. Same total distance as the easy run; you're just making decisions
+            during it instead of cruising.
+          </p>
+        </article>
+
+        <article class="gl-term" id="intervals">
+          <h3>Intervals <a class="gl-anchor" href="#intervals" aria-label="Link to Intervals">#</a></h3>
+          <p>
+            Repeated bursts of harder running separated by easy recovery — for example 5 × 3 minutes
+            hard with a jog between each. The recovery is the point: it lets you bank more total time at
+            a strong effort than you could in one continuous push.
+          </p>
+        </article>
+      </section>
+
+      <section class="gl-section">
+        <h2>Plan structure</h2>
+
+        <article class="gl-term" id="long-run">
+          <h3>Long run <a class="gl-anchor" href="#long-run" aria-label="Link to Long run">#</a></h3>
+          <p>
+            The longest run of your week and the backbone of endurance training. Run it easy (RPE 3–5)
+            unless told otherwise — the goal is time on your feet, not speed. It builds the aerobic
+            engine and durability that carry you through a race.
+          </p>
+        </article>
+
+        <article class="gl-term" id="easy-run">
+          <h3>
+            Easy / recovery run
+            <a class="gl-anchor" href="#easy-run" aria-label="Link to Easy or recovery run">#</a>
+          </h3>
+          <p>
+            A deliberately gentle run at conversational effort (RPE 3–5). Its job is to build aerobic
+            fitness and let you recover while still moving, not to tire you out. Run the easy ones easy
+            so you can run the hard ones hard.
+          </p>
+        </article>
+
+        <article class="gl-term" id="base">
+          <h3>Base <a class="gl-anchor" href="#base" aria-label="Link to Base">#</a></h3>
+          <p>
+            The early phase built on easy aerobic mileage, before much hard work goes in. It lays the
+            foundation — the aerobic and structural stuff like tendon resilience — that later speed work
+            sits on top of.
+          </p>
+        </article>
+
+        <article class="gl-term" id="build-phase">
+          <h3>Build <a class="gl-anchor" href="#build-phase" aria-label="Link to Build">#</a></h3>
+          <p>
+            The phase where weekly mileage and the long run grow and harder sessions like tempo and
+            intervals get added. It's the main stretch of training, between base and peak, where most of
+            the fitness gets constructed.
+          </p>
+        </article>
+
+        <article class="gl-term" id="peak">
+          <h3>Peak <a class="gl-anchor" href="#peak" aria-label="Link to Peak">#</a></h3>
+          <p>
+            The highest-volume, highest-intensity stretch of the plan, a few weeks out from the race.
+            It's the hardest training you'll do before the taper, where the biggest long runs and
+            toughest sessions land.
+          </p>
+        </article>
+
+        <article class="gl-term" id="taper">
+          <h3>Taper <a class="gl-anchor" href="#taper" aria-label="Link to Taper">#</a></h3>
+          <p>
+            The planned drop in training volume over the last one to three weeks before a race, so you
+            show up fresh. You keep a little intensity to stay sharp but cut the total load. Restless
+            legs during a taper are normal and usually mean it's working.
+          </p>
+        </article>
+
+        <article class="gl-term" id="cutback-week">
+          <h3>
+            Cutback week
+            <a class="gl-anchor" href="#cutback-week" aria-label="Link to Cutback week">#</a>
+          </h3>
+          <p>
+            A planned lighter week — lower mileage, shorter long run — dropped in every few weeks. It's
+            when the training you've already done actually sticks, by giving your body room to absorb
+            it. Treat it as mandatory; skipping cutbacks is how you dig a hole.
+          </p>
+        </article>
+
+        <article class="gl-term" id="shakeout">
+          <h3>Shakeout <a class="gl-anchor" href="#shakeout" aria-label="Link to Shakeout">#</a></h3>
+          <p>
+            A very short, very easy run — often 2–3 miles, sometimes with a few strides — a day or two
+            before a race. It loosens the legs and keeps you moving without adding fatigue. The opposite
+            of a workout.
+          </p>
+        </article>
+
+        <article class="gl-term" id="tune-up-race">
+          <h3>
+            Tune-up race
+            <a class="gl-anchor" href="#tune-up-race" aria-label="Link to Tune-up race">#</a>
+          </h3>
+          <p>
+            A smaller race run during training as preparation for your goal race. It's a chance to
+            rehearse pacing, fueling, and race-morning logistics, and to read your fitness — usually run
+            as a hard effort rather than an all-out peak.
+          </p>
+        </article>
+      </section>
+
+      <section class="gl-section">
+        <h2>Body &amp; recovery</h2>
+
+        <article class="gl-term" id="doms">
+          <h3>DOMS <a class="gl-anchor" href="#doms" aria-label="Link to DOMS">#</a></h3>
+          <p>
+            Delayed Onset Muscle Soreness — the stiffness and ache that show up a day or two after a
+            hard or unfamiliar session, especially one with a lot of downhill. It's normal and fades
+            within a few days; it isn't an injury. Easy movement helps more than sitting still.
+          </p>
+        </article>
+
+        <article class="gl-term" id="itb">
+          <h3>ITB <a class="gl-anchor" href="#itb" aria-label="Link to ITB">#</a></h3>
+          <p>
+            Iliotibial band — a thick band of connective tissue running down the outside of your thigh,
+            from hip to just below the knee. When it gets irritated it causes pain on the outer knee,
+            often on longer runs and steep downhills. It's common in runners and is usually managed with
+            strength work and load management, not stretching alone.
+          </p>
+        </article>
+
+        <article class="gl-term" id="niggle">
+          <h3>Niggle <a class="gl-anchor" href="#niggle" aria-label="Link to Niggle">#</a></h3>
+          <p>
+            A minor, nagging ache or tightness that isn't a real injury but is worth watching. Flagging
+            one early lets the plan adjust before it turns into something bigger. Sharp pain, swelling,
+            or anything that changes how you run is past this — that's a see-a-professional signal.
+          </p>
+        </article>
+
+        <article class="gl-term" id="prehab">
+          <h3>Prehab <a class="gl-anchor" href="#prehab" aria-label="Link to Prehab">#</a></h3>
+          <p>
+            Short for preventative rehab: the small routine of strength and mobility movements built
+            into your week to keep weak spots resilient and head off injury before it starts. Rehab is
+            the same idea aimed at something already bothering you. Daybreak keeps the set short and
+            targeted rather than a full gym session.
+          </p>
+        </article>
+
+        <article class="gl-term" id="readiness">
+          <h3>
+            Readiness &amp; soreness
+            <a class="gl-anchor" href="#readiness" aria-label="Link to Readiness and soreness">#</a>
+          </h3>
+          <p>
+            The two quick numbers Daybreak asks for on a check-in: readiness (1–10, how recovered and
+            ready to train you feel) and soreness (1–10, plus where, if anywhere). They let the coach
+            tune the day's run to how your body actually is, instead of only what the plan says.
+          </p>
+        </article>
+
+        <article class="gl-term" id="eccentric">
+          <h3>Eccentric <a class="gl-anchor" href="#eccentric" aria-label="Link to Eccentric">#</a></h3>
+          <p>
+            The lengthening phase of a muscle working under load — the lowering part of a heel drop, or
+            how your quads fire while braking on a downhill. Eccentric loading builds strength and
+            resilience, but it also causes more soreness, which is why long descents leave you sorer than
+            the climb.
+          </p>
+        </article>
+
+        <article class="gl-term" id="cadence">
+          <h3>Cadence <a class="gl-anchor" href="#cadence" aria-label="Link to Cadence">#</a></h3>
+          <p>
+            Your step rate — how many steps you take per minute. A lighter, quicker cadence, especially
+            on downhills, cuts braking and impact on the knees. It's a form cue, not a number to obsess
+            over.
+          </p>
+        </article>
+      </section>
+
+      <section class="gl-section">
+        <h2>Terrain &amp; fueling</h2>
+
+        <article class="gl-term" id="vert">
+          <h3>Vert <a class="gl-anchor" href="#vert" aria-label="Link to Vert">#</a></h3>
+          <p>
+            Short for vertical gain: the total elevation you climb over a run, in feet or meters. On
+            trails the vert often matters more than the distance — "4 miles with 2,000 ft of vert" is a
+            very different day than 4 flat miles.
+          </p>
+        </article>
+
+        <article class="gl-term" id="fueling">
+          <h3>Fueling <a class="gl-anchor" href="#fueling" aria-label="Link to Fueling">#</a></h3>
+          <p>
+            Glycogen is the carbohydrate your muscles and liver store for fuel, and it's the main energy
+            source for hard and long efforts — it starts running low after about 90 minutes. Fueling
+            means taking in carbs before and during longer runs, and topping up your stores beforehand,
+            so you don't hit the wall.
+          </p>
+        </article>
+      </section>
+    </main>
+
+    <footer>
+      <span>© 2026 Daybreak</span>
+      <span>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+        <a href="/support">Support</a>
+      </span>
+    </footer>
+  </body>
+</html>

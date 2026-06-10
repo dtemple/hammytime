@@ -9,6 +9,14 @@ const nextConfig: NextConfig = {
     '/api/calendar/[token]': ['./worker/knowledge/exercises.md'],
     '/prehab/[token]': ['./worker/knowledge/exercises.md'],
   },
+  async rewrites() {
+    return [
+      // Global reference page (Specs/PREHAB.md): /glossary is a plain static
+      // route. The page is a self-contained HTML document in public/, so serve
+      // it at the clean path rather than /glossary.html.
+      { source: '/glossary', destination: '/glossary.html' },
+    ];
+  },
   async headers() {
     return [
       {
