@@ -148,6 +148,10 @@ const RaceSchema = z
     elevation_gain_ft: z.number().nonnegative().optional(),
     goal: z.string().optional(), // "finish" | "time" | freeform
     target_time_sec: z.number().int().positive().optional(),
+    // True on the synthetic race the renderer fabricates for plans with no real
+    // race (keep_fit / intended-no-date) — the schema requires `race`, so those
+    // plans carry one. Athlete-visible surfaces must not render it.
+    placeholder: z.boolean().optional(),
   })
   .refine((r) => r.goal !== 'time' || r.target_time_sec !== undefined, {
     message: 'target_time_sec is required when goal is "time"',
@@ -303,3 +307,14 @@ export const PlanSchema = z
   );
 
 export type Plan = z.infer<typeof PlanSchema>;
+
+/**
+ * Whether metadata.race is the renderer's synthetic placeholder rather than a
+ * real race. The flag is authoritative on plans rendered after GF-W1; the name
+ * patterns cover versions persisted before the flag existed (the renderer has
+ * only ever fabricated these two names).
+ */
+export function isPlaceholderRace(race: Plan['metadata']['race']): boolean {
+  if (race.placeholder === true) return true;
+  return race.name === 'Ongoing base — no race set' || /^Goal .+ — date TBD$/.test(race.name);
+}

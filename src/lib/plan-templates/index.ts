@@ -9,6 +9,7 @@
 export * from './types';
 export * from './selector';
 export * from './renderer';
+export * from './continuation';
 export { DRAFT_SAFETY_CAPS } from './caps';
 
 import type { PlanTemplate, RenderParams, SafetyCaps, TemplateId } from './types';

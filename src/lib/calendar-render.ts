@@ -1,5 +1,5 @@
 import ical, { ICalCalendar } from 'ical-generator';
-import type { Plan } from './plan-schema';
+import { isPlaceholderRace, type Plan } from './plan-schema';
 import { planToCalendarEvents } from './calendar-events';
 
 type RenderInput = {
@@ -31,7 +31,11 @@ function applyCalendarMeta(cal: ICalCalendar, input: RenderInput): void {
   cal.ttl(60 * 60); // PT1H refresh hint
   if (input.plan) {
     const race = input.plan.metadata.race;
-    cal.description(`${race.name} · ${race.date}`);
+    // keep_fit / intended plans carry a synthetic metadata.race (the schema
+    // requires one) — its fabricated name·date must not surface here.
+    cal.description(
+      isPlaceholderRace(race) ? 'Rolling training plan — no race set' : `${race.name} · ${race.date}`,
+    );
   } else {
     cal.description('no active training plan.');
   }

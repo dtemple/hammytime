@@ -362,7 +362,10 @@ export function buildWeeks(
     // remainder to easy warm-up runs. The coach reasons about how to use the rest of the
     // week from here; this is just the safe baseline the preview shows.
     const isEaseInWeek =
-      wi === 0 && params.startDate >= weekMonday && params.startDate <= addDays(weekMonday, 6);
+      params.easeIn !== false &&
+      wi === 0 &&
+      params.startDate >= weekMonday &&
+      params.startDate <= addDays(weekMonday, 6);
 
     const roleByWeekday = assignWeekdays(
       pattern,
@@ -903,6 +906,9 @@ function assemblePlan(
         distance_miles: nominalRaceMiles(params.distance),
         type: params.terrain,
         goal: 'finish',
+        // Athlete-visible surfaces suppress placeholder races on this flag
+        // (isPlaceholderRace in plan-schema.ts).
+        placeholder: true,
       };
 
   // phases — group the allocation (covers weeks 1..N exactly once incl. cutback).

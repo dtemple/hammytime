@@ -121,6 +121,22 @@ This is one of their first messages with you, so use those two numbers. A long s
 The floor is your baseline; keep it. Float any extra runs as suggestions, and don't write them into marathon_training_plan.json until the athlete agrees, the same ask-first rule as any plan change. If you've already framed week 2 earlier in this thread, don't say it again — just carry on from there.`;
 }
 
+// Set on the one run right after the worker auto-extended an open-ended plan
+// (GF-W1, src/server/plan/extend.ts) so the morning message announces the new
+// block in the coach's voice instead of the calendar silently growing.
+export type PlanExtensionInfo = { newEndDate: string; blockWeeks: number };
+
+// Same empty-substitution pattern as {{ease_in_context}} — '' on every run
+// where no extension just happened.
+export function planExtensionContext(ext: PlanExtensionInfo | undefined): string {
+  if (!ext) return '';
+  return `## The plan was just extended
+
+Their rolling plan was running low on future days, so the system appended the next ${ext.blockWeeks}-week block this morning — the calendar now runs through ${ext.newEndDate}. The new weeks start from their current volume; the structure carries on, it's not a new plan.
+
+Mention it naturally in today's message — one or two sentences, in your voice: the next block is on the calendar and what its shape is (where the volume heads, where the cutback weeks land). Don't call it "the system" or describe the mechanics; it's you keeping their plan rolling. No confirmation needed from them — if they want it shaped differently, that's a normal plan-change conversation.`;
+}
+
 function distanceLabel(distance: string | null): string {
   switch (distance) {
     case '5k':
@@ -153,11 +169,22 @@ function goalLine(
         : 'finish';
     return `Goal race: ${parts.join(', ')}${detail.length ? ` — ${detail.join(', ')}` : ''}. Target: ${goal}.`;
   }
+  // No real race in both branches below — the plan file still carries a
+  // metadata.race because the schema requires one. It's a synthetic
+  // placeholder (renderer marks it), and the coach must never surface it.
+  const placeholderNote =
+    " The plan file's metadata.race is a schema-required placeholder, not a real race — never mention its name or date to the athlete.";
   if (mode === 'no_race') {
-    return "Goal: general fitness — no race on the calendar. Keep them consistent and healthy; build and hold an aerobic base. Don't push toward a peak or nudge them to pick a race unless they raise it.";
+    return (
+      "Goal: general fitness — no race on the calendar. Keep them consistent and healthy; build and hold an aerobic base. Don't push toward a peak or nudge them to pick a race unless they raise it." +
+      placeholderNote
+    );
   }
   if (mode === 'intended') {
-    return `Goal: a ${distanceLabel(profile?.goal_distance ?? null)} in mind — no race picked yet. Help them lock one when the timing's right; don't build a peak until a date binds.`;
+    return (
+      `Goal: a ${distanceLabel(profile?.goal_distance ?? null)} in mind — no race picked yet. Help them lock one when the timing's right; don't build a peak until a date binds.` +
+      placeholderNote
+    );
   }
   return 'Goal race: not set yet — confirm it before prescribing a build.';
 }
@@ -241,7 +268,11 @@ export function safetyCapsBlock(caps: SafetyCaps, distanceMi: number | null): st
   return lines.join('\n');
 }
 
-export async function renderSystemPrompt(athleteId: string, plan?: Plan | null): Promise<string> {
+export async function renderSystemPrompt(
+  athleteId: string,
+  plan?: Plan | null,
+  planExtension?: PlanExtensionInfo,
+): Promise<string> {
   const data = await loadAthleteData(athleteId);
   const template = await loadTemplate();
 
@@ -262,6 +293,7 @@ export async function renderSystemPrompt(athleteId: string, plan?: Plan | null):
     injury_history: injuryHistory(data.injuries),
     safety_caps: safetyCapsBlock(DRAFT_SAFETY_CAPS, data.goalRace?.distance_mi ?? null),
     ease_in_context: easeInContext(plan, today, data.goalRace),
+    plan_extension_context: planExtensionContext(planExtension),
     plan_shape_reference: PLAN_SHAPE_REFERENCE,
   };
 

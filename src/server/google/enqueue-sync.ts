@@ -8,6 +8,7 @@ export type CalendarSyncReason =
   | 'promotion'
   | 'plan_gen'
   | 'strength_zero'
+  | 'plan_extend' // GF-W1 — enqueued inline in src/server/plan/extend.ts (worker-safe, no Sentry import)
   | 'nightly';
 
 /**

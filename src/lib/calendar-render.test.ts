@@ -121,6 +121,51 @@ describe('renderPlanIcs', () => {
     expect(birdDog).not.toMatch(/https?:\/\//);
   });
 
+  it('shows the real race in the calendar description', () => {
+    const ics = renderPlanIcs({
+      athleteName: 'David',
+      timezone: 'America/Los_Angeles',
+      plan: seedPlan,
+      planId: 'pv',
+      planStartDate: '2026-03-30',
+    });
+    expect(ics).toContain(seedPlan.metadata.race.name);
+  });
+
+  it('suppresses the synthetic placeholder race from the description (keep_fit / intended)', () => {
+    for (const name of ['Ongoing base — no race set', 'Goal 5k — date TBD']) {
+      const plan = PlanSchema.parse({
+        ...rawSeed,
+        metadata: { ...rawSeed.metadata, race: { ...rawSeed.metadata.race, name } },
+      });
+      const ics = renderPlanIcs({
+        athleteName: 'Sam',
+        timezone: 'America/Los_Angeles',
+        plan,
+        planId: 'pv',
+        planStartDate: '2026-03-30',
+      });
+      expect(ics).toContain('Rolling training plan — no race set');
+      expect(ics).not.toContain(name.split(' — ')[0]); // neither name nor its fake date line
+    }
+    // The flag alone also suppresses, independent of the name.
+    const flagged = PlanSchema.parse({
+      ...rawSeed,
+      metadata: {
+        ...rawSeed.metadata,
+        race: { ...rawSeed.metadata.race, placeholder: true },
+      },
+    });
+    const ics = renderPlanIcs({
+      athleteName: 'Sam',
+      timezone: 'America/Los_Angeles',
+      plan: flagged,
+      planId: 'pv',
+      planStartDate: '2026-03-30',
+    });
+    expect(ics).toContain('Rolling training plan — no race set');
+  });
+
   it('snapshot of the rendered calendar', () => {
     const ics = renderPlanIcs({
       athleteName: 'David',

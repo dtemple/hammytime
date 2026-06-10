@@ -963,6 +963,16 @@ export type Database = {
         }
         Returns: string
       }
+      record_plan_extension: {
+        Args: {
+          p_plan_id: string
+          p_plan_json: Json
+          p_start_date: string
+          p_supersedes_version_id: string
+          p_total_weeks: number
+        }
+        Returns: string
+      }
       reset_athlete_onboarding: {
         Args: { p_athlete_id: string }
         Returns: undefined

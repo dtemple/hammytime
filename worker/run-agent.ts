@@ -21,9 +21,20 @@ import {
   sendReply,
   startTyping,
 } from './send';
-import { buildPrompt, loadRecentHistory, renderSystemPrompt } from './system-prompt';
+import {
+  buildPrompt,
+  loadRecentHistory,
+  renderSystemPrompt,
+  type PlanExtensionInfo,
+} from './system-prompt';
 
 export type RunSource = 'daily_checkin' | 'tg_message' | 'post_activity';
+
+export type RunOpts = {
+  // Set by daily-checkin when the plan was auto-extended just before this run
+  // (GF-W1) — rides into the system prompt so the coach announces the block.
+  planExtension?: PlanExtensionInfo;
+};
 
 const SOURCE_TO_KIND: Record<RunSource, RunKind> = {
   daily_checkin: 'daily',
@@ -49,6 +60,7 @@ export async function runAgent(
   source: RunSource,
   message?: string,
   activityId?: number,
+  opts?: RunOpts,
 ): Promise<void> {
   const startedAt = new Date().toISOString();
   const { timezone, name } = await loadAthleteMeta(athleteId);
@@ -75,7 +87,7 @@ export async function runAgent(
   const steps: CapturedStep[] = [];
 
   try {
-    const systemPrompt = await renderSystemPrompt(athleteId, folder.plan);
+    const systemPrompt = await renderSystemPrompt(athleteId, folder.plan, opts?.planExtension);
     const history = await loadRecentHistory(athleteId);
     const prompt = buildPrompt(source, timezone, message, history, activityId);
 

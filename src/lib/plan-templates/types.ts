@@ -246,6 +246,12 @@ export interface RenderParams {
   startDate: string; // ISO; athlete-local "today"
   totalWeeks: number | null; // null => open-ended (A4b "no date yet")
   race: RenderRace | null; // present when goal_state = 'committed'
+  /** Week-1 ease-in opt-out. Default (absent/true): when startDate falls inside
+   *  week 1, that week is a partial ease-in (mid-week onboarding). A plan
+   *  continuation rendered ahead of time (GF-W1) starts on a future Monday —
+   *  startDate equals the week-1 Monday, which WOULD match the ease-in
+   *  condition — so it passes false to get a normal full week 1. */
+  easeIn?: boolean;
 
   // Volume — computed from the Strava snapshot, clamped to template + caps
   startVolumeMi: number;

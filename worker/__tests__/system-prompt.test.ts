@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { buildPrompt, safetyCapsBlock, renderSystemPrompt, easeInContext } from '../system-prompt';
+import {
+  buildPrompt,
+  safetyCapsBlock,
+  renderSystemPrompt,
+  easeInContext,
+  planExtensionContext,
+} from '../system-prompt';
 import { DRAFT_SAFETY_CAPS } from '@/lib/plan-templates/caps';
 import type { Plan } from '@/lib/plan-schema';
 
@@ -199,11 +205,72 @@ describe('renderSystemPrompt — three-way goal branch (V3-W7)', () => {
     expect(out).toContain('effort-led');
   });
 
+  it('no-race + intended: warned off the plan file placeholder race; committed is not', async () => {
+    for (const p of [profile('day_to_day', 'keep_fit'), profile('intended', 'half')]) {
+      mockLoadAthleteData.mockResolvedValueOnce(loaded({ trainingProfile: p }));
+      const out = await renderSystemPrompt('a1');
+      expect(out).toContain('schema-required placeholder');
+    }
+    mockLoadAthleteData.mockResolvedValueOnce(
+      loaded({ goalRace: committedRace, trainingProfile: profile('committed', 'marathon') }),
+    );
+    expect(await renderSystemPrompt('a1')).not.toContain('schema-required placeholder');
+  });
+
   it('legacy athlete with no profile: preserves the old "not set yet" line', async () => {
     mockLoadAthleteData.mockResolvedValueOnce(loaded({}));
     const out = await renderSystemPrompt('a1');
     expect(out).toContain('# Marathon coach');
     expect(out).toContain('Goal race: not set yet');
+  });
+});
+
+describe('planExtensionContext — announce-the-new-block signal (GF-W1)', () => {
+  it('empty on every run without a just-landed extension', () => {
+    expect(planExtensionContext(undefined)).toBe('');
+  });
+
+  it('carries the new end date and block size, no residual placeholders', () => {
+    const out = planExtensionContext({ newEndDate: '2026-09-27', blockWeeks: 8 });
+    expect(out).toContain('2026-09-27');
+    expect(out).toContain('8-week block');
+    expect(out).not.toContain('{{');
+  });
+
+  it('renders into the system prompt when passed through renderSystemPrompt', async () => {
+    mockLoadAthleteData.mockResolvedValueOnce({
+      athlete: {
+        id: 'a1',
+        name: 'Sam',
+        dob: '1990-01-01',
+        sex: 'M',
+        timezone: TZ,
+        notes: null,
+        asthma: false,
+        telegram_chat_id: '123',
+      },
+      goalRace: null,
+      tuneupRaces: [],
+      pastRace: null,
+      injuries: [],
+      profileMd: '',
+      trainingProfile: {
+        athlete_id: 'a1',
+        goal_type: 'day_to_day',
+        goal_state: 'day_to_day',
+        goal_distance: 'keep_fit',
+        experience_tier: 'some_training',
+        days_per_week: 4,
+        long_run_day: 0,
+        target_date: null,
+        goal_race_id: null,
+        created_at: '2026-06-01',
+        updated_at: '2026-06-01',
+      },
+    });
+    const out = await renderSystemPrompt('a1', null, { newEndDate: '2026-09-27', blockWeeks: 8 });
+    expect(out).toContain('The plan was just extended');
+    expect(out).toContain('2026-09-27');
   });
 });
 

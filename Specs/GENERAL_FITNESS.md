@@ -23,7 +23,7 @@ core race product. That makes two transitions (race → fitness, fitness → rac
 load-bearing, and it makes the no-race daily experience worth designing on its
 own terms rather than inheriting race framing.
 
-## 2. Current state (verified 2026-06-10)
+## 2. Current state (verified 2026-06-10; GF-W1 shipped same day — see CHANGELOG v0.7.32)
 
 - **Plan.** `base-maintenance` (`src/lib/plan-templates/templates/base-maintenance.ts`):
   open-ended base+build, cutback every 4 weeks, 35 mi peak cap, 14 mi long-run
@@ -40,14 +40,20 @@ own terms rather than inheriting race framing.
   in `worker/prompts/coach.md` (status → today's workout → follow-ups → prehab
   → risk flags), the post-activity note, the plan propose/confirm flow
   (`worker/plan-version.ts` → `propose_plan_edit` RPC → athlete Yes/No tap).
-- **Nothing extends an exhausted open-ended plan.** The template comment says
-  "the daily coach extends or anchors it"; no code or prompt does this.
+- **GF-W1 shipped (2026-06-10, v0.7.32): open-ended plans now auto-extend.**
+  At the top of each `daily_checkin` job, `extendPlanIfDue`
+  (`src/server/plan/extend.ts`) appends the next rendered block when ≤ 14 dated
+  days remain, auto-publishes via the `record_plan_extension` RPC (re-baselines),
+  and the coach announces the block via `{{plan_extension_context}}`. Pure merge
+  logic: `src/lib/plan-templates/continuation.ts`.
 - **Race binding is deferred in both directions.** Fitness → race re-plan was
   deferred in v0.7.15 ("late race-binding re-plan" + `/setrace`); race →
   fitness rollover has never been specced.
 - **Placeholder race.** PlanSchema requires `metadata.race`, so keep_fit plans
   carry a synthetic placeholder (selector `DISTANCE_MILES.keep_fit = 5`).
-  Whether anything athlete-visible renders it is unverified (GF-W1 audits this).
+  Audited in GF-W1: the one leak (ICS calendar description) is fixed; the
+  renderer now marks placeholders (`metadata.race.placeholder`, with
+  `isPlaceholderRace` name-fallback for pre-flag plans).
 
 ## 3. Locks respected
 
@@ -73,7 +79,14 @@ in place to have anything to nudge toward.
 
 ---
 
-### GF-W1 — Open-ended plan extension (fix first)
+### GF-W1 — Open-ended plan extension (fix first) — **SHIPPED 2026-06-10 (v0.7.32)**
+
+> Built as designed, with five build-time corrections recorded in the CHANGELOG
+> entry: an `easeIn` render opt-out (the "falls out free" claim below was wrong
+> — a future-Monday start DOES match the ease-in condition), strength-opt-out
+> carry-forward from the working plan, stale-`target_date` nulling for intended
+> athletes, plan-derived snapshot fallback when Strava is broken, and a David
+> alert on extension failure. Decision (a) — auto-publish — confirmed.
 
 **Problem.** A keep_fit athlete's plan ends after 8 weeks. At week 9 the plan
 file has no future days, the subscribed calendar goes empty, `plan_drift.md`
@@ -420,6 +433,11 @@ other Fly-only prompt (W2 is the natural host if W4 is already live).
 - **Drift threshold / off-track alerts** — still deferred (v0.7.11), and
   GF-W1's re-baseline-on-extension reduces how much drift accumulates for
   keep_fit athletes anyway.
+- **Unbounded plan growth (named at GF-W1 ship time).** Each extension appends
+  8 weeks (~every 6 weeks of wall time), so the working plan JSON grows without
+  bound — coach context, ICS size, and hydrate cost creep. Fine at friend scale
+  for a year-plus; pruning old weeks tensions with keeping past calendar events
+  (UIDs key on week numbers). Revisit when a plan passes ~40 weeks.
 - **Per-athlete-local recap/daily timing** — same deferral as the daily cron.
 - **The eval harness (V3-W5)** is unaffected, but note: W2's prompt changes
   are exactly the kind of `coach.md` edit the v0.7.19 coaching-quality harness
@@ -428,8 +446,8 @@ other Fly-only prompt (W2 is the natural host if W4 is already live).
 
 ## 6. Open questions for David
 
-1. **GF-W1 decision** — auto-publish continuations (recommended) or
-   propose/confirm?
+1. ~~**GF-W1 decision** — auto-publish continuations (recommended) or
+   propose/confirm?~~ **Decided 2026-06-10: auto-publish. Shipped.**
 2. **GF-W3 decision** — offer-and-wait after a race (recommended) or
    auto-roll to maintenance after 14 days of silence?
 3. **GF-W4 decision** — binding through `/edit_profile` only (recommended) or
@@ -444,7 +462,7 @@ other Fly-only prompt (W2 is the natural host if W4 is already live).
 
 | Order | Workstream | Size | Deploy | Depends on |
 |-------|-----------|------|--------|------------|
-| 1 | GF-W1 extension + placeholder audit | M | Fly + Vercel | — |
+| 1 | ~~GF-W1 extension + placeholder audit~~ **shipped v0.7.32** | M | Fly + Vercel | — |
 | 2 | GF-W2 daily narrative | S | Fly | — |
 | 3 | GF-W3 race → fitness rollover | L | both | W1 |
 | 4 | GF-W4 fitness → race binding | M–L | both | — |
