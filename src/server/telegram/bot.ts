@@ -450,12 +450,12 @@ export async function handlePrehabCommand(ctx: CommandContext<Context>): Promise
 
 // Shared by the /calendar command and the onboarding next-action [Add to calendar].
 // Two paths to a synced calendar: Google OAuth direct-write (real-time, one tap)
-// and the ICS subscribe link for everyone else (Specs/CALENDAR_OAUTH.md). Both
-// are offered; the athlete picks. An existing Google ICS subscription keeps
-// working — connecting is opt-in.
+// and the ICS subscribe link for everyone else (Specs/CALENDAR_OAUTH.md). Rather
+// than explain both up front, ask which calendar they use — the Google button
+// links out to connect, the other tap answers with the subscribe link
+// (handleCalendarPick). An existing Google ICS subscription keeps working —
+// connecting is opt-in.
 async function sendCalendarMessage(athleteId: string, chatId: number | string): Promise<void> {
-  const { url } = await getOrCreateCalendarToken(athleteId);
-
   const { data: googleRow } = await supabaseAdmin()
     .from('oauth_tokens')
     .select('id')
@@ -464,6 +464,7 @@ async function sendCalendarMessage(athleteId: string, chatId: number | string): 
     .maybeSingle();
 
   if (googleRow) {
+    const { url } = await getOrCreateCalendarToken(athleteId);
     await sendAndLog(
       athleteId,
       chatId,
@@ -479,20 +480,11 @@ async function sendCalendarMessage(athleteId: string, chatId: number | string): 
     return;
   }
 
-  const text = [
-    'Two ways to get your plan on a calendar:',
-    '',
-    'Google Calendar — tap the button below. A "Daybreak — training" calendar appears in your Google account and plan changes land within seconds.',
-    '',
-    'Apple Calendar, Outlook, anything else — subscribe to this link:',
-    url,
-    '• Apple Calendar — File → New Calendar Subscription → paste URL',
-    '• Outlook — Add calendar → Subscribe from web → paste URL',
-    '',
-    'Workouts appear on their day. Both update automatically when your plan changes.',
-  ].join('\n');
-
-  const keyboard = new InlineKeyboard().url('Connect Google Calendar', googleConnectUrl(athleteId));
+  const text = 'Which calendar do you use?';
+  const keyboard = new InlineKeyboard()
+    .url('Google Calendar', googleConnectUrl(athleteId))
+    .row()
+    .text('Apple Calendar, Outlook, anything else', 'calpick:ics');
   await getBot().api.sendMessage(chatId, text, { reply_markup: keyboard });
   await supabaseAdmin().from('messages').insert({
     athlete_id: athleteId,
@@ -500,6 +492,45 @@ async function sendCalendarMessage(athleteId: string, chatId: number | string): 
     direction: 'out',
     body: text,
   });
+}
+
+// The "Apple Calendar, Outlook, anything else" tap from the calendar picker —
+// answers with the ICS subscribe link. The Google button on the same keyboard
+// is a URL button and never reaches the webhook.
+export async function handleCalendarPick(
+  ctx: Context,
+  athlete: AthleteRow,
+  data: string,
+): Promise<void> {
+  const chatId = ctx.chat?.id ?? ctx.from!.id;
+
+  const msg = ctx.callbackQuery?.message;
+  const rows = msg && 'reply_markup' in msg ? msg.reply_markup?.inline_keyboard : undefined;
+  await supabaseAdmin()
+    .from('messages')
+    .insert({
+      athlete_id: athlete.id,
+      channel: 'tg',
+      direction: 'in',
+      body: labelForTap(rows, data) ?? data,
+    });
+
+  await ctx.answerCallbackQuery();
+
+  const { url } = await getOrCreateCalendarToken(athlete.id);
+  await sendAndLog(
+    athlete.id,
+    chatId,
+    [
+      'Subscribe to this link:',
+      url,
+      '',
+      'Apple Calendar — File → New Calendar Subscription → paste URL',
+      'Outlook — Add calendar → Subscribe from web → paste URL',
+      '',
+      'Workouts appear on their day and update automatically when your plan changes.',
+    ].join('\n'),
+  );
 }
 
 // Phase D next-actions, tapped after onboarding is terminal (so they can't route
@@ -1043,6 +1074,13 @@ function getBot(): Bot {
       // also route ahead of the onboarding-state gates below.
       if (data.startsWith('cal:')) {
         await handleCalendarConfirm(ctx, athlete, data);
+        return;
+      }
+
+      // Calendar-picker taps (the Apple/Outlook/other button on /calendar) —
+      // same post-onboarding routing as cal: above.
+      if (data.startsWith('calpick:')) {
+        await handleCalendarPick(ctx, athlete, data);
         return;
       }
 

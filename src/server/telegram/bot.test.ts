@@ -25,10 +25,20 @@ vi.mock('child_process', () => ({ execSync: vi.fn().mockReturnValue('abc1234 —
 vi.mock('grammy', () => ({
   Bot: vi.fn(),
   Context: vi.fn(),
+  // Mirrors grammy's row-building: url/text append to the current row, row()
+  // starts a new one.
   InlineKeyboard: class {
-    inline_keyboard: { text: string; url: string }[][] = [];
+    inline_keyboard: { text: string; url?: string; callback_data?: string }[][] = [[]];
     url(text: string, url: string) {
-      this.inline_keyboard.push([{ text, url }]);
+      this.inline_keyboard[this.inline_keyboard.length - 1]!.push({ text, url });
+      return this;
+    }
+    text(text: string, callback_data: string) {
+      this.inline_keyboard[this.inline_keyboard.length - 1]!.push({ text, callback_data });
+      return this;
+    }
+    row() {
+      this.inline_keyboard.push([]);
       return this;
     }
   },
@@ -64,6 +74,7 @@ import {
   handleDisconnectCalendarCommand,
   handleNextAction,
   handleCalendarConfirm,
+  handleCalendarPick,
   _resetBotForTest,
 } from './bot';
 
@@ -839,25 +850,28 @@ describe('calendar message via next:calendar', () => {
     });
   }
 
-  it('offers the Connect Google Calendar button plus the ICS link when not connected', async () => {
+  it('asks which calendar with the two-button picker when not connected', async () => {
     const { sendMessageMock } = setup(false);
 
     await handleNextAction(calCtx() as AnyMock, { id: ATHLETE_ID } as AnyMock, 'next:calendar');
 
     expect(sendMessageMock).toHaveBeenCalledOnce();
     const [, text, opts] = (sendMessageMock as AnyMock).mock.calls[0];
-    expect(text).toContain('https://daybreak.run/api/calendar/cal-tok.ics');
-    expect(text).toContain('Apple Calendar');
-    const buttons = opts.reply_markup.inline_keyboard.flat();
-    expect(buttons).toEqual([
-      {
-        text: 'Connect Google Calendar',
-        url: `https://daybreak.run/google/connect?athlete_id=${ATHLETE_ID}`,
-      },
+    expect(text).toBe('Which calendar do you use?');
+    // No wall of text — the ICS link arrives only after the athlete picks.
+    expect(text).not.toContain('.ics');
+    expect(opts.reply_markup.inline_keyboard).toEqual([
+      [
+        {
+          text: 'Google Calendar',
+          url: `https://daybreak.run/google/connect?athlete_id=${ATHLETE_ID}`,
+        },
+      ],
+      [{ text: 'Apple Calendar, Outlook, anything else', callback_data: 'calpick:ics' }],
     ]);
   });
 
-  it('shows connected state (no button) once Google is connected', async () => {
+  it('shows connected state (no picker) once Google is connected', async () => {
     const { sendMessageMock } = setup(true);
 
     await handleNextAction(calCtx() as AnyMock, { id: ATHLETE_ID } as AnyMock, 'next:calendar');
@@ -866,6 +880,32 @@ describe('calendar message via next:calendar', () => {
     expect(text).toContain('Google Calendar: connected');
     expect(text).toContain('https://daybreak.run/api/calendar/cal-tok.ics');
     expect(text).toContain('/disconnect_calendar');
+    expect(opts).toBeUndefined();
+  });
+
+  it('answers the Apple/Outlook/other tap with the subscribe link', async () => {
+    const { sendMessageMock } = setup(false);
+    const answerCallbackQuery = vi.fn().mockResolvedValue(undefined);
+    const ctx = makeCtx({
+      answerCallbackQuery,
+      callbackQuery: {
+        message: {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: 'Apple Calendar, Outlook, anything else', callback_data: 'calpick:ics' }],
+            ],
+          },
+        },
+      },
+    });
+
+    await handleCalendarPick(ctx as AnyMock, { id: ATHLETE_ID } as AnyMock, 'calpick:ics');
+
+    expect(answerCallbackQuery).toHaveBeenCalled();
+    const [, text, opts] = (sendMessageMock as AnyMock).mock.calls[0];
+    expect(text).toContain('https://daybreak.run/api/calendar/cal-tok.ics');
+    expect(text).toContain('Apple Calendar — File → New Calendar Subscription');
+    expect(text).toContain('Outlook — Add calendar → Subscribe from web');
     expect(opts).toBeUndefined();
   });
 });
