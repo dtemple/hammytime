@@ -43,9 +43,9 @@ own terms rather than inheriting race framing.
   `goal_state='day_to_day'` athletes. The one live keep_fit athlete (Anjie,
   v2-onboarded 2026-06-04) carries `goal_type='race'` /
   `goal_state='intended'` / `goal_distance='keep_fit'` + a stale
-  `target_date` — a combo current v3 code can't produce. She coaches in
-  `intended` mode and gets none of the no_race behavior until her row is
-  fixed (see open question 6).
+  `target_date` — a combo current v3 code can't produce. **Resolved
+  2026-06-10: row fixed to `day_to_day`/`day_to_day`/null (open question 6);
+  she now renders the full no_race prompt.**
 - **Everything downstream is shared:** "What a daily coaching run looks like"
   in `worker/prompts/coach.md` (status → today's workout → follow-ups → prehab
   → risk flags), the post-activity note, the plan propose/confirm flow
@@ -483,16 +483,18 @@ other Fly-only prompt (W2 is the natural host if W4 is already live).
    (trail-friendly, effort-led); a mile time trial is the sharper signal but
    needs a track/flat road and reads more race-like than the audience wants.
    Worth a gut check against the actual friend cohort.
-6. **Anjie's profile row (found at GF-W2 build time)** — she's the only live
-   keep_fit athlete, but her v2-era row reads `goal_type='race'` /
-   `goal_state='intended'` / `goal_distance='keep_fit'` with a stale
-   `target_date` (2026-07-30), so she coaches in `intended` mode ("a race in
-   mind — no race picked yet") and never sees the no_race behavior (W7's or
-   W2's). Recommended fix: one-row update to `goal_type='day_to_day'`,
-   `goal_state='day_to_day'`, `target_date=null` — matching what v3 onboarding
-   would have written. Alternative (not recommended): broaden `coachMode()` to
-   treat `goal_distance='keep_fit'` as no_race regardless of `goal_state`,
-   which papers over inconsistent data with a second source of truth.
+6. ~~**Anjie's profile row (found at GF-W2 build time)** — recommended fix:
+   one-row update to `goal_type='day_to_day'`, `goal_state='day_to_day'`,
+   `target_date=null`.~~ **Decided 2026-06-10 (David: "her intention is
+   general fitness, not a race") and applied to prod same day — she now
+   renders the full no_race prompt (verified via
+   `scripts/render-system-prompt.ts`, incl. her real 5 runs/week target).
+   One leftover: her v2-seeded `known_gaps.md` still carries an
+   `[open] target_time` line (race-only by definition); removal was proposed
+   but is athlete memory-file data beyond the approved fix — David to remove
+   or have the coach retire it. Her real Broken Arrow 11K entry (June 20) is
+   correct and stays; no_race coaching handles one-off races via
+   `race_calendar.md` fine.**
 
 ## 7. Sequencing summary
 
