@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import QRCode from 'qrcode';
 import { supabaseAdmin } from '@/lib/db';
+import { sendDavidAlert } from '@/server/admin/alerts';
 import { SiteShell } from '@/components/SiteShell';
 
 /**
@@ -40,6 +41,14 @@ async function joinWaitlist(formData: FormData) {
   const db = supabaseAdmin();
   // Idempotent: a repeat request just refreshes the note. See the `waitlist`
   // migration (20260603000001_waitlist.sql). Unique constraint on email.
+  // Check existence first so a repeat submission (just a goal edit) doesn't
+  // re-alert David.
+  const { data: existing } = await db
+    .from('waitlist')
+    .select('email')
+    .eq('email', email)
+    .maybeSingle();
+
   const { error } = await db
     .from('waitlist')
     .upsert({ email, goal: goal || null }, { onConflict: 'email' });
@@ -47,6 +56,18 @@ async function joinWaitlist(formData: FormData) {
   if (error) {
     throw new Error(`Failed to add to waitlist: ${error.message}`);
   }
+
+  if (!existing) {
+    try {
+      await sendDavidAlert(
+        `New waitlist signup: ${email}${goal ? `\nTraining for: ${goal}` : ''}`,
+      );
+    } catch (err) {
+      // A failed alert shouldn't block the signup confirmation.
+      console.error('[signup] waitlist alert failed', err);
+    }
+  }
+
   redirect('/signup?done=1');
 }
 
