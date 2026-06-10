@@ -19,22 +19,22 @@ the cues, and use the canonical link.
 - **Linking etiquette in chat:** link the exercise *name* to its `source` the first time it comes
   up in a message — every message it comes up in, once per exercise per message. Don't paste the
   raw URL.
-- The `source` for each entry is the page that *demonstrates* the movement (video + written
-  technique). Most are E3 Rehab articles; four (front plank, dead bug, single-leg glute bridge,
-  eccentric heel drop) are curated YouTube videos.
-  Several E3 articles are named after an injury (e.g. Achilles tendinopathy) — that's where E3
-  teaches that exercise, and it's fine to link it; it also explains the "why."
+- The `source` for each entry is a YouTube video that *demonstrates* the movement. Most are
+  single-movement demos from the **E3 Rehab Exercise Library** channel; a few are other E3 Rehab
+  videos or individually curated clips (front plank, dead bug, single-leg glute bridge, eccentric
+  heel drop, Nordic curl, pogo hops).
 
 ## Source
 
-Primary source: **E3 Rehab** (e3rehab.com) — Doctors of Physical Therapy, evidence-based, free.
-Secondary (sanctioned) for runner-specific gaps: **Kinetic Revolution / James Dunne**
-(kinetic-revolution.com). Four entries use individually curated YouTube videos (front plank, dead
-bug, single-leg glute bridge, eccentric heel drop). No other sources without sign-off.
+Primary source: **E3 Rehab** (youtube.com/@e3rehabexerciselibrary, e3rehab.com) — Doctors of
+Physical Therapy, evidence-based, free. Every entry now links to a demonstration video, most from
+the E3 Rehab Exercise Library channel; a handful are other curated YouTube clips (front plank, dead
+bug, single-leg glute bridge, eccentric heel drop, Nordic curl, pogo hops). Secondary (sanctioned)
+for runner-specific gaps: **Kinetic Revolution / James Dunne** (kinetic-revolution.com). No other
+sources without sign-off.
 
-All E3 links last verified live + content-matched: **2026-06-02**. The YouTube links were
-provided/curated by David (single-leg glute bridge + eccentric heel drop swapped from E3 articles
-2026-06-03).
+The remaining E3 article links were swapped for YouTube demo videos **2026-06-10** (matches verified
+by David). Earlier YouTube swaps: single-leg glute bridge + eccentric heel drop (2026-06-03).
 
 ## Deferred
 
@@ -104,28 +104,28 @@ provided/curated by David (single-leg glute bridge + eccentric heel drop swapped
 - region: knee / quad
 - targets: quad + patellar tendon load with low knee-joint stress (knee-friendly)
 - cues: loop a strong band/strap around the backs of the knees, anchored to a rack; sit back until hips and knees are ~90°; hold (e.g. 3–5 × 45s at ~7/10 effort).
-- source: https://e3rehab.com/patellartendinopathy/
+- source: https://www.youtube.com/watch?v=Aq-QrVYZ-Vc
 
 ### 9. Lateral step-down
 - id: lateral-step-down
 - region: knee / quad
 - targets: eccentric quad control, knee tracking
 - cues: stand on a step, slowly bend the stance knee and lightly tap the opposite heel to the floor, then back up; chest upright, let the knee travel over the toes; control the lowering.
-- source: https://e3rehab.com/pfp/
+- source: https://www.youtube.com/watch?v=_r_vsI64pyw
 
 ### 10. Goblet squat
 - id: goblet-squat
 - region: knee / quad (foundational)
 - targets: foundational bilateral leg strength
 - cues: hold a kettlebell/dumbbell at the chest; sit down between the hips with a flat low back; heels-elevated biases the quads, an upright trunk with depth biases the glutes.
-- source: https://e3rehab.com/how-to-grow-your-glutes/
+- source: https://www.youtube.com/watch?v=_oZYSM-5ZEs
 
 ### 11. Bulgarian (rear-foot-elevated) split squat
 - id: bulgarian-split-squat
 - region: knee / quad / glute
 - targets: unilateral quad/glute strength, side-to-side imbalance
 - cues: back foot on a bench, "laces down"; most weight (70–90%) through the front leg; tap the back knee toward the floor — the bottom of the range is where the value is; film yourself for feedback.
-- source: https://e3rehab.com/how-to-perform-split-squats/
+- source: https://www.youtube.com/watch?v=tcEAeBjSkHI
 
 ## Hip / glute
 
@@ -141,28 +141,28 @@ provided/curated by David (single-leg glute bridge + eccentric heel drop swapped
 - region: hip / glute medius
 - targets: gluteus medius — hip/pelvis control (hip drop, IT band)
 - cues: keep the top leg in line with the trunk or slightly behind, hip in neutral or slight internal rotation; lift under control; add an ankle weight or band; on a bench for more range.
-- source: https://e3rehab.com/how-to-train-your-gluteus-medius/
+- source: https://www.youtube.com/watch?v=s6lDpy4AO6w
 
 ### 14. Banded lateral walk
 - id: banded-lateral-walk
 - region: hip / glute medius
 - targets: gluteus medius under continuous tension
 - cues: band around the knees, ankles, or feet; athletic half-squat stance; step sideways keeping tension the whole time; don't let the knees cave in.
-- source: https://e3rehab.com/how-to-train-your-gluteus-medius/
+- source: https://www.youtube.com/watch?v=0cahZCQAR4g
 
 ### 15. Single-leg RDL
 - id: single-leg-rdl
 - region: hip / hamstring (+ balance)
 - targets: posterior chain, hip-hinge control, balance
 - cues: slight bend in the stance knee, hinge at the hip with a flat back until the trunk is ~parallel to the floor, then squeeze back up; hold a rack/dumbbell for balance so the hamstring stays the focus.
-- source: https://e3rehab.com/how-to-grow-your-hamstrings/
+- source: https://www.youtube.com/watch?v=YKVi-BsdKw4
 
 ### 16. Hip thrust
 - id: hip-thrust
 - region: hip / glute
 - targets: maximal glute strength
 - cues: upper back on a bench, knees at ~90° at the top, squeeze the glutes; minimize bending/arching the lower back; feet flat, hip-width.
-- source: https://e3rehab.com/how-to-grow-your-glutes/
+- source: https://www.youtube.com/watch?v=QatGP6bFeEg
 
 ## Hamstring
 
@@ -171,21 +171,21 @@ provided/curated by David (single-leg glute bridge + eccentric heel drop swapped
 - region: hamstring
 - targets: eccentric hamstring strength — strain prevention
 - cues: kneel on a pad with feet anchored; keep a straight line from knees to shoulders; lower slowly, resisting the fall forward; catch with the hands. It's brutal — start eccentric-only with a short range or band assistance.
-- source: https://e3rehab.com/how-to-grow-your-hamstrings/
+- source: https://www.youtube.com/watch?v=9TemDaazL8A
 
 ### 18. Romanian deadlift (RDL)
 - id: romanian-deadlift
 - region: hamstring / posterior chain
 - targets: posterior-chain strength (hamstrings, glutes)
 - cues: from standing, push the hips back and lower the bar/dumbbells close to the shins with a flat low back and a slight knee bend; feel the hamstring stretch near the bottom; don't round the back.
-- source: https://e3rehab.com/how-to-grow-your-hamstrings/
+- source: https://www.youtube.com/watch?v=F5ZGAP-ZMaI
 
 ### 19. Slider / supine hamstring curl
 - id: slider-hamstring-curl
 - region: hamstring
 - targets: unilateral hamstring capacity (knee-flexion action)
 - cues: on your back, bridge up, slide the heels out while keeping the hips extended, then pull back in; progress double-leg → single-leg, and eccentric-only → full range.
-- source: https://e3rehab.com/how-to-grow-your-hamstrings/
+- source: https://www.youtube.com/watch?v=uHDLEITrSQU
 
 ## Adductor / groin
 
@@ -194,7 +194,7 @@ provided/curated by David (single-leg glute bridge + eccentric heel drop swapped
 - region: adductor / groin
 - targets: adductor strength — a high runner-injury site
 - cues: top leg supported on a bench, bottom leg underneath; lift the hips into a straight line with the legs together; lower slowly and tap, don't rest on the floor; regress by bending the top knee (support nearer the knee).
-- source: https://e3rehab.com/how-to-perform-copenhagen-planks/
+- source: https://www.youtube.com/watch?v=aDsaGBnvDQo
 
 ## Core / trunk
 
@@ -203,7 +203,7 @@ provided/curated by David (single-leg glute bridge + eccentric heel drop swapped
 - region: core / lateral chain
 - targets: lateral trunk + pelvic control
 - cues: forearm under the shoulder, feet stacked, straight line from trunk to ankle; regress onto the knees; progress by abducting the top leg.
-- source: https://e3rehab.com/how-to-train-your-gluteus-medius/
+- source: https://www.youtube.com/watch?v=eRygfYEe1hs
 
 ### 22. Front plank
 - id: front-plank
@@ -226,4 +226,4 @@ provided/curated by David (single-leg glute bridge + eccentric heel drop swapped
 - region: calf / tendon (power)
 - targets: calf-tendon stiffness, running economy
 - cues: hands on hips, quick springy jumps off both feet with relatively straight knees; spend as little time on the ground as possible; start small and build height; 3 × 30–60s.
-- source: https://e3rehab.com/strength-training-for-runners/
+- source: https://www.youtube.com/watch?v=lz6BM6WyJ0k
