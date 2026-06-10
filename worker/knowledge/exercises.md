@@ -51,14 +51,14 @@ provided/curated by David (single-leg glute bridge + eccentric heel drop swapped
 - region: calf / Achilles
 - targets: gastrocnemius; push-off power, Achilles load tolerance
 - cues: knee straight; full stretch at the bottom and peak squeeze at the top, ideally off a step; slow — about 3s up, 3s down, no bouncing; train it heavy (6–12 hard reps).
-- source: https://e3rehab.com/calves/
+- source: https://www.youtube.com/watch?v=zvZp4FJjME4
 
 ### 2. Bent-knee (soleus) calf raise
 - id: soleus-calf-raise
 - region: calf / Achilles
 - targets: soleus — the runner's workhorse, often neglected
 - cues: knee bent past ~60°, preferably seated so the quads aren't the limiter; same slow full-range tempo; load it (weight on thighs / machine).
-- source: https://e3rehab.com/calves/
+- source: https://www.youtube.com/watch?v=1IR4me-fMSk
 
 ### 3. Eccentric heel drop
 - id: eccentric-heel-drop
@@ -72,7 +72,7 @@ provided/curated by David (single-leg glute bridge + eccentric heel drop swapped
 - region: calf / Achilles
 - targets: unilateral calf capacity + balance
 - cues: full bodyweight through one leg; hands for light balance only; full range, controlled; progress to a step, then add weight.
-- source: https://e3rehab.com/calves/
+- source: https://www.youtube.com/watch?v=2fiF2Ku8Y_U
 
 ## Foot / ankle
 
@@ -81,21 +81,21 @@ provided/curated by David (single-leg glute bridge + eccentric heel drop swapped
 - region: foot / plantar fascia
 - targets: plantar fascia loading
 - cues: single-leg heel raise on a step with a rolled towel under the toes to extend the big toe; slow tempo; this is the research-backed loading exercise for plantar heel pain.
-- source: https://e3rehab.com/plantar-fasciitis-rehab/
+- source: https://www.youtube.com/watch?v=Tx2Of1T1zI4
 
 ### 6. Short foot / toe yoga
 - id: short-foot-toe-yoga
 - region: foot intrinsics
 - targets: arch control, foot intrinsic muscles
 - cues: short foot — draw the ball of the big toe toward the heel to lift the arch while keeping toes flat; toe yoga — lift the big toe while keeping the other four down, then reverse; 2–4 sets of 30–60s.
-- source: https://e3rehab.com/foot-ankle-strength/
+- source: https://www.youtube.com/watch?v=DoEIW4Y8MEo
 
 ### 7. Knee-to-wall ankle dorsiflexion
 - id: knee-to-wall-dorsiflexion
 - region: ankle (mobility)
 - targets: dorsiflexion range of motion
 - cues: split or half-kneeling stance, drive the knee out over the second toe with the heel flat; hold 3–5s, or move in and out of end range; add gentle overpressure if needed.
-- source: https://e3rehab.com/ankle-dorsiflexion/
+- source: https://www.youtube.com/watch?v=KmiPXKmoUbs
 
 ## Knee / quad
 

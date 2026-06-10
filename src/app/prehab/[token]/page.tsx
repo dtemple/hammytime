@@ -101,7 +101,7 @@ export default async function PrehabPage({ params }: { params: Promise<{ token: 
       ) : (
         <>
           <p className="sg-lede">
-            This is your standing prehab routine — what to do, why, and which days it lands on. This
+            This is your standing prehab routine — what to do, why, and which days to do it. This
             page stays current as you and your coach adjust it.
           </p>
           <Blocks blocks={prehabPageBlocks(data.contentMd)} />
