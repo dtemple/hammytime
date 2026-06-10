@@ -57,7 +57,7 @@ describe('parsePrehabMarkdown', () => {
     expect(calfRaises[0]).toEqual({
       kind: 'link',
       text: 'Single-leg calf raises',
-      href: 'https://e3rehab.com/calves/',
+      href: 'https://www.youtube.com/watch?v=2fiF2Ku8Y_U',
     });
   });
 

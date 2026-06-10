@@ -15,7 +15,7 @@ describe('exercise-library', () => {
   it('resolves by slug', () => {
     const ex = resolveExercise({ slug: 'single-leg-calf-raise' });
     expect(ex?.id).toBe('single-leg-calf-raise');
-    expect(ex?.source).toBe('https://e3rehab.com/calves/');
+    expect(ex?.source).toBe('https://www.youtube.com/watch?v=2fiF2Ku8Y_U');
   });
 
   it('falls back to normalized name when no slug', () => {
