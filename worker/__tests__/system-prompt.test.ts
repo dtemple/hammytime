@@ -217,6 +217,44 @@ describe('renderSystemPrompt — three-way goal branch (V3-W7)', () => {
     expect(await renderSystemPrompt('a1')).not.toContain('schema-required placeholder');
   });
 
+  it('no-race: daily lead is the consistency story, with the profile runs/week target rendered (GF-W2)', async () => {
+    mockLoadAthleteData.mockResolvedValueOnce(
+      loaded({ trainingProfile: profile('day_to_day', 'keep_fit') }),
+    );
+    const out = await renderSystemPrompt('a1');
+    expect(out).toContain('consistency story');
+    expect(out).toContain('their target of 4 runs/week'); // days_per_week from the profile row
+    expect(out).toContain('North-star goal'); // pocket tie-in, self-conditional on the file
+    expect(out).toContain('checkin_log.md'); // vary-the-through-line checks a concrete source
+    expect(out).not.toContain('on track, minor concern, or off track');
+  });
+
+  it('no-race without days_per_week: falls back to the plan-prescribed run days', async () => {
+    mockLoadAthleteData.mockResolvedValueOnce(
+      loaded({ trainingProfile: { ...profile('day_to_day', 'keep_fit'), days_per_week: null } }),
+    );
+    const out = await renderSystemPrompt('a1');
+    expect(out).toContain('the run days the plan prescribes');
+    expect(out).not.toContain('their target of');
+  });
+
+  it('committed/intended/legacy: daily lead keeps the status line verbatim, no narrative block (GF-W2)', async () => {
+    const fixtures = [
+      loaded({ goalRace: committedRace, trainingProfile: profile('committed', 'marathon') }),
+      loaded({ trainingProfile: profile('intended', 'half') }),
+      loaded({}),
+    ];
+    for (const data of fixtures) {
+      mockLoadAthleteData.mockResolvedValueOnce(data);
+      const out = await renderSystemPrompt('a1');
+      expect(out).toContain(
+        "Today's status in a sentence or two — on track, minor concern, or off track, read off recent Strava and the plan.",
+      );
+      expect(out).not.toContain('consistency story');
+      expect(out).not.toContain('North-star goal');
+    }
+  });
+
   it('legacy athlete with no profile: preserves the old "not set yet" line', async () => {
     mockLoadAthleteData.mockResolvedValueOnce(loaded({}));
     const out = await renderSystemPrompt('a1');

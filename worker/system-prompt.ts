@@ -217,6 +217,36 @@ function knownGapsExamples(mode: CoachMode): string {
   return 'a finish-time goal, strength equipment, tune-up races, schedule constraints';
 }
 
+// Item 1 of the daily-run list (GF-W2). Race-ish modes keep the plan-compliance
+// status line; a no-race athlete has no destination for "on track" to point at,
+// so the lead is the consistency story instead. The runs-per-week target lives
+// only in athlete_training_profile (it's not written to athlete_profile.md), so
+// it's rendered here rather than asked of the agent.
+function dailyStatusLead(mode: CoachMode, profile: LoadedData['trainingProfile']): string {
+  if (mode !== 'no_race') {
+    return "Today's status in a sentence or two — on track, minor concern, or off track, read off recent Strava and the plan.";
+  }
+  const target =
+    profile?.days_per_week != null
+      ? `their target of ${profile.days_per_week} runs/week`
+      : 'the run days the plan prescribes';
+  return (
+    'Open with the consistency story in a sentence or two — with no race there is no "on track," so the question is whether the habit is holding and the base is growing. ' +
+    'Read it from `strava_recent.json`: the 7- and 28-day summaries carry totals only (count, miles, minutes), so compare the 7-day total against the 28-day weekly average for the volume trend, ' +
+    `check this week's runs against ${target}, and scan the activities list for how the long run is progressing. ` +
+    "Lead with the one signal that's most alive this week — don't recite all three every day."
+  );
+}
+
+// The through-line paragraph after the daily-run list — '' on every mode except
+// no_race (GF-W2). Same empty-substitution pattern as {{ease_in_context}}.
+function dailyNarrativeGuidance(mode: CoachMode): string {
+  if (mode !== 'no_race') return '';
+  return `With no race date doing the work, the daily message needs a through-line of its own — and the failure mode is the same message every morning ("easy 4 today, keep it conversational"). Before you write, check the last ~7 \`checkin_log.md\` entries and the recent thread for what you've been leading with, and when it's getting stale anchor today to a different thread: the long-run build, the strength habit, the wellness trend.
+
+If \`athlete_profile.md\` carries a "North-star goal" section, that's the real target in the athlete's own words — tie the consistency story back to it when it fits, not to generic fitness.`;
+}
+
 function formatTime(sec: number): string {
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
@@ -289,6 +319,8 @@ export async function renderSystemPrompt(
     goal_race_line: goalLine(data.goalRace, data.trainingProfile, mode),
     target_time_gap_guidance: targetTimeGapGuidance(mode),
     known_gaps_examples: knownGapsExamples(mode),
+    daily_status_lead: dailyStatusLead(mode, data.trainingProfile),
+    daily_narrative_guidance: dailyNarrativeGuidance(mode),
     asthma_line: data.athlete.asthma ? '- Mild asthma — watch cold/dry/high-effort conditions' : '',
     injury_history: injuryHistory(data.injuries),
     safety_caps: safetyCapsBlock(DRAFT_SAFETY_CAPS, data.goalRace?.distance_mi ?? null),

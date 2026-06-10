@@ -35,7 +35,17 @@ own terms rather than inheriting race framing.
   `'no_race'` when `athlete_training_profile.goal_state === 'day_to_day'`.
   Substitutions: `coach_title` ("Running coach"), `missionLine` (consistency/
   base), `goalLine` ("Don't push toward a peak or nudge them to pick a race
-  unless they raise it"), `targetTimeGapGuidance`, `knownGapsExamples`.
+  unless they raise it"), `targetTimeGapGuidance`, `knownGapsExamples`, and —
+  since GF-W2 (v0.7.33) — `dailyStatusLead` (consistency story instead of
+  on/off-track status) and `dailyNarrativeGuidance` (through-line variation +
+  North-star tie-in).
+- **Prod data caveat (found at GF-W2 build time, 2026-06-10).** Prod has zero
+  `goal_state='day_to_day'` athletes. The one live keep_fit athlete (Anjie,
+  v2-onboarded 2026-06-04) carries `goal_type='race'` /
+  `goal_state='intended'` / `goal_distance='keep_fit'` + a stale
+  `target_date` — a combo current v3 code can't produce. She coaches in
+  `intended` mode and gets none of the no_race behavior until her row is
+  fixed (see open question 6).
 - **Everything downstream is shared:** "What a daily coaching run looks like"
   in `worker/prompts/coach.md` (status → today's workout → follow-ups → prehab
   → risk flags), the post-activity note, the plan propose/confirm flow
@@ -155,7 +165,23 @@ line + audit are one coherent change; splitting them ships dead code.
 
 ---
 
-### GF-W2 — No-race daily coaching narrative
+### GF-W2 — No-race daily coaching narrative — **SHIPPED 2026-06-10 (v0.7.33)**
+
+> Built with three build-time corrections (recorded in the CHANGELOG entry):
+> two surgical placeholders (`{{daily_status_lead}}` for list item 1 +
+> `{{daily_narrative_guidance}}` after the list) instead of forking the whole
+> section — items 2–5 stay in coach.md once, shared; the runs-per-week target
+> is NOT in the folder (days_per_week lives only in `athlete_training_profile`,
+> never written to `athlete_profile.md`), so it renders into the prompt from
+> the profile row with a plan-prescribed-days fallback; and the North-star
+> pocket line is self-conditional in the prompt (the `known_gaps.md` idiom),
+> not render-conditional — `renderSystemPrompt` doesn't load memory files.
+> Also: the 7/28-day summaries are aggregates only (count/miles/minutes), so
+> the lead instruction says how to derive the trend (7d vs 28d weekly average;
+> long-run progression from the activities list). New review tool:
+> `scripts/render-system-prompt.ts <email>` prints the rendered system prompt
+> for one athlete, zero writes. **Reaches zero prod athletes until the Anjie
+> data fix (open question 6) or GF-W3 creates day_to_day athletes.**
 
 **Problem.** "What a daily coaching run looks like" in `coach.md` opens with
 "on track, minor concern, or off track" — plan-compliance framing that means
@@ -457,13 +483,23 @@ other Fly-only prompt (W2 is the natural host if W4 is already live).
    (trail-friendly, effort-led); a mile time trial is the sharper signal but
    needs a track/flat road and reads more race-like than the audience wants.
    Worth a gut check against the actual friend cohort.
+6. **Anjie's profile row (found at GF-W2 build time)** — she's the only live
+   keep_fit athlete, but her v2-era row reads `goal_type='race'` /
+   `goal_state='intended'` / `goal_distance='keep_fit'` with a stale
+   `target_date` (2026-07-30), so she coaches in `intended` mode ("a race in
+   mind — no race picked yet") and never sees the no_race behavior (W7's or
+   W2's). Recommended fix: one-row update to `goal_type='day_to_day'`,
+   `goal_state='day_to_day'`, `target_date=null` — matching what v3 onboarding
+   would have written. Alternative (not recommended): broaden `coachMode()` to
+   treat `goal_distance='keep_fit'` as no_race regardless of `goal_state`,
+   which papers over inconsistent data with a second source of truth.
 
 ## 7. Sequencing summary
 
 | Order | Workstream | Size | Deploy | Depends on |
 |-------|-----------|------|--------|------------|
 | 1 | ~~GF-W1 extension + placeholder audit~~ **shipped v0.7.32** | M | Fly + Vercel | — |
-| 2 | GF-W2 daily narrative | S | Fly | — |
+| 2 | ~~GF-W2 daily narrative~~ **shipped v0.7.33** | S | Fly | — |
 | 3 | GF-W3 race → fitness rollover | L | both | W1 |
 | 4 | GF-W4 fitness → race binding | M–L | both | — |
 | 5 | GF-W5 benchmarks | M | both | W1 |
