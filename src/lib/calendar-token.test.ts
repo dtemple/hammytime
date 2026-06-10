@@ -4,7 +4,7 @@ vi.mock('@/lib/db', () => ({
   supabaseAdmin: vi.fn(),
 }));
 
-import { getOrCreateCalendarToken } from './calendar-token';
+import { getOrCreateCalendarToken, getOrCreatePrehabToken } from './calendar-token';
 import { supabaseAdmin } from '@/lib/db';
 
 type SelectChain = {
@@ -83,5 +83,57 @@ describe('getOrCreateCalendarToken', () => {
     );
 
     await expect(getOrCreateCalendarToken('athlete-3')).rejects.toThrow(/unique violation/);
+  });
+});
+
+describe('getOrCreatePrehabToken', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.NEXT_PUBLIC_APP_URL = 'https://hammytime.test';
+  });
+
+  it('returns existing token with a /prehab URL without inserting', async () => {
+    const mock = makeMock({
+      existing: { data: { token: 'pre456', expires_at: '2099-01-01' }, error: null },
+    });
+    vi.mocked(supabaseAdmin).mockReturnValue(
+      mock.client as unknown as ReturnType<typeof supabaseAdmin>,
+    );
+
+    const result = await getOrCreatePrehabToken('athlete-1');
+
+    expect(result.token).toBe('pre456');
+    expect(result.url).toBe('https://hammytime.test/prehab/pre456');
+    expect(mock.insertSpy).not.toHaveBeenCalled();
+  });
+
+  it("mints with purpose 'prehab' when no row exists", async () => {
+    const mock = makeMock({ existing: { data: null, error: null } });
+    vi.mocked(supabaseAdmin).mockReturnValue(
+      mock.client as unknown as ReturnType<typeof supabaseAdmin>,
+    );
+
+    const result = await getOrCreatePrehabToken('athlete-2');
+
+    expect(mock.insertSpy).toHaveBeenCalledTimes(1);
+    const inserted = mock.insertSpy.mock.calls[0]![0];
+    expect(inserted.athlete_id).toBe('athlete-2');
+    expect(inserted.purpose).toBe('prehab');
+    expect(inserted.token.length).toBeGreaterThan(20);
+    expect(result.url).toBe(`https://hammytime.test/prehab/${inserted.token}`);
+  });
+
+  it('throws when the insert fails', async () => {
+    const mock = makeMock({
+      existing: { data: null, error: null },
+      insertError: { message: 'check violation' },
+    });
+    vi.mocked(supabaseAdmin).mockReturnValue(
+      mock.client as unknown as ReturnType<typeof supabaseAdmin>,
+    );
+
+    await expect(getOrCreatePrehabToken('athlete-3')).rejects.toThrow(
+      /Failed to mint prehab token: check violation/,
+    );
   });
 });

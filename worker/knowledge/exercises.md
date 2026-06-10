@@ -16,9 +16,9 @@ the cues, and use the canonical link.
 - **These are exercise suggestions, not rehab protocols.** Anything that looks like a real injury
   (pain that changes gait, sharp/localized pain, swelling, pain not improving) → tell the athlete to
   see a physio or doctor. Do not self-prescribe a rehab program.
-- **Linking etiquette in chat:** link the exercise *name* to its `source` the first time you
-  recommend it in a conversation. Don't paste the raw URL, and don't re-send the link every message —
-  once per exercise per conversation is enough.
+- **Linking etiquette in chat:** link the exercise *name* to its `source` the first time it comes
+  up in a message — every message it comes up in, once per exercise per message. Don't paste the
+  raw URL.
 - The `source` for each entry is the page that *demonstrates* the movement (video + written
   technique). Most are E3 Rehab articles; four (front plank, dead bug, single-leg glute bridge,
   eccentric heel drop) are curated YouTube videos.

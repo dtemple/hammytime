@@ -2,11 +2,22 @@ import type { NextConfig } from 'next';
 import { withSentryConfig } from '@sentry/nextjs';
 
 const nextConfig: NextConfig = {
-  // The calendar route reads the exercise corpus at runtime to resolve each
-  // strength exercise's source link. The file lives under worker/ — outside the
-  // route's traced module graph — so trace it explicitly into the bundle.
+  // The calendar route and the prehab routine page read the exercise corpus at
+  // runtime to resolve exercise source links. The file lives under worker/ —
+  // outside their traced module graphs — so trace it explicitly into each bundle.
   outputFileTracingIncludes: {
     '/api/calendar/[token]': ['./worker/knowledge/exercises.md'],
+    '/prehab/[token]': ['./worker/knowledge/exercises.md'],
+  },
+  async headers() {
+    return [
+      {
+        // Unguessable-token page: belt-and-braces noindex alongside the page's
+        // robots metadata. Scoped narrowly so future public pages are unaffected.
+        source: '/prehab/:token',
+        headers: [{ key: 'X-Robots-Tag', value: 'noindex, nofollow' }],
+      },
+    ];
   },
 };
 

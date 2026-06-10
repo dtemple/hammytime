@@ -12,6 +12,9 @@ const { mockApi } = vi.hoisted(() => ({
   },
 }));
 vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
+vi.mock('@/lib/calendar-token', () => ({
+  getOrCreatePrehabToken: vi.fn(),
+}));
 vi.mock('grammy', async (importOriginal) => {
   const actual = await importOriginal<typeof import('grammy')>();
   // A constructor (new Bot(...)) returning the stubbed api — arrows can't be new'd.
@@ -23,8 +26,9 @@ vi.mock('grammy', async (importOriginal) => {
   };
 });
 
-import { renderTelegramHtml, sendCalendarConfirm } from '../send';
+import { renderTelegramHtml, sendCalendarConfirm, sendReply, PREHAB_LINK_SLUG } from '../send';
 import { supabaseAdmin } from '@/lib/db';
+import { getOrCreatePrehabToken } from '@/lib/calendar-token';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyMock = any;
@@ -72,6 +76,95 @@ describe('renderTelegramHtml', () => {
     expect(renderTelegramHtml('noted in race_calendar.md and *keep* easy')).toBe(
       'noted in race_calendar.md and *keep* easy',
     );
+  });
+
+  it('substitutes a reserved slug from extraLinks with an escaped href', () => {
+    const out = renderTelegramHtml('see [your prehab routine](prehab-routine) for the list', {
+      'prehab-routine': 'https://daybreak.run/prehab/tok"x&y',
+    });
+    expect(out).toBe(
+      'see <a href="https://daybreak.run/prehab/tok&quot;x&amp;y">your prehab routine</a> for the list',
+    );
+  });
+
+  it('collapses the reserved slug to plain text when no extraLinks are passed', () => {
+    expect(renderTelegramHtml('see [your prehab routine](prehab-routine)')).toBe(
+      'see your prehab routine',
+    );
+  });
+
+  it('extraLinks wins over a corpus slug of the same name', () => {
+    const out = renderTelegramHtml('[calf raises](single-leg-calf-raise)', {
+      'single-leg-calf-raise': 'https://example.test/override',
+    });
+    expect(out).toBe('<a href="https://example.test/override">calf raises</a>');
+  });
+});
+
+describe('sendReply — prehab routine link resolution', () => {
+  const ATHLETE = '11111111-2222-3333-4444-555555555555';
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let inserted: any[];
+
+  function makeDb() {
+    return {
+      from(table: string) {
+        if (table === 'athletes') {
+          return {
+            select: () => ({
+              eq: () => ({ maybeSingle: () => ({ data: { telegram_chat_id: '12345' } }) }),
+            }),
+          };
+        }
+        if (table === 'messages') {
+          return {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            insert: (row: any) => {
+              inserted.push(row);
+              return Promise.resolve({ error: null });
+            },
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      },
+    };
+  }
+
+  beforeEach(() => {
+    inserted = [];
+    process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+    mockApi.sendMessage.mockReset().mockResolvedValue({ message_id: 1 });
+    (supabaseAdmin as AnyMock).mockImplementation(() => makeDb());
+    (getOrCreatePrehabToken as AnyMock)
+      .mockReset()
+      .mockResolvedValue({ token: 'tok', url: 'https://daybreak.run/prehab/tok' });
+  });
+
+  it('resolves the token and links it when the text contains the reserved slug', async () => {
+    await sendReply(ATHLETE, `Routine day — [your prehab routine](${PREHAB_LINK_SLUG}) first.`);
+
+    expect(getOrCreatePrehabToken).toHaveBeenCalledExactlyOnceWith(ATHLETE);
+    const [, html] = mockApi.sendMessage.mock.calls[0]!;
+    expect(html).toContain('<a href="https://daybreak.run/prehab/tok">your prehab routine</a>');
+    // The log keeps the token text, not the URL.
+    expect(inserted[0].body).toContain(`](${PREHAB_LINK_SLUG})`);
+  });
+
+  it('never queries for a token when the text has no reserved slug', async () => {
+    await sendReply(ATHLETE, 'Easy 5 today, nothing else.');
+    expect(getOrCreatePrehabToken).not.toHaveBeenCalled();
+    expect(mockApi.sendMessage).toHaveBeenCalledOnce();
+  });
+
+  it('still sends (token collapses to plain text) when minting fails', async () => {
+    (getOrCreatePrehabToken as AnyMock).mockRejectedValue(new Error('db down'));
+
+    await sendReply(ATHLETE, `See [your prehab routine](${PREHAB_LINK_SLUG}).`);
+
+    expect(mockApi.sendMessage).toHaveBeenCalledOnce();
+    const [, html] = mockApi.sendMessage.mock.calls[0]!;
+    expect(html).toBe('See your prehab routine.');
   });
 });
 

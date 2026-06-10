@@ -4,6 +4,7 @@
 
 import { Bot, InlineKeyboard } from 'grammy';
 import { supabaseAdmin } from '@/lib/db';
+import { getOrCreatePrehabToken } from '@/lib/calendar-token';
 import { resolveExercise } from '@/lib/exercise-library';
 
 const TELEGRAM_MAX_CHARS = 4096;
@@ -17,6 +18,11 @@ function escapeHtml(s: string): string {
 // chars so arbitrary parens in prose can't be mistaken for a link.
 const LINK_TOKEN_RE = /\[([^\]]+)\]\(([a-z0-9-]+)\)/g;
 
+// Reserved slug for the athlete's prehab routine page — resolved by sendReply
+// to their tokened URL, never by the corpus. Must never collide with an
+// exercises.md id.
+export const PREHAB_LINK_SLUG = 'prehab-routine';
+
 // Markdown bold the agent emits by habit. Telegram HTML mode doesn't render
 // markdown, so `**x**` would show as literal asterisks — convert it to <b>.
 // Only the double-asterisk form is converted: single `*`/`_` are unsafe (they
@@ -27,21 +33,23 @@ const BOLD_RE = /\*\*(.+?)\*\*/g;
 /**
  * Renders a coach message for Telegram HTML parse mode. The whole string is
  * HTML-escaped first, then `**bold**` becomes `<b>` and the controlled
- * `[text](slug)` tokens become `<a>` tags resolved against the corpus — a
- * matched slug links to its canonical `source`, an unmatched one collapses to
- * plain text (no link, no fabricated URL). Escaping happens before any
- * substitution, so arbitrary agent prose can never break parsing, and the only
- * URLs that appear are corpus `source`s. Bold runs before links so a bolded
- * link (`**[name](slug)**`) nests as `<b><a>…</a></b>`.
+ * `[text](slug)` tokens become `<a>` tags — a slug resolves through
+ * `extraLinks` (reserved, system-built URLs like the prehab routine page)
+ * first, then the corpus; an unmatched one collapses to plain text (no link,
+ * no fabricated URL). extraLinks wins so a future corpus entry can never
+ * shadow a reserved slug. Escaping happens before any substitution, so
+ * arbitrary agent prose can never break parsing, and the only URLs that
+ * appear are corpus `source`s and the system-built extras. Bold runs before
+ * links so a bolded link (`**[name](slug)**`) nests as `<b><a>…</a></b>`.
  */
-export function renderTelegramHtml(text: string): string {
+export function renderTelegramHtml(text: string, extraLinks?: Record<string, string>): string {
   return escapeHtml(text)
     .replace(BOLD_RE, '<b>$1</b>')
     .replace(LINK_TOKEN_RE, (_m, label: string, slug: string) => {
-      const entry = resolveExercise({ slug });
-      if (!entry) return label;
-      const href = escapeHtml(entry.source).replace(/"/g, '&quot;');
-      return `<a href="${href}">${label}</a>`;
+      const href = extraLinks?.[slug] ?? resolveExercise({ slug })?.source;
+      if (!href) return label;
+      const escaped = escapeHtml(href).replace(/"/g, '&quot;');
+      return `<a href="${escaped}">${label}</a>`;
     });
 }
 
@@ -197,11 +205,24 @@ export async function sendReply(athleteId: string, text: string, runId?: string)
   const chunks = chunk(text);
   if (chunks.length === 0) return;
 
+  // The prehab routine link is resolved lazily — only when the coach actually
+  // emitted the reserved token — so ordinary messages cost no extra query. A
+  // mint failure logs and the token collapses to its plain label downstream.
+  let extraLinks: Record<string, string> | undefined;
+  if (text.includes(`](${PREHAB_LINK_SLUG})`)) {
+    try {
+      const { url } = await getOrCreatePrehabToken(athleteId);
+      extraLinks = { [PREHAB_LINK_SLUG]: url };
+    } catch (e) {
+      console.warn('[worker] prehab routine token resolution failed', e);
+    }
+  }
+
   for (const part of chunks) {
     // Render per chunk: substitution happens after the 4096 split, so an <a>
     // tag can never straddle a boundary and break the send. We store the
     // original `[text](slug)` token text — readable, no URL spam in the log.
-    await bot().api.sendMessage(athlete.telegram_chat_id, renderTelegramHtml(part), {
+    await bot().api.sendMessage(athlete.telegram_chat_id, renderTelegramHtml(part, extraLinks), {
       parse_mode: 'HTML',
       // Exercise links are inline references, not shared articles — suppress
       // Telegram's auto-generated preview card for the last URL in the message.

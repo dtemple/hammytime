@@ -260,3 +260,42 @@ the folder. Negligible against current run cost.
   link-less per existing rules and flag the gap to David; don't grow the corpus in this build.
 - **Prehab compliance tracking** (did the athlete actually do it) — nothing new; the coach may ask,
   as it already does.
+
+---
+
+## 8. The prehab routine page (added 2026-06-09, built same session)
+
+Athletes forget what the routine is between its scheduled days — the durable reference is a
+**public, no-login, per-athlete page** at `daybreak.run/prehab/<token>` showing their prehab
+routine, greeted by first name. David's naming rule applies everywhere: athlete-facing copy always
+says **"prehab routine"**, never bare "routine".
+
+### Mechanics
+
+- **Token**: `link_tokens` purpose `'prehab'` (migration `20260612000000`), minted by
+  `getOrCreatePrehabToken` (`src/lib/calendar-token.ts`) — 32-byte base64url, 5-year expiry,
+  reuse-before-mint, same pattern as the calendar token. **Rotation = delete the row**; the next
+  reference mints a fresh token and the old URL 404s.
+- **Page** (`src/app/prehab/[token]/page.tsx`, force-dynamic): renders `prehab_program.md` from
+  `memory_files` via a typed-segment parser (`src/lib/prehab-markdown.ts`) — segments become React
+  children, never HTML strings, so drifted/hostile agent markdown degrades to plain text and the
+  only possible hrefs are `exercises.md` `source` URLs (routine bullets linkify by exercise name,
+  with a plural strip-s retry). The file's h1 and Revision log are not rendered; "Last updated"
+  comes from `memory_files.updated_at`. Absent file → a pending state, not an error. The
+  injury-tied "why" lines ARE shown (decided: friends-only audience, unguessable token). noindex
+  via page metadata + an `X-Robots-Tag` header (`next.config.ts`), generic page title (no name in
+  link previews), `no-referrer` on outbound links.
+- **Chat linking**: the coach emits the reserved token `[your prehab routine](prehab-routine)`;
+  `worker/send.ts` resolves it at send time (`extraLinks` wins over the corpus, so a future
+  `exercises.md` id can never shadow it; mint failure degrades to plain text). The coach never
+  sees or writes the URL. **Cadence (decided): every message that mentions the prehab routine
+  carries the link, once per message** — and the same once-per-message cadence now applies to
+  exercise links (replaced first-mention-per-conversation, coach.md + exercises.md header).
+- **`/prehab` bot command** mirrors `/calendar` as the deterministic fallback. (BotFather menu
+  entry is a manual David step.)
+
+### URL-namespace convention (for future reference pages)
+
+Per-athlete tokened pages get a path per feature backed by a `link_tokens` purpose
+(`/prehab/<token>` is the first). Global reference pages — e.g. a future glossary of terms the
+coach uses — are plain static routes (`/glossary`), no token. Don't re-derive this.

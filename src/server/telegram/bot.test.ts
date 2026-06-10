@@ -43,6 +43,9 @@ vi.mock('@/lib/calendar-token', () => ({
   getOrCreateCalendarToken: vi
     .fn()
     .mockResolvedValue({ token: 'cal-tok', url: 'https://daybreak.run/api/calendar/cal-tok.ics' }),
+  getOrCreatePrehabToken: vi
+    .fn()
+    .mockResolvedValue({ token: 'pre-tok', url: 'https://daybreak.run/prehab/pre-tok' }),
 }));
 
 import { supabaseAdmin } from '@/lib/db';
@@ -56,6 +59,7 @@ import {
   handleInboundText,
   handleInboundMedia,
   handleConnectStravaCommand,
+  handlePrehabCommand,
   handleDisconnectStravaCommand,
   handleDisconnectCalendarCommand,
   handleNextAction,
@@ -423,6 +427,116 @@ describe('/connect_strava command', () => {
 // ---------------------------------------------------------------------------
 // /disconnect_strava command
 // ---------------------------------------------------------------------------
+
+describe('/prehab command', () => {
+  beforeEach(() => {
+    _resetBotForTest();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    delete process.env.TELEGRAM_BOT_TOKEN;
+  });
+
+  it('replies with invite-link message when athlete is not found', async () => {
+    (supabaseAdmin as AnyMock).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+          }),
+        }),
+      }),
+    });
+    const ctx = makeCtx();
+
+    await handlePrehabCommand(ctx as AnyMock);
+
+    expect(ctx.reply).toHaveBeenCalledWith('Use your invite link to get started.');
+  });
+
+  it("replies with 'Finish onboarding first' when onboarding is incomplete", async () => {
+    (supabaseAdmin as AnyMock).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: {
+                id: ATHLETE_ID,
+                telegram_chat_id: String(CHAT_ID),
+                onboarding_state: { step: 3 },
+              },
+              error: null,
+            }),
+          }),
+        }),
+      }),
+    });
+    const ctx = makeCtx();
+
+    await handlePrehabCommand(ctx as AnyMock);
+
+    expect(ctx.reply).toHaveBeenCalledWith('Finish onboarding first.');
+  });
+
+  it('logs the inbound command and sends the prehab routine URL', async () => {
+    process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+
+    const sendMessageMock = vi.fn().mockResolvedValue(undefined);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (Bot as AnyMock).mockImplementation(function (this: any) {
+      return {
+        api: { sendMessage: sendMessageMock },
+        command: vi.fn(),
+        on: vi.fn(),
+        catch: vi.fn(),
+      };
+    });
+
+    const messagesInserts: { direction: string; body: string }[] = [];
+    (supabaseAdmin as AnyMock).mockReturnValue({
+      from: vi.fn().mockImplementation((table: string) => {
+        if (table === 'athletes') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({
+                  data: {
+                    id: ATHLETE_ID,
+                    telegram_chat_id: String(CHAT_ID),
+                    onboarding_state: { step: 7 },
+                  },
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === 'messages') {
+          return {
+            insert: vi.fn().mockImplementation((row: { direction: string; body: string }) => {
+              messagesInserts.push(row);
+              return Promise.resolve({ error: null });
+            }),
+          };
+        }
+        return {};
+      }),
+    });
+
+    const ctx = makeCtx();
+
+    await handlePrehabCommand(ctx as AnyMock);
+
+    expect(ctx.reply).not.toHaveBeenCalled();
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      String(CHAT_ID),
+      'Your prehab routine: https://daybreak.run/prehab/pre-tok',
+    );
+    expect(messagesInserts.map((m) => m.direction)).toEqual(['in', 'out']);
+    expect(messagesInserts[0]!.body).toBe('/prehab');
+  });
+});
 
 describe('/disconnect_strava command', () => {
   beforeEach(() => {

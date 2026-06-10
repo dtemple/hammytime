@@ -17,7 +17,7 @@ import { fetchRecentActivities, hasStravaConnection } from '@/server/strava/acti
 import { disconnectStrava } from '@/server/strava/disconnect';
 import { disconnectGoogleCalendar } from '@/server/google/disconnect';
 import { enqueueCalendarSyncIfConnected } from '@/server/google/enqueue-sync';
-import { getOrCreateCalendarToken } from '@/lib/calendar-token';
+import { getOrCreateCalendarToken, getOrCreatePrehabToken } from '@/lib/calendar-token';
 import { enqueueJob } from '@/server/jobs/enqueue';
 import { transcribeOgg } from '@/lib/transcribe';
 
@@ -413,6 +413,39 @@ async function handleCalendarCommand(ctx: CommandContext<Context>): Promise<void
   });
 
   await sendCalendarMessage(athlete.id, ctx.chat.id);
+}
+
+// /prehab — the athlete's prehab routine page. Mirrors /calendar. Doesn't
+// check whether prehab_program.md exists yet: the page owns the pending state.
+export async function handlePrehabCommand(ctx: CommandContext<Context>): Promise<void> {
+  const db = supabaseAdmin();
+  const chatId = String(ctx.chat.id);
+
+  const { data: athlete } = await db
+    .from('athletes')
+    .select('id, onboarding_state')
+    .eq('telegram_chat_id', chatId)
+    .maybeSingle();
+
+  if (!athlete) {
+    await ctx.reply('Use your invite link to get started.');
+    return;
+  }
+
+  if (!isOnboarded(athlete.onboarding_state as Parameters<typeof isOnboarded>[0])) {
+    await ctx.reply('Finish onboarding first.');
+    return;
+  }
+
+  await db.from('messages').insert({
+    athlete_id: athlete.id,
+    channel: 'tg',
+    direction: 'in',
+    body: '/prehab',
+  });
+
+  const { url } = await getOrCreatePrehabToken(athlete.id);
+  await sendAndLog(athlete.id, chatId, `Your prehab routine: ${url}`);
 }
 
 // Shared by the /calendar command and the onboarding next-action [Add to calendar].
@@ -928,6 +961,7 @@ function getBot(): Bot {
     _bot.command('disconnect_calendar', handleDisconnectCalendarCommand);
     _bot.command('strava_status', handleStravaStatusCommand);
     _bot.command('calendar', handleCalendarCommand);
+    _bot.command('prehab', handlePrehabCommand);
     _bot.command('fresh_update', handleFreshUpdateCommand);
     _bot.command('adjust_plan', handleAdjustPlanCommand);
     _bot.command('edit_profile', handleEditProfileCommand);
