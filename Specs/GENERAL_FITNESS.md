@@ -489,11 +489,9 @@ other Fly-only prompt (W2 is the natural host if W4 is already live).
    general fitness, not a race") and applied to prod same day — she now
    renders the full no_race prompt (verified via
    `scripts/render-system-prompt.ts`, incl. her real 5 runs/week target).
-   One leftover: her v2-seeded `known_gaps.md` still carries an
-   `[open] target_time` line (race-only by definition); removal was proposed
-   but is athlete memory-file data beyond the approved fix — David to remove
-   or have the coach retire it. Her real Broken Arrow 11K entry (June 20) is
-   correct and stays; no_race coaching handles one-off races via
+   The v2-seeded race-only `[open] target_time` line in her `known_gaps.md`
+   was removed same day (David-approved). Her real Broken Arrow 11K entry
+   (June 20) is correct and stays; no_race coaching handles one-off races via
    `race_calendar.md` fine.**
 
 ## 7. Sequencing summary
