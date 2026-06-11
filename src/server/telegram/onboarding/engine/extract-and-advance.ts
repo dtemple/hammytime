@@ -19,6 +19,7 @@ import { ProvenanceSchema } from '../slots/provenance';
 import { SLOTS, SLOT_KEYS, requiredCoreSlots, type SlotKey } from '../slots/schema';
 import type { V3OnboardingState } from '../slots/slot-state';
 import { formatFinishTime } from '../parsing/durations';
+import { todayISOInTz } from './numeric';
 import type { HistoryTurn } from './history';
 
 export const ONBOARDING_MODEL = 'claude-sonnet-4-6';
@@ -206,6 +207,7 @@ const FLOW_RULES = [
   'Some shape slots arrive already filled as "inferred, unconfirmed" from Strava. Do NOT ask those cold — state them back together in one line for a yes/no ("Looks like ~4 days/week, long runs Sunday, and you know your way around training — that right?") and let the athlete correct. A confirm flips them to confirmed.',
   'Confirm safety and plan-driving slots inline (a quick yes/no). Let nice-to-haves ride.',
   "When the goal race changes, restate goal_date in the same turn (a fill) or mark it open — never let the old race's date ride on the new goal. When a former goal race becomes a tune-up, carry its name AND its date into tune_up_races.",
+  'Dates: any goal_date you emit must be in the future relative to today (the turn context states today\'s date). A bare month like "September" means its next future occurrence — pick the year accordingly.',
   'Generate the plan only once every required slot is filled and the injury beat is answered; recap the whole picture first.',
   'On your very first question (conversation phase "orientation"), end the message with exactly this sentence so the athlete knows the chips are optional: "Tap a button or type an answer if it\'s not in the list." Only on that first question — never repeat it.',
 ].join(' ');
@@ -320,7 +322,13 @@ export async function callExtractAndAdvance(
   input: ExtractAdvanceInput,
 ): Promise<ExtractAdvanceResult> {
   const client = anthropicClient();
+  // The date rides in the per-turn user content, not the system prompt, so the
+  // static prompt stays byte-identical (cacheable). Without it the model resolves
+  // relative dates blind — "September or later" became 2025-09-01 (R1 fix 3).
+  const tz = (input.state.slots.timezone?.value as string | null) ?? 'America/Los_Angeles';
   const userContent = [
+    `Today is ${todayISOInTz(tz)}.`,
+    '',
     'Current onboarding state:',
     summarizeState(input.state),
     '',

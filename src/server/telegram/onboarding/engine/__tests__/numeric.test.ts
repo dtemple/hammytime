@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   resolveFinishTime,
+  resolveFinishTimeForMiles,
   paceToFinish,
   finishToPace,
   formatPace,
   deriveBucketFromMiles,
+  isPastISODate,
 } from '../numeric';
 
 describe('deriveBucketFromMiles (V3-W8)', () => {
@@ -22,6 +24,13 @@ describe('deriveBucketFromMiles (V3-W8)', () => {
     expect(deriveBucketFromMiles(31)).toBeNull(); // 50k
     expect(deriveBucketFromMiles(44)).toBeNull(); // Rae Lakes
     expect(deriveBucketFromMiles(100)).toBeNull(); // Western States
+  });
+
+  it('returns null below the catalog floor → the pocket (R1 fix 1)', () => {
+    expect(deriveBucketFromMiles(1)).toBeNull(); // the Nathan mile — never silently a 5K
+    expect(deriveBucketFromMiles(2)).toBeNull();
+    expect(deriveBucketFromMiles(2.4)).toBeNull();
+    expect(deriveBucketFromMiles(2.5)).toBe('5k'); // the floor itself is in catalog
   });
 
   it('returns null for nonsense input', () => {
@@ -68,6 +77,49 @@ describe('resolveFinishTime', () => {
 
   it('returns no_range for keep_fit (no finish-time goal)', () => {
     expect(resolveFinishTime(15900, 'keep_fit')).toEqual({ status: 'no_range' });
+  });
+});
+
+describe('resolveFinishTimeForMiles (R1 fix 5 — the pace envelope)', () => {
+  it('accepts a sub-5 mile, which the 5k bucket band would have rejected', () => {
+    expect(resolveFinishTimeForMiles(300, 1)).toEqual({ status: 'ok', seconds: 300 });
+  });
+
+  it('rejects an implausibly fast or slow time for the distance', () => {
+    expect(resolveFinishTimeForMiles(30, 1)).toEqual({ status: 'out_of_range', seconds: 30 }); // 30s mile
+    expect(resolveFinishTimeForMiles(2000, 1)).toEqual({ status: 'out_of_range', seconds: 2000 }); // 33min mile
+  });
+
+  it('accepts a plausible ultra finish against the real distance', () => {
+    expect(resolveFinishTimeForMiles(14400, 44)).toEqual({ status: 'ok', seconds: 14400 }); // 4h for 44mi — fast but in envelope
+  });
+
+  it('carries the bucket path’s ambiguity handling (the "4:25" case)', () => {
+    const r = resolveFinishTimeForMiles(265, 26.2); // 4m25s against a marathon-length envelope
+    expect(r.status).toBe('ambiguous');
+    if (r.status === 'ambiguous') expect(r.asHours.label).toBe('4:25:00');
+  });
+
+  it('returns no_range for a nonsense distance', () => {
+    expect(resolveFinishTimeForMiles(300, 0)).toEqual({ status: 'no_range' });
+    expect(resolveFinishTimeForMiles(300, NaN)).toEqual({ status: 'no_range' });
+  });
+});
+
+describe('isPastISODate (R1 fix 3)', () => {
+  it('flags a date strictly before today', () => {
+    expect(isPastISODate('2025-09-01', '2026-06-10')).toBe(true);
+    expect(isPastISODate('2026-06-09', '2026-06-10')).toBe(true);
+  });
+
+  it('does not flag today or the future', () => {
+    expect(isPastISODate('2026-06-10', '2026-06-10')).toBe(false);
+    expect(isPastISODate('2026-09-01', '2026-06-10')).toBe(false);
+  });
+
+  it('never flags a non-ISO string (intended-branch placeholders pass through)', () => {
+    expect(isPastISODate('September or later', '2026-06-10')).toBe(false);
+    expect(isPastISODate('2025-09', '2026-06-10')).toBe(false);
   });
 });
 

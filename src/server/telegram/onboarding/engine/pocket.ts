@@ -15,13 +15,17 @@
 import { slotValue } from '../slots/provenance';
 import type { GoalDistanceValue } from '../slots/schema';
 import type { OutOfCatalogGoal, V3OnboardingState } from '../slots/slot-state';
-import { deriveBucketFromMiles } from './numeric';
-import type { Chip, ExtractAdvanceOutput } from './extract-and-advance';
-import { enforceGuardrails, mergeFills, type ResolvedTurn } from './guardrails';
+import { CATALOG_FLOOR_MI, deriveBucketFromMiles } from './numeric';
+import type { Chip } from './extract-and-advance';
+import { enforceGuardrails, mergeFills, SYNTHETIC_GENERATE, type ResolvedTurn } from './guardrails';
 
-/** The nearest in-catalog structure today — the largest bucket. ULTRA_SUPPORT U1
- *  widens the catalog underneath this and the proxy graduates to a real ultra plan. */
-const PROXY: GoalDistanceValue = 'marathon';
+/** The nearest in-catalog structure, by direction (R1 fix 1): a goal below the
+ *  catalog floor proxies to the smallest bucket, anything else (oversize, or a
+ *  shapeless objective with no distance) to the largest. ULTRA_SUPPORT U1 widens
+ *  the catalog underneath the long side and the proxy graduates to a real plan. */
+function proxyFor(distanceMi: number | null): GoalDistanceValue {
+  return distanceMi != null && distanceMi < CATALOG_FLOOR_MI ? '5k' : 'marathon';
+}
 
 /** The consent chips on every pocket turn (a closed 2-option set → chips, per
  *  principle 2). `yes`/`no` are the exact tokens the router fast path keys on. */
@@ -31,8 +35,16 @@ export const POCKET_CHIPS: Chip[] = [
 ];
 
 /** The acknowledge + offer body. Daybreak voice, no hedging. The caller may
- *  prepend race context ("Found it — Western States, June 28. Heads up though: …"). */
+ *  prepend race context ("Found it — Western States, June 28. Heads up though: …").
+ *  Branches by direction: the short side (below the catalog floor) offers a 5K
+ *  block; the long side keeps the marathon offer byte-for-byte. */
 export function pocketBody(distanceMi: number | null): string {
+  if (distanceMi != null && distanceMi < CATALOG_FLOOR_MI) {
+    const rounded = Math.round(distanceMi);
+    const race = rounded === 1 ? 'A mile race' : `A ${rounded}-mile race`;
+    const pace = rounded === 1 ? 'mile-pace' : 'race-pace';
+    return `${race} is shorter than what I build a full plan for right now — I bottom out at the 5K. What I can do: a 5K block with ${pace} work in the mix, treating your target as the goal the whole way. Want that?`;
+  }
   const lead = distanceMi != null ? `${Math.round(distanceMi)} miles is` : "That's";
   const target = distanceMi != null ? 'it' : 'your goal';
   return `${lead} past what I can build a structured plan for right now — I top out at the marathon. What I can do is build you a strong marathon block and point you at ${target} as the target. Want that?`;
@@ -47,7 +59,7 @@ export function setPocket(
   const out: OutOfCatalogGoal = {
     words,
     distance_mi: distanceMi,
-    proxy: PROXY,
+    proxy: proxyFor(distanceMi),
     consent: 'pending',
   };
   return { ...state, out_of_catalog: out };
@@ -84,18 +96,6 @@ export function applyStatedDistance(
     chips: POCKET_CHIPS,
   };
 }
-
-const SYNTHETIC_GENERATE: ExtractAdvanceOutput = {
-  fills: [],
-  next_action: 'generate',
-  message: '',
-  chips: [],
-  asked_slot: null,
-  race_lookup_query: null,
-  goal_distance_mi: null,
-  contradiction: null,
-  numeric_unresolved: null,
-};
 
 /**
  * Accept the marathon-proxy (the `yes` chip): write `goal_distance` = proxy
@@ -134,7 +134,7 @@ export function declinePocket(state: V3OnboardingState): {
   return {
     state: { ...state, slots, out_of_catalog: undefined },
     message:
-      'No problem — want to aim at something I can build a full plan for? A marathon or shorter, or just staying fit.',
+      'No problem — want to aim at something I can build a full plan for? Anything from a 5K to a marathon, or just staying fit.',
     chips: [],
   };
 }

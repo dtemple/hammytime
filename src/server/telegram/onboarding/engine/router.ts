@@ -27,9 +27,21 @@ import {
   seedKnownGapsFromFilled,
 } from '../known-gaps-memory';
 import { callExtractAndAdvance, logOnboardingRun, type Chip } from './extract-and-advance';
-import { enforceGuardrails, mergeFills, resolveConfirmAndAdvance } from './guardrails';
+import {
+  enforceGuardrails,
+  mergeFills,
+  resolveConfirmAndAdvance,
+  resolveRecapAffirmAndAdvance,
+} from './guardrails';
 import { loadRecentHistory } from './history';
-import { deriveBucketFromMiles, resolveFinishTime } from './numeric';
+import {
+  CATALOG_FLOOR_MI,
+  deriveBucketFromMiles,
+  isPastISODate,
+  resolveFinishTime,
+  resolveFinishTimeForMiles,
+  todayISOInTz,
+} from './numeric';
 import {
   acceptPocketAndAdvance,
   applyStatedDistance,
@@ -182,23 +194,61 @@ async function runTurn({
     return;
   }
 
+  // Recap-affirm fast path (R1 fix 2): "Looks right" against the recap confirms
+  // every displayed slot in code — the athlete just affirmed the whole picture, so
+  // walking per-slot "Quick check" turns afterward is redundant (the Nathan
+  // transcript's five serial confirms). Typed affirmations fall through to the
+  // model; the same bulk-confirm fires in enforceGuardrails when its turn resolves
+  // to generate.
+  if (
+    state.recap_shown?.length &&
+    fromChip &&
+    text === 'yes' &&
+    !state.pending_confirm &&
+    state.out_of_catalog?.consent !== 'pending'
+  ) {
+    await logInbound(athleteId, logBody ?? text);
+    await withTyping(chatId, async () => {
+      const resolved = resolveRecapAffirmAndAdvance(state);
+      const working: V3OnboardingState = {
+        ...resolved.state,
+        last_processed_key: dedupKey ?? state.last_processed_key,
+      };
+      if (resolved.action === 'generate') {
+        await finishOnboarding(athlete, chatId, working);
+        return;
+      }
+      await saveV3State(athleteId, working);
+      await sendV3(athleteId, chatId, resolved.message, chipsKeyboard(resolved.chips));
+    });
+    return;
+  }
+
   await logInbound(athleteId, logBody ?? text);
 
   await withTyping(chatId, async () => {
     const history = await loadRecentHistory(athleteId, 12);
     const startedAt = new Date().toISOString();
 
+    // One retry on a failed model call (R1 fix 6): the Nathan transcript hit this
+    // fallback mid-onboarding on a transient API error. The athlete is waiting
+    // inside the typing indicator, so one immediate retry, no backoff, no third.
     let result;
     try {
       result = await callExtractAndAdvance({ state, history, latest: text, athleteId });
-    } catch (err) {
-      console.error('[v3] extract_and_advance failed', err);
-      await sendV3(
-        athleteId,
-        chatId,
-        'Lost the thread there for a second — mind saying that again?',
-      );
-      return;
+    } catch (firstErr) {
+      console.error('[v3] extract_and_advance failed, retrying', firstErr);
+      try {
+        result = await callExtractAndAdvance({ state, history, latest: text, athleteId });
+      } catch (err) {
+        console.error('[v3] extract_and_advance failed', err);
+        await sendV3(
+          athleteId,
+          chatId,
+          'Lost the thread there for a second — mind saying that again?',
+        );
+        return;
+      }
     }
     void logOnboardingRun(athleteId, startedAt, result.inputTokens, result.outputTokens);
 
@@ -209,18 +259,6 @@ async function runTurn({
     };
     let message = resolved.message;
     let chips = resolved.chips;
-
-    // Deterministic numeric backstop (§5.1): never let an implausible finish time
-    // reach the plan. Runs whenever this turn touched target_time.
-    const touchedTarget = result.output.fills.some((f) => f.slot === 'target_time');
-    if (touchedTarget) {
-      const backstop = backstopTargetTime(working);
-      if (backstop) {
-        working = backstop.state;
-        message = backstop.message;
-        chips = backstop.chips;
-      }
-    }
 
     // Race lookup — a second, slower call, only on the race-naming turn. A
     // confirmed race's distance drives goal_distance in code (resolveRace);
@@ -249,7 +287,28 @@ async function runTurn({
       working = reconcilePocket(state.out_of_catalog, working);
     }
 
-    if (resolved.action === 'generate') {
+    // Deterministic numeric backstop (§5.1): never let an implausible finish time
+    // reach the plan. Runs whenever this turn touched target_time — AFTER the
+    // pocket/race-lookup block, because a pocketed goal validates against its real
+    // distance, which the same turn may have just set ("1 mile in under 5 minutes"
+    // opens the pocket AND fills target_time; R1 fix 5). When the backstop and the
+    // pocket both want the turn, the backstop's message wins — the pocket stays
+    // pending in state and summarizeState/reconcilePocket settle it next turn.
+    const touchedTarget = result.output.fills.some((f) => f.slot === 'target_time');
+    let backstopFired = false;
+    if (touchedTarget) {
+      const backstop = backstopTargetTime(working);
+      if (backstop) {
+        backstopFired = true;
+        working = backstop.state;
+        message = backstop.message;
+        chips = backstop.chips;
+      }
+    }
+
+    // A fired backstop owns the turn even against a generate — building the plan
+    // now would silently drop the athlete's goal time (the "sub-5 evaporated" bug).
+    if (resolved.action === 'generate' && !backstopFired) {
       await finishOnboarding(athlete, chatId, working);
       return;
     }
@@ -267,10 +326,26 @@ function backstopTargetTime(
   state: V3OnboardingState,
 ): { state: V3OnboardingState; message: string; chips: Chip[] } | null {
   const tt = state.slots.target_time;
-  const distance = state.slots.goal_distance?.value as GoalDistanceValue | undefined;
-  if (!tt || typeof tt.value !== 'number' || !distance) return null;
+  if (!tt || typeof tt.value !== 'number') return null;
 
-  const res = resolveFinishTime(tt.value, distance);
+  // A pocketed goal validates against its REAL distance via the pace envelope —
+  // 300s is implausible for the 5k bucket but right for the mile behind the proxy
+  // (R1 fix 5). The bucket table stays the fallback when no concrete distance
+  // exists; no distance at all → nothing to validate against yet.
+  const oocMiles = state.out_of_catalog?.distance_mi;
+  const distance = state.slots.goal_distance?.value as GoalDistanceValue | undefined;
+  let res;
+  let forLabel: string;
+  if (oocMiles != null) {
+    res = resolveFinishTimeForMiles(tt.value, oocMiles);
+    const rounded = Math.round(oocMiles);
+    forLabel = rounded === 1 ? 'the mile' : `${rounded} miles`;
+  } else if (distance) {
+    res = resolveFinishTime(tt.value, distance);
+    forLabel = `a ${distance}`;
+  } else {
+    return null;
+  }
   if (res.status === 'ok' || res.status === 'no_range') return null;
 
   // Drop the implausible value so it can't be committed; ask for the right reading.
@@ -291,9 +366,11 @@ function backstopTargetTime(
     };
   }
   // out_of_range
+  const units =
+    oocMiles != null && oocMiles < CATALOG_FLOOR_MI ? 'minutes and seconds' : 'hours and minutes';
   return {
     state: next,
-    message: `That time doesn't look right for a ${distance}. What's your goal finish, as hours and minutes?`,
+    message: `That time doesn't look right for ${forLabel}. What's your goal finish, as ${units}?`,
     chips: [],
   };
 }
@@ -313,17 +390,24 @@ async function resolveRace(
 
   if (r.ok && 'found' in r) {
     const f = r.found;
-    const dateStr = f.date ?? 'date still TBD';
+    // A past date from the race DB is a stale edition (last year's running) — it
+    // must not land `stated`+confirmed and bypass the merge-time guard (R1 fix 3).
+    // Treat it as absent; the gate asks for the date like any dateless race.
+    const todayISO = todayISOInTz(
+      (state.slots.timezone?.value as string | null) ?? 'America/Los_Angeles',
+    );
+    const date = f.date && !isPastISODate(f.date, todayISO) ? f.date : null;
+    const dateStr = date ?? 'date still TBD';
     const derived = f.distance_mi != null ? deriveBucketFromMiles(f.distance_mi) : null;
 
     // Out of catalog (e.g. Western States, 100 mi): the consent turn doubles as the
-    // race confirm, so name + date land `stated`; a `yes` takes the marathon-proxy.
+    // race confirm, so name + date land `stated`; a `yes` takes the proxy.
     if (f.distance_mi != null && derived === null) {
       const slots: SlotState = {
         ...state.slots,
         goal_type: state.slots.goal_type ?? mkSlot('race', 'inferred', true),
         goal_race: mkSlot(f.canonical_name, 'stated', true),
-        goal_date: f.date ? mkSlot(f.date, 'stated', true) : state.slots.goal_date,
+        goal_date: date ? mkSlot(date, 'stated', true) : state.slots.goal_date,
       };
       return {
         state: setPocket({ ...state, slots }, f.canonical_name, f.distance_mi),
@@ -337,7 +421,7 @@ async function resolveRace(
       goal_type: state.slots.goal_type ?? mkSlot('race', 'inferred', true),
       // System-resolved → unconfirmed: the athlete confirms the match (plan-driving).
       goal_race: mkSlot(f.canonical_name, 'inferred', false),
-      goal_date: f.date ? mkSlot(f.date, 'inferred', false) : state.slots.goal_date,
+      goal_date: date ? mkSlot(date, 'inferred', false) : state.slots.goal_date,
       // The bucket comes from the number in code, never the model (§5.3). `stated`
       // (the athlete confirms the race) skips the redundant distance-confirm gate.
       goal_distance: derived ? mkSlot(derived, 'stated', true) : state.slots.goal_distance,
@@ -390,6 +474,27 @@ async function finishOnboarding(
     try {
       await commitSlotsSafe(athleteId, state);
     } catch (err) {
+      // Commit refuses a past target_date outright (R1 fix 3 / T-9): with the
+      // merge-time guard upstream this should be unreachable, so log loudly,
+      // reset the date, and route back to intake instead of generating.
+      if ((err as { code?: string })?.code === 'PAST_TARGET_DATE') {
+        console.error('[v3] commit refused: past target_date', err);
+        await sendDavidAlert(
+          `v3 commit refused for ${athleteId}: past target_date (${String(err)})`,
+        ).catch(() => {});
+        await saveV3State(athleteId, {
+          ...state,
+          slots: { ...state.slots, goal_date: mkSlot<string>(null, 'unknown', false) },
+          phase: 'intake',
+          recap_shown: undefined,
+        });
+        await sendV3(
+          athleteId,
+          chatId,
+          "That race date looks like it's already behind us — what's the actual date?",
+        );
+        return;
+      }
       console.error('[v3] commitSlots failed', err);
       await sendDavidAlert(`v3 commit failed for ${athleteId}: ${String(err)}`).catch(() => {});
       await sendV3(

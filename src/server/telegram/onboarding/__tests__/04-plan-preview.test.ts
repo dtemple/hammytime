@@ -11,11 +11,7 @@ vi.mock('@/server/admin/alerts', () => ({ sendDavidAlert: vi.fn().mockResolvedVa
 import { selectPlan, renderPlan, DRAFT_SAFETY_CAPS } from '@/lib/plan-templates';
 import type { SelectorProfile } from '@/lib/plan-templates';
 import { formatPreview, planPreviewStep } from '../steps/04-plan-preview';
-import {
-  generateAndPersistPlan,
-  getActiveTemplatePlan,
-  setPlanStrengthToZero,
-} from '../plan-gen';
+import { generateAndPersistPlan, getActiveTemplatePlan, setPlanStrengthToZero } from '../plan-gen';
 import { enqueueJob } from '@/server/jobs/enqueue';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -54,7 +50,9 @@ function render(profile: SelectorProfile) {
   return { plan: renderPlan(template, params), params };
 }
 
-function buttons(kb: { inline_keyboard: { text: string; callback_data?: string }[][] } | undefined) {
+function buttons(
+  kb: { inline_keyboard: { text: string; callback_data?: string }[][] } | undefined,
+) {
   return (kb?.inline_keyboard ?? []).flat().map((b) => b.callback_data);
 }
 
@@ -107,8 +105,59 @@ describe('formatPreview', () => {
   });
 
   it('omits the ease-in line when a clamped far race makes week 1 a normal future week', () => {
-    const { plan, params } = render({ ...COMMITTED, targetDate: '2027-06-01', race: { ...COMMITTED.race!, date: '2027-06-01' } });
+    const { plan, params } = render({
+      ...COMMITTED,
+      targetDate: '2027-06-01',
+      race: { ...COMMITTED.race!, date: '2027-06-01' },
+    });
     expect(formatPreview(plan, params)).not.toContain('first full week');
+  });
+
+  // R1 fix 4: a tiny horizon means an upstream invariant broke (a past goal_date
+  // clamps weeks-to-race to 1 — the "~1 weeks of base and build" preview).
+  it('suppresses the build arc and logs below the horizon floor (no-race variant)', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { plan, params } = render(INTENDED);
+    const tiny = {
+      ...plan,
+      metadata: {
+        ...plan.metadata,
+        plan_structure: { ...plan.metadata.plan_structure, total_weeks: 1 },
+      },
+    };
+    const text = formatPreview(tiny, { ...params, totalWeeks: 1 });
+    expect(text).not.toContain('1 weeks'); // the malformed phrasing
+    expect(text).not.toContain('weeks of base and build'); // no numeric arc
+    expect(text).not.toContain('growing from');
+    expect(text).toContain('short opening block');
+    expect(text).toContain('No race locked');
+    expect(spy).toHaveBeenCalledWith(
+      '[plan-preview] total_weeks below horizon floor',
+      expect.objectContaining({ totalWeeks: 1 }),
+    );
+    spy.mockRestore();
+  });
+
+  it('keeps the build arc (and stays quiet) at a normal horizon', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { plan, params } = render(INTENDED);
+    const text = formatPreview(plan, params);
+    expect(text).toMatch(/~\d+ weeks of base and build/);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('pluralizes the committed-race countdown ("1 week to", not "1 weeks to")', () => {
+    const { plan, params } = render(COMMITTED);
+    const oneWeek = {
+      ...plan,
+      metadata: {
+        ...plan.metadata,
+        plan_structure: { ...plan.metadata.plan_structure, total_weeks: 1 },
+      },
+    };
+    expect(formatPreview(oneWeek, params)).toContain('1 week to CIM');
+    expect(formatPreview(plan, params)).toMatch(/\d+ weeks to CIM/);
   });
 });
 
@@ -159,7 +208,11 @@ describe('planPreviewStep.handleCallback', () => {
   });
 
   it('plan:adjust enqueues a tg_message keyed on the version id and completes', async () => {
-    (getActiveTemplatePlan as AnyMock).mockResolvedValue({ planId: 'p1', versionId: 'v9', plan: {} });
+    (getActiveTemplatePlan as AnyMock).mockResolvedValue({
+      planId: 'p1',
+      versionId: 'v9',
+      plan: {},
+    });
     const res = await planPreviewStep.handleCallback!('plan:adjust', {}, 'a1');
     expect(enqueueJob).toHaveBeenCalledWith(
       'tg_message',

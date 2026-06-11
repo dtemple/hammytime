@@ -97,6 +97,8 @@ This is **two compounding bugs**:
 
 ## T-9 · Onboarding preview never flagged the wrong date · P2 · handoff
 
+> **Done in two halves.** The renderer half (the gen-time "exactly one race day == `metadata.race.date`" assertion) shipped 2026-06-08 with T-1 (SPEC v0.7.24). The input half was absorbed into **R1** (`Specs/ONBOARDING_REFLECTION.md`, 2026-06-10): a past `goal_date` is reset to unknown at merge time, and `commitSlots` refuses outright (`PastTargetDateError`) before any write — a wrong date can no longer reach generation at all.
+
 **Symptom.** The 7:41 plan preview ("11 weeks to Santa Rosa, peaking at 17") gave no hint the schedule ended Aug 15; the worker caught it 11 min later on `/fresh_update`. Per `ONBOARDING_V3.md` §9, plan correctness shouldn't depend on the worker noticing a renderer bug.
 
 **Proposed fix.** The gen-time assertion from T-1 (rendered race day == `metadata.race.date`) — fail or self-correct at generation rather than relying on the coach. Low risk; this is the safety net that makes T-1 stay fixed.

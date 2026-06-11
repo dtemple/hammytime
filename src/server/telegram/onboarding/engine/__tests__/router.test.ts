@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
 
 // --- boundary mocks (the router orchestrates already-tested pure pieces) ---
 
@@ -72,11 +72,18 @@ vi.mock('../../known-gaps-memory', async (orig) => ({
 
 import { handleV3Message, handleV3Callback } from '../router';
 import { lookupRace } from '@/server/agent/race-lookup';
+import { sendDavidAlert } from '@/server/admin/alerts';
 import { KNOWN_GAPS } from '@/lib/known-gaps';
+import { recapDisplayedSlots } from '../guardrails';
 import { initialV3State, type V3OnboardingState } from '../../slots/slot-state';
 import type { SlotState } from '../../slots/schema';
 import type { Provenance, SlotValue } from '../../slots/provenance';
 import type { ExtractAdvanceOutput } from '../extract-and-advance';
+
+// Pin the clock: the past-goal_date guard (R1 fix 3) runs inside the real
+// guardrails these tests exercise, so the 2026 fixture dates must never rot.
+beforeAll(() => vi.useFakeTimers({ now: new Date('2026-06-10T12:00:00-07:00'), toFake: ['Date'] }));
+afterAll(() => vi.useRealTimers());
 
 function sv<const T>(value: T, provenance: Provenance = 'stated'): SlotValue<T> {
   return { value, provenance, confirmed: true };
@@ -514,6 +521,216 @@ describe('router — pocket consent chips (V3-W8)', () => {
     );
     const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
     expect(saved.out_of_catalog).toBeUndefined();
+  });
+});
+
+// --- R1 fix 2: the recap-affirm fast path (the Nathan regression) ---
+
+describe('router — recap-affirm fast path (R1 fix 2)', () => {
+  // The Nathan state at recap time: core complete, the inferred slots displayed
+  // in the recap but unconfirmed — the shape that produced five serial
+  // "Quick check" turns after he tapped "Looks right".
+  function nathanState(): V3OnboardingState {
+    const slots: SlotState = {
+      ...completeSlots(),
+      goal_date: { value: '2026-09-01', provenance: 'inferred', confirmed: false },
+      experience_tier: { value: 'experienced', provenance: 'inferred', confirmed: false },
+      days_per_week: { value: 3, provenance: 'inferred', confirmed: false },
+      long_run_day: { value: 3, provenance: 'inferred', confirmed: false },
+    };
+    const base = { ...initialV3State(null), phase: 'recap' as const, slots };
+    return { ...base, recap_shown: recapDisplayedSlots(base) };
+  }
+
+  it('"Looks right" on the recap generates with zero Quick-check turns and no model call', async () => {
+    loadV3State.mockResolvedValue(nathanState());
+
+    await handleV3Callback(cbCtx('cbrecapyes'), athlete, 'v3:yes');
+
+    expect(callExtractAndAdvance).not.toHaveBeenCalled();
+    expect(commitSlots).toHaveBeenCalledOnce();
+    expect(sendMessage).toHaveBeenCalledWith(99, 'YOUR PLAN', expect.anything());
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      99,
+      expect.stringMatching(/Quick check/),
+      expect.anything(),
+    );
+  });
+
+  it('pending_confirm takes precedence over the recap snapshot', async () => {
+    loadV3State.mockResolvedValue({
+      ...nathanState(),
+      pending_confirm: { slot: 'days_per_week', value: 3, attempts: 1 },
+    });
+
+    await handleV3Callback(cbCtx('cbprec'), athlete, 'v3:yes');
+
+    // resolved by the pending-confirm path: the single slot confirms, then the
+    // gate chains; either way the model is never called.
+    expect(callExtractAndAdvance).not.toHaveBeenCalled();
+    const saved =
+      (saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState | undefined) ?? undefined;
+    if (saved) expect(saved.slots.days_per_week?.confirmed).toBe(true);
+  });
+
+  it('a recap turn records recap_shown on the saved state', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: completeSlots(),
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({ next_action: 'recap', message: 'here is what I have' }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(60, 'that is everything'), athlete);
+
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.recap_shown?.length).toBeGreaterThan(0);
+  });
+});
+
+// --- R1 fixes 1 + 5: the mile turn — catalog floor, pocket, pace envelope ---
+
+describe('router — the Nathan mile turn (R1 fixes 1 + 5)', () => {
+  it('"1 mile in under 5 minutes" opens the short pocket AND keeps the 300s target', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race') },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'ask',
+        goal_distance_mi: 1,
+        message: 'got it',
+        fills: [{ slot: 'target_time', value: 300, provenance: 'stated' }],
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(70, '1 mile in under 5 minutes'), athlete);
+
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toMatch(/5K block/); // the short-side pocket offer
+    expect(labels(call)).toEqual(['Do that', 'Not now']);
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.out_of_catalog).toMatchObject({ distance_mi: 1, proxy: '5k', consent: 'pending' });
+    expect(saved.slots.goal_distance).toBeUndefined(); // never silently a 5K
+    // the envelope (1 mi × 230–1500 s/mi) accepts 300s — sub-5 survives to commit
+    expect(saved.slots.target_time?.value).toBe(300);
+  });
+
+  it('an implausible time for the pocketed distance is cleared and re-asked', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race') },
+      out_of_catalog: {
+        words: 'a fast mile',
+        distance_mi: 1,
+        proxy: '5k',
+        consent: 'pending',
+      },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'ask',
+        message: 'noted',
+        fills: [{ slot: 'target_time', value: 30, provenance: 'stated' }], // a 30-second mile
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(71, '30 seconds'), athlete);
+
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toMatch(/doesn't look right for the mile/i);
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.slots.target_time?.value).toBeNull();
+  });
+});
+
+// --- R1 fix 3 (d): commit refuses a past target_date ---
+
+describe('router — commit refusal on a past target_date (R1 fix 3 / T-9)', () => {
+  it('resets the date, routes back to intake, and alerts David instead of generating', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'recap',
+      slots: completeSlots(),
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({ next_action: 'generate', message: 'building it' }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+    commitSlots.mockRejectedValueOnce(
+      Object.assign(new Error('target_date 2025-09-01 is in the past'), {
+        code: 'PAST_TARGET_DATE',
+      }),
+    );
+
+    await handleV3Message(ctx(80, 'go'), athlete);
+
+    expect(vi.mocked(sendDavidAlert)).toHaveBeenCalledWith(
+      expect.stringMatching(/past target_date/),
+    );
+    expect(sendMessage).toHaveBeenCalledWith(
+      99,
+      expect.stringMatching(/already behind us/i),
+      expect.anything(),
+    );
+    expect(sendMessage).not.toHaveBeenCalledWith(99, 'YOUR PLAN', expect.anything());
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.phase).toBe('intake');
+    expect(saved.slots.goal_date?.value).toBeNull();
+    expect(saved.slots.goal_date?.provenance).toBe('unknown');
+  });
+});
+
+// --- R1 fix 6: one retry on a failed model call ---
+
+describe('router — extract-call retry (R1 fix 6)', () => {
+  it('retries once on a transient failure and proceeds normally', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockRejectedValueOnce(new Error('api blip')).mockResolvedValueOnce({
+      output: out({ next_action: 'ask', asked_slot: 'goal_type', message: 'what for?' }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(90, 'hi'), athlete);
+
+    expect(callExtractAndAdvance).toHaveBeenCalledTimes(2);
+    expect(sendMessage).toHaveBeenCalledWith(99, 'what for?', expect.anything());
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      99,
+      expect.stringMatching(/Lost the thread/),
+      expect.anything(),
+    );
+  });
+
+  it('falls back after the second failure, once', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockRejectedValue(new Error('api down'));
+
+    await handleV3Message(ctx(91, 'hi'), athlete);
+
+    expect(callExtractAndAdvance).toHaveBeenCalledTimes(2);
+    const fallbacks = sendMessage.mock.calls.filter((c) => /Lost the thread/.test(String(c[1])));
+    expect(fallbacks).toHaveLength(1);
+    expect(saveV3State).not.toHaveBeenCalled();
   });
 });
 

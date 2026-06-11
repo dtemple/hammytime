@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import {
   coerceFill,
   mergeFills,
@@ -6,14 +6,23 @@ import {
   firstUnconfirmedInferred,
   enforceGuardrails,
   resolveConfirmAndAdvance,
+  resolveRecapAffirmAndAdvance,
+  recapDisplayedSlots,
   applyChipPolicy,
   buildRecapMessage,
+  formatSlotValue,
 } from '../guardrails';
 import { INJURY_CHIPS, SLOT_CHIPS } from '../../slots/chips';
 import { initialV3State, type V3OnboardingState } from '../../slots/slot-state';
 import type { SlotKey, SlotState } from '../../slots/schema';
 import type { SlotValue, Provenance } from '../../slots/provenance';
 import type { ExtractAdvanceOutput, SlotFill } from '../extract-and-advance';
+
+// Pin the clock: the past-goal_date guard (R1 fix 3) compares fixture dates to
+// "today", so without this the 2026 fixtures rot into the past and the suite
+// starts failing on its own schedule.
+beforeAll(() => vi.useFakeTimers({ now: new Date('2026-06-10T12:00:00-07:00'), toFake: ['Date'] }));
+afterAll(() => vi.useRealTimers());
 
 function sv<const T>(value: T, provenance: Provenance = 'stated', confirmed = true): SlotValue<T> {
   return { value, provenance, confirmed };
@@ -470,7 +479,7 @@ describe('buildRecapMessage', () => {
     const msg = buildRecapMessage(stateWith(slots));
     expect(msg).toContain('Sam'); // personal greeting
     expect(msg).toContain('CIM');
-    expect(msg).toContain('2026-12-06');
+    expect(msg).toContain('Dec 6, 2026'); // human-readable, never raw ISO (R1 fix 3)
     expect(msg).toContain('marathon');
     expect(msg).toContain('nothing bothering you'); // injury_status none
     expect(msg).toContain('3:45:00'); // goal time rendered
@@ -640,5 +649,229 @@ describe('chip registry — round-trip safety', () => {
         expect(coerceFill(slot as SlotKey, c.value)).toBe(c.value);
       }
     }
+  });
+});
+
+// --- R1 fix 3: the past-goal_date guard + human-readable dates ---
+
+describe('formatSlotValue — goal_date rendering (R1 fix 3)', () => {
+  it('renders an ISO date human-readable, year visible', () => {
+    expect(formatSlotValue('goal_date', '2026-09-01')).toBe('Sep 1, 2026');
+    expect(formatSlotValue('goal_date', '2025-09-01')).toBe('Sep 1, 2025'); // a wrong year is now visible
+  });
+
+  it('passes a non-ISO value through untouched', () => {
+    expect(formatSlotValue('goal_date', 'September-ish')).toBe('September-ish');
+  });
+});
+
+describe('enforceGuardrails — past goal_date guard (R1 fix 3)', () => {
+  const TODAY = { todayISO: '2026-06-10' };
+
+  it('resets a past goal_date fill to unknown and re-asks ("September or later" → 2025-09-01)', () => {
+    const slots = { ...coreSlots('race'), injury_status: sv('none') };
+    const r = enforceGuardrails(
+      stateWith(slots),
+      out({ next_action: 'generate', fills: [fill('goal_date', '2025-09-01', 'inferred')] }),
+      TODAY,
+    );
+    expect(r.state.slots.goal_date!.value).toBeNull();
+    expect(r.state.slots.goal_date!.provenance).toBe('unknown');
+    expect(r.action).toBe('ask'); // goal_date is required-core for a race goal
+    expect(r.message).toMatch(/race date/i);
+  });
+
+  it('clears a past goal_date already sitting in state, not just a fresh fill', () => {
+    const slots = { ...coreSlots('race'), goal_date: sv('2025-09-01'), injury_status: sv('none') };
+    const r = enforceGuardrails(stateWith(slots), out({ next_action: 'generate' }), TODAY);
+    expect(r.state.slots.goal_date!.provenance).toBe('unknown');
+  });
+
+  it('leaves a future date and a non-ISO placeholder alone', () => {
+    const future = enforceGuardrails(
+      stateWith({ ...coreSlots('race'), injury_status: sv('none') }),
+      out({ next_action: 'generate' }),
+      TODAY,
+    );
+    expect(future.state.slots.goal_date!.value).toBe('2026-11-01');
+
+    const placeholder = enforceGuardrails(
+      stateWith({ ...coreSlots('race'), goal_date: sv('September or later') }),
+      out({ next_action: 'ask', asked_slot: 'injury_status' }),
+      TODAY,
+    );
+    expect(placeholder.state.slots.goal_date!.value).toBe('September or later');
+  });
+
+  it('renders the date human-readable in a deterministic confirm', () => {
+    const slots = {
+      ...coreSlots('race'),
+      goal_date: sv('2026-09-01', 'inferred', false),
+      injury_status: sv('none'),
+    };
+    const r = enforceGuardrails(stateWith(slots), out({ next_action: 'generate' }), TODAY);
+    expect(r.action).toBe('confirm');
+    expect(r.message).toContain('Sep 1, 2026');
+    expect(r.message).not.toContain('2026-09-01');
+  });
+});
+
+// --- R1 fix 2: the recap bulk-confirm ---
+
+// The Nathan fill shape at recap time: distance settled, the Strava-inferred and
+// model-inferred slots all unconfirmed — the state that produced five serial
+// "Quick check" turns after an affirmed recap.
+function nathanSlots(): SlotState {
+  return {
+    goal_type: sv('race'),
+    goal_distance: sv('5k', 'stated', true),
+    goal_date: sv('2026-09-01', 'inferred', false),
+    experience_tier: sv('experienced', 'inferred', false),
+    days_per_week: sv(3, 'inferred', false),
+    long_run_day: sv(3, 'inferred', false),
+    injury_status: sv('past'),
+    target_time: sv(300, 'inferred', false),
+  };
+}
+
+describe('enforceGuardrails — recap_shown bookkeeping (R1 fix 2)', () => {
+  it('records the displayed pairs when the gate forces a recap', () => {
+    const r = enforceGuardrails(stateWith(coreSlots('race')), out({ next_action: 'generate' }), {
+      todayISO: '2026-06-10',
+    });
+    expect(r.action).toBe('recap');
+    expect(r.state.recap_shown).toContainEqual({ slot: 'goal_distance', value: 'marathon' });
+    expect(r.state.recap_shown).toContainEqual({ slot: 'days_per_week', value: 4 });
+    expect(r.state.recap_shown).toContainEqual({ slot: 'goal_date', value: '2026-11-01' });
+  });
+
+  it('records on a model-authored recap too (no buildRecapMessage call)', () => {
+    const r = enforceGuardrails(
+      stateWith(coreSlots('race')),
+      out({ next_action: 'recap', message: 'here is what I have…' }),
+    );
+    expect(r.state.recap_shown?.length).toBeGreaterThan(0);
+  });
+
+  it('clears the snapshot on any non-recap resolution', () => {
+    const r = enforceGuardrails(
+      stateWith(coreSlots('race'), { recap_shown: [{ slot: 'days_per_week', value: 4 }] }),
+      out({ next_action: 'ask', asked_slot: 'age' }),
+    );
+    expect(r.state.recap_shown).toBeUndefined();
+  });
+});
+
+describe('enforceGuardrails — recap bulk-confirm (R1 fix 2, the Nathan regression)', () => {
+  const TODAY = { todayISO: '2026-06-10' };
+
+  it('an affirmed recap confirms every displayed slot — zero Quick-check turns', () => {
+    const slots = nathanSlots();
+    const shown = recapDisplayedSlots(stateWith(slots));
+    const r = enforceGuardrails(
+      stateWith(slots, { phase: 'recap', recap_shown: shown }),
+      out({ next_action: 'generate', message: 'building it' }),
+      TODAY,
+    );
+    expect(r.action).toBe('generate');
+    expect(r.overridden).toBe(false);
+    for (const k of [
+      'goal_date',
+      'experience_tier',
+      'days_per_week',
+      'long_run_day',
+      'target_time',
+    ] as const) {
+      expect(r.state.slots[k]!.confirmed).toBe(true);
+      expect(r.state.slots[k]!.provenance).toBe('stated');
+    }
+    expect(r.state.recap_shown).toBeUndefined(); // consumed
+  });
+
+  it('a slot corrected in the same turn is excluded — one legitimate confirm, not five', () => {
+    const slots = nathanSlots();
+    const shown = recapDisplayedSlots(stateWith(slots));
+    const r = enforceGuardrails(
+      stateWith(slots, { phase: 'recap', recap_shown: shown }),
+      out({
+        next_action: 'generate',
+        fills: [fill('days_per_week', 4, 'inferred')], // "actually 4 days" mid-affirmation
+      }),
+      TODAY,
+    );
+    expect(r.action).toBe('confirm');
+    expect(r.state.pending_confirm?.slot).toBe('days_per_week');
+    // the untouched displayed slots were still bulk-confirmed
+    expect(r.state.slots.goal_date!.confirmed).toBe(true);
+    expect(r.state.slots.experience_tier!.confirmed).toBe(true);
+  });
+
+  it('an affirmed recap with the injury beat open asks the injury question, not a second recap', () => {
+    const slots = nathanSlots();
+    delete slots.injury_status;
+    const shown = recapDisplayedSlots(stateWith(slots));
+    const r = enforceGuardrails(
+      stateWith(slots, { phase: 'recap', recap_shown: shown }),
+      out({ next_action: 'generate' }),
+      TODAY,
+    );
+    expect(r.action).toBe('ask');
+    expect(r.message).toMatch(/anything bothering you/i);
+    expect(r.chips.map((c) => c.label)).toEqual(['Nothing right now', 'Skip']);
+    expect(r.state.recap_shown).toBeUndefined();
+  });
+
+  it('no bulk-confirm without a preceding recap (a plain generate turn)', () => {
+    const slots = nathanSlots();
+    const r = enforceGuardrails(stateWith(slots), out({ next_action: 'generate' }), TODAY);
+    expect(r.action).toBe('confirm'); // the normal gate walk — recap_shown was never set
+  });
+});
+
+describe('resolveRecapAffirmAndAdvance — the chip fast path (R1 fix 2)', () => {
+  it('a "Looks right" tap resolves straight to generate with everything confirmed', () => {
+    const slots = nathanSlots();
+    const shown = recapDisplayedSlots(stateWith(slots));
+    const r = resolveRecapAffirmAndAdvance(
+      stateWith(slots, { phase: 'recap', recap_shown: shown }),
+    );
+    expect(r.action).toBe('generate');
+    expect(r.state.slots.days_per_week!.confirmed).toBe(true);
+    expect(r.state.pending_confirm).toBeUndefined();
+  });
+});
+
+describe('recapDisplayedSlots — mirrors what the recap shows', () => {
+  it('includes only displayed slots and skips unknowns', () => {
+    const slots: SlotState = {
+      ...nathanSlots(),
+      injury_status: sv('unknown', 'unknown', false), // a skip — the recap shows nothing for it
+    };
+    const shown = recapDisplayedSlots(stateWith(slots));
+    const keys = shown.map((s) => s.slot);
+    expect(keys).not.toContain('injury_status');
+    expect(keys).toContain('goal_distance');
+    expect(keys).toContain('target_time');
+  });
+
+  it('in the accepted-pocket case records the displayed proxy, not the race line', () => {
+    const slots: SlotState = {
+      ...coreSlots('race'),
+      goal_race: sv('Rae Lakes Loop'),
+      injury_status: sv('none'),
+    };
+    const shown = recapDisplayedSlots(
+      stateWith(slots, {
+        out_of_catalog: {
+          words: 'Rae Lakes Loop',
+          distance_mi: 44,
+          proxy: 'marathon',
+          consent: 'accepted',
+        },
+      }),
+    );
+    const keys = shown.map((s) => s.slot);
+    expect(keys).toContain('goal_distance'); // the proxy is what the recap displays
+    expect(keys).not.toContain('goal_race'); // the ooc goal line replaces the race line
   });
 });

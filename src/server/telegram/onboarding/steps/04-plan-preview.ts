@@ -3,11 +3,7 @@ import type { Plan } from '@/lib/plan-schema';
 import type { GoalDistance, RenderParams } from '@/lib/plan-templates';
 import { enqueueJob } from '@/server/jobs/enqueue';
 import { sendDavidAlert } from '@/server/admin/alerts';
-import {
-  generateAndPersistPlan,
-  getActiveTemplatePlan,
-  setPlanStrengthToZero,
-} from '../plan-gen';
+import { generateAndPersistPlan, getActiveTemplatePlan, setPlanStrengthToZero } from '../plan-gen';
 import type { OnboardingStep, StepHandleResult } from '../types';
 
 // Beat B1 (onboarding v2, W4): the payoff. The deterministic template engine
@@ -60,7 +56,7 @@ export function formatPreview(plan: Plan, params: RenderParams): string {
 
   if (params.race) {
     lines.push(
-      `Here's your starting plan: **${ps.total_weeks} weeks to ${params.race.name}, ` +
+      `Here's your starting plan: **${ps.total_weeks} week${ps.total_weeks === 1 ? '' : 's'} to ${params.race.name}, ` +
         `building from ~${startMi} to ~${peakMi} mi/wk, long runs on ${lrDay}, peaking at ${peakLong}.**`,
     );
     lines.push(
@@ -74,12 +70,23 @@ export function formatPreview(plan: Plan, params: RenderParams): string {
     );
   } else {
     const distance = DISTANCE_LABEL[params.distance];
-    const horizon =
-      params.totalWeeks == null ? 'a rolling base block' : `~${ps.total_weeks} weeks of base and build`;
-    lines.push(
-      `Here's your starting plan: **building toward ${distance}, ${horizon}, growing from ~${startMi} ` +
-        `to ~${peakMi} mi/wk, long runs on ${lrDay}.**`,
-    );
+    const weeks = params.totalWeeks == null ? null : ps.total_weeks;
+    if (weeks != null && weeks < 3) {
+      // A dateless goal clamped to a tiny horizon means an upstream invariant
+      // broke (a past goal_date clamps weeks-to-race to 1 — the "~1 weeks" bug).
+      // Don't render a build arc off it; log it loudly instead (R1 fix 4).
+      console.error('[plan-preview] total_weeks below horizon floor', { totalWeeks: weeks });
+      lines.push(
+        `Here's your starting plan: **building toward ${distance} — a short opening block to get ` +
+          `you moving, long runs on ${lrDay}.** We'll build from there.`,
+      );
+    } else {
+      const horizon = weeks == null ? 'a rolling base block' : `~${weeks} weeks of base and build`;
+      lines.push(
+        `Here's your starting plan: **building toward ${distance}, ${horizon}, growing from ~${startMi} ` +
+          `to ~${peakMi} mi/wk, long runs on ${lrDay}.**`,
+      );
+    }
     lines.push(
       "No race locked yet, so I've laid out base and build but held off on the taper — tell me the " +
         "race when you pick it and I'll anchor the calendar and add the peak.",
@@ -130,7 +137,9 @@ export function formatPreview(plan: Plan, params: RenderParams): string {
 const RETRY_KEYBOARD = new InlineKeyboard().text('Try again', 'plan:retry');
 const FAIL_TEXT = "I hit a snag building your plan. Tap and I'll have another go.";
 
-async function buildPreview(athleteId: string): Promise<{ text: string; keyboard: InlineKeyboard }> {
+async function buildPreview(
+  athleteId: string,
+): Promise<{ text: string; keyboard: InlineKeyboard }> {
   const { plan, params } = await generateAndPersistPlan(athleteId);
   return { text: formatPreview(plan, params), keyboard: previewKeyboard(params) };
 }
@@ -142,9 +151,9 @@ async function onEnter(athleteId: string): Promise<{ text: string; keyboard?: In
     return await buildPreview(athleteId);
   } catch (err) {
     console.error('[plan-preview] generate failed', err);
-    await sendDavidAlert(`B1 plan generation failed for athlete ${athleteId}: ${String(err)}`).catch(
-      () => {},
-    );
+    await sendDavidAlert(
+      `B1 plan generation failed for athlete ${athleteId}: ${String(err)}`,
+    ).catch(() => {});
     return { text: FAIL_TEXT, keyboard: RETRY_KEYBOARD };
   }
 }
@@ -176,7 +185,8 @@ async function handleCallback(
     return {
       done: true,
       newPartial: {},
-      reply: "Good — I'll take a pass at it and message you in a moment. A couple of quick things first.",
+      reply:
+        "Good — I'll take a pass at it and message you in a moment. A couple of quick things first.",
     };
   }
 
@@ -211,7 +221,7 @@ async function handleMessage(
   return {
     done: false,
     newPartial: partial,
-    reply: 'Tap a button above — Looks good if it works, or Adjust it and we\'ll rework it.',
+    reply: "Tap a button above — Looks good if it works, or Adjust it and we'll rework it.",
   };
 }
 

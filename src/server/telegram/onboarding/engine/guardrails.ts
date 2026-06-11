@@ -26,6 +26,7 @@ import {
 } from '../slots/schema';
 import { unknownSlot, type SlotValue, type Provenance } from '../slots/provenance';
 import { INJURY_CHIPS, SLOT_CHIPS } from '../slots/chips';
+import { isPastISODate, todayISOInTz } from './numeric';
 import type { Chip, ExtractAdvanceOutput, NextAction, SlotFill } from './extract-and-advance';
 
 const EXPERIENCE = new Set(['beginner', 'for_fun', 'some_training', 'experienced']);
@@ -97,10 +98,11 @@ function strongerProvenance(a: Provenance, b: Provenance): Provenance {
   return PROVENANCE_RANK[a] >= PROVENANCE_RANK[b] ? a : b;
 }
 
-/** Value equality for the monotonic-merge guard. Primitives compare strictly;
- *  the two object-valued slots (injury_detail, tune_up_races) compare by shape.
+/** Value equality for the monotonic-merge guard (also the recap bulk-confirm's
+ *  "displayed unchanged" check). Primitives compare strictly; the two
+ *  object-valued slots (injury_detail, tune_up_races) compare by shape.
  *  coerceFill builds injury_detail with a fixed key order, so JSON is stable. */
-function slotValuesEqual(a: unknown, b: unknown): boolean {
+export function slotValuesEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (a == null || b == null) return false;
   if (typeof a === 'object' || typeof b === 'object')
@@ -240,12 +242,24 @@ export function slotLabel(slot: SlotKey): string {
   return LABELS[slot] ?? slot.replace(/_/g, ' ');
 }
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 export function formatSlotValue(slot: SlotKey, value: unknown): string {
   if (slot === 'target_time' && typeof value === 'number') return formatFinishTime(value);
   if (slot === 'long_run_day' && typeof value === 'number') return WEEKDAYS[value] ?? String(value);
   if (slot === 'injury_detail' && value && typeof value === 'object') {
     const v = value as { body_part: string; status: string };
     return `${v.body_part} (${v.status})`;
+  }
+  // Dates render human-readable in confirms and recaps (R1 fix 3) — a wrong year
+  // must be visible to a human, which "2025-09-01" wasn't. Non-ISO passes through.
+  if (slot === 'goal_date' && typeof value === 'string' && ISO_DATE.test(value)) {
+    return new Date(`${value}T00:00:00Z`).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
   }
   return String(value);
 }
@@ -304,9 +318,10 @@ function recapGoalLine(s: SlotState): string {
   const distLabel = distance ? (DISTANCE_LABELS[distance] ?? distance) : 'race';
   const race = s.goal_race?.value as string | undefined;
   const date = s.goal_date?.value as string | undefined;
+  const dateLabel = date != null ? formatSlotValue('goal_date', date) : undefined;
 
-  if (race && date) return `• Race: ${race} — ${date} (${distLabel})`;
-  if (date) return `• Goal: ${distLabel}, around ${date}`;
+  if (race && dateLabel) return `• Race: ${race} — ${dateLabel} (${distLabel})`;
+  if (dateLabel) return `• Goal: ${distLabel}, around ${dateLabel}`;
   return `• Goal: ${distLabel}`;
 }
 
@@ -355,6 +370,45 @@ export function buildRecapMessage(state: V3OnboardingState): string {
   return [intro, ...lines, '', 'Look right?'].join('\n');
 }
 
+/**
+ * The slot/value pairs a recap displays — the snapshot recorded as `recap_shown`
+ * when a recap goes out (R1 fix 2). KEEP IN SYNC with buildRecapMessage: a slot
+ * belongs here exactly when the recap shows its value (goal_type rides along —
+ * the goal line's framing displays it). Recorded off the resolved action, not
+ * inside buildRecapMessage, so a model-authored recap (its own message, rendered
+ * from the same slots) is captured too.
+ */
+export function recapDisplayedSlots(
+  state: V3OnboardingState,
+): Array<{ slot: SlotKey; value: unknown }> {
+  const s = state.slots;
+  const shown: Array<{ slot: SlotKey; value: unknown }> = [];
+  const add = (slot: SlotKey) => {
+    const v = s[slot];
+    if (v && v.value != null && v.provenance !== 'unknown') shown.push({ slot, value: v.value });
+  };
+
+  add('goal_type');
+  add('goal_distance'); // in the ooc-accepted case this is the displayed proxy
+  const race = s.goal_race?.value;
+  const date = s.goal_date?.value;
+  if (state.out_of_catalog?.consent !== 'accepted') {
+    if (race != null && date != null) add('goal_race');
+    if (date != null) add('goal_date');
+  }
+  add('experience_tier');
+  if (typeof s.days_per_week?.value === 'number') {
+    add('days_per_week');
+    add('long_run_day'); // displayed only alongside days_per_week
+  }
+  const detail = s.injury_detail?.value as { body_part?: string } | undefined;
+  if (detail?.body_part) add('injury_detail');
+  else if (s.injury_status?.value !== 'unknown') add('injury_status');
+  if (typeof s.target_time?.value === 'number') add('target_time');
+
+  return shown;
+}
+
 // ---------------------------------------------------------------------------
 // Chip policy (V3-W4, §5.4 + principle 2)
 // ---------------------------------------------------------------------------
@@ -401,12 +455,46 @@ export interface ResolvedTurn {
  * Merge the model's delta and resolve the turn against the §5.4 invariants.
  * Override priority: generate→(open required ⇒ ask) / (unconfirmed inference ⇒
  * confirm); optional ask over budget ⇒ recap; otherwise the model's move stands.
+ *
+ * `opts.todayISO` pins the clock for tests; production derives it from the
+ * athlete's timezone slot.
  */
 export function enforceGuardrails(
   state: V3OnboardingState,
   output: ExtractAdvanceOutput,
+  opts?: { todayISO?: string },
 ): ResolvedTurn {
-  const merged = mergeFills(state.slots, output.fills);
+  let merged = mergeFills(state.slots, output.fills);
+
+  // A goal_date in the past can never sit in the slot (R1 fix 3) — "September or
+  // later" landed as 2025-09-01 and rode a rubber-stamped confirm into the plan.
+  // Reset to unknown so the gate re-asks; the prompt rule makes this rare.
+  const todayISO =
+    opts?.todayISO ??
+    todayISOInTz((merged.timezone?.value as string | null) ?? 'America/Los_Angeles');
+  if (
+    typeof merged.goal_date?.value === 'string' &&
+    isPastISODate(merged.goal_date.value, todayISO)
+  ) {
+    merged = { ...merged, goal_date: unknownSlot<string>() };
+  }
+
+  // Recap bulk-confirm, typed path (R1 fix 2): the last message out was a recap
+  // and this turn resolves to generate — that's an affirmation of the displayed
+  // picture, so every displayed slot whose value is unchanged is re-emitted as
+  // `stated` through the monotonic merge (exactly how a single confirm resolves).
+  // A slot this turn's fills corrected fails the unchanged check and takes the
+  // normal gate path — at most one legitimate confirm, never the recapped five.
+  if (state.recap_shown?.length && output.next_action === 'generate') {
+    const reEmits: SlotFill[] = [];
+    for (const shown of state.recap_shown) {
+      const current = merged[shown.slot];
+      if (current && current.value != null && slotValuesEqual(current.value, shown.value)) {
+        reEmits.push({ slot: shown.slot, value: current.value, provenance: 'stated' });
+      }
+    }
+    if (reEmits.length) merged = mergeFills(merged, reEmits);
+  }
 
   const asked = [...state.asked];
   if (output.asked_slot && !asked.includes(output.asked_slot)) asked.push(output.asked_slot);
@@ -462,11 +550,23 @@ export function enforceGuardrails(
         pendingConfirm = { slot: pendingInferred, value, attempts };
       }
     } else if (!isV3OnboardingComplete(working)) {
-      // Injury beat not answered, or some other gate — recap instead of generating.
-      action = 'recap';
-      message = buildRecapMessage(working);
-      chips = [];
-      overridden = true;
+      if (state.recap_shown?.length) {
+        // The athlete just affirmed a recap and the injury beat is the only thing
+        // open (core is complete — the recap displayed it). A second recap would
+        // loop "Looks right" → recap forever; ask the injury question directly.
+        action = 'ask';
+        askSlot = 'injury_status';
+        message =
+          'Before I build it — anything bothering you right now, or any past injuries I should know about?';
+        chips = [];
+        overridden = true;
+      } else {
+        // Injury beat not answered, or some other gate — recap instead of generating.
+        action = 'recap';
+        message = buildRecapMessage(working);
+        chips = [];
+        overridden = true;
+      }
     }
   }
 
@@ -487,6 +587,11 @@ export function enforceGuardrails(
   working.pending_confirm = pendingConfirm;
   if (action === 'recap') working.phase = 'recap';
 
+  // `recap_shown` means "the last outbound message was a recap" — set fresh on
+  // every recap resolution, cleared on anything else (R1 fix 2). The strictest
+  // policy: no stale snapshot can survive an intervening ask/confirm turn.
+  working.recap_shown = action === 'recap' ? recapDisplayedSlots(working) : undefined;
+
   // Closed-option / yes-no asks always carry chips, in code (§5.4, principle 2).
   // An override that forced an ask owns its target slot; otherwise it's the
   // model's asked_slot, falling back to the first open required slot.
@@ -496,6 +601,21 @@ export function enforceGuardrails(
 
   return { state: working, action, message, chips, overridden };
 }
+
+/** The no-op "try to generate" turn the deterministic resolvers feed back through
+ *  the gates — chip-path confirm resolution, pocket acceptance, recap affirmation.
+ *  The gates decide the real next move (ask / confirm / recap / generate). */
+export const SYNTHETIC_GENERATE: ExtractAdvanceOutput = {
+  fills: [],
+  next_action: 'generate',
+  message: '',
+  chips: [],
+  asked_slot: null,
+  race_lookup_query: null,
+  goal_distance_mi: null,
+  contradiction: null,
+  numeric_unresolved: null,
+};
 
 /**
  * Resolve an outstanding `pending_confirm` deterministically — the chip-`yes`
@@ -514,15 +634,17 @@ export function resolveConfirmAndAdvance(state: V3OnboardingState): ResolvedTurn
     { slot: pending.slot, value: pending.value, provenance: 'stated' },
   ]);
   const cleared: V3OnboardingState = { ...state, slots, pending_confirm: undefined };
-  return enforceGuardrails(cleared, {
-    fills: [],
-    next_action: 'generate',
-    message: '',
-    chips: [],
-    asked_slot: null,
-    race_lookup_query: null,
-    goal_distance_mi: null,
-    contradiction: null,
-    numeric_unresolved: null,
-  });
+  return enforceGuardrails(cleared, SYNTHETIC_GENERATE);
+}
+
+/**
+ * Resolve a "Looks right" chip tap against the recap deterministically (R1 fix 2).
+ * The bulk-confirm AND the injury-loop guard both live in enforceGuardrails (the
+ * `recap_shown` + generate path), so the chip and a typed affirmation share one
+ * mechanism; this entry point just feeds the synthetic generate through it.
+ *
+ * Caller guarantees `state.recap_shown` is set.
+ */
+export function resolveRecapAffirmAndAdvance(state: V3OnboardingState): ResolvedTurn {
+  return enforceGuardrails(state, SYNTHETIC_GENERATE);
 }

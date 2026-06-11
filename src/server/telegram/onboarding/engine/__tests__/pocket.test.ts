@@ -52,6 +52,26 @@ describe('applyStatedDistance', () => {
     expect(r.message).toMatch(/past what I can build/i);
     expect(r.chips.map((c) => c.value)).toEqual(['yes', 'no']);
   });
+
+  it('opens the pocket below the catalog floor with the 5k proxy (R1 fix 1)', () => {
+    const r = applyStatedDistance(stateWith({}), 1, '1 mile in under 5 minutes');
+    expect(r.pocket).toBe(true);
+    expect(r.state.slots.goal_distance).toBeUndefined(); // the mile never silently becomes a 5K
+    expect(r.state.out_of_catalog).toMatchObject({
+      words: '1 mile in under 5 minutes',
+      distance_mi: 1,
+      proxy: '5k',
+      consent: 'pending',
+    });
+    expect(r.message).toMatch(/5K block/);
+    expect(r.message).toMatch(/mile-pace/);
+    expect(r.chips.map((c) => c.value)).toEqual(['yes', 'no']);
+  });
+
+  it('a shapeless (null-distance) pocket still proxies to the marathon', () => {
+    const state = setPocket(stateWith({}), 'be ready for anything', null);
+    expect(state.out_of_catalog?.proxy).toBe('marathon');
+  });
 });
 
 describe('acceptPocketAndAdvance', () => {
@@ -62,6 +82,13 @@ describe('acceptPocketAndAdvance', () => {
     expect(resolved.state.out_of_catalog?.consent).toBe('accepted');
     // every required slot now filled → the gate moves on (recap), not another ask
     expect(resolved.action).not.toBe('ask');
+  });
+
+  it('writes the 5k proxy for a short-side pocket (R1 fix 1)', () => {
+    const state = setPocket(stateWith(shapeSlots()), '1 mile in under 5 minutes', 1);
+    const resolved = acceptPocketAndAdvance(state);
+    expect(resolved.state.slots.goal_distance).toEqual(sv('5k', 'stated', true));
+    expect(resolved.state.out_of_catalog?.consent).toBe('accepted');
   });
 });
 
@@ -109,5 +136,19 @@ describe('reconcilePocket (typed path)', () => {
   it('leaves it pending while the distance is still open', () => {
     const working = stateWith({}, { out_of_catalog: pocket });
     expect(reconcilePocket(pocket, working).out_of_catalog?.consent).toBe('pending');
+  });
+
+  it('marks a short-side pocket accepted when the model filled its 5k proxy', () => {
+    const shortPocket = {
+      words: 'a sub-5 mile',
+      distance_mi: 1,
+      proxy: '5k' as const,
+      consent: 'pending' as const,
+    };
+    const working = stateWith(
+      { goal_distance: sv('5k', 'stated') },
+      { out_of_catalog: shortPocket },
+    );
+    expect(reconcilePocket(shortPocket, working).out_of_catalog?.consent).toBe('accepted');
   });
 });

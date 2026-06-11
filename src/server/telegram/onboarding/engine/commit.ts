@@ -12,6 +12,7 @@
 
 import { supabaseAdmin } from '@/lib/db';
 import { nominalRaceMiles } from '@/lib/plan-templates/selector';
+import { isPastISODate, todayISOInTz } from './numeric';
 import { upsertTrainingProfile, type TrainingProfileInsert } from '../athlete-training-profile';
 import { upsertProfileSection, upsertMemorySection } from '../memory';
 import { seedKnownGapsFromFilled } from '../known-gaps-memory';
@@ -133,9 +134,27 @@ export function buildGoalWrite(state: V3OnboardingState): GoalWrite {
 // Execution
 // ---------------------------------------------------------------------------
 
+/** Commit refusal: a past target_date must never reach the tables (R1 fix 3,
+ *  absorbing T-9). The router catches by `code` (this module is lazy-imported
+ *  and mocked in router tests, so `instanceof` wouldn't survive). */
+export class PastTargetDateError extends Error {
+  readonly code = 'PAST_TARGET_DATE' as const;
+}
+
 /** Write every slot to its destination table. The router commits once per
- *  onboarding (races/injuries inserts aren't idempotent). */
+ *  onboarding (races/injuries inserts aren't idempotent). Refuses outright —
+ *  before any write, so nothing partial lands — when the goal date is in the
+ *  past; the merge-time guard makes this unreachable in normal flow. */
 export async function commitSlots(athleteId: string, state: V3OnboardingState): Promise<void> {
+  const { profile, race } = buildGoalWrite(state);
+  const targetDate = race?.date ?? profile.target_date ?? null;
+  if (targetDate) {
+    const tz = slotVal<string>(state, 'timezone') ?? 'America/Los_Angeles';
+    if (isPastISODate(targetDate, todayISOInTz(tz))) {
+      throw new PastTargetDateError(`target_date ${targetDate} is in the past`);
+    }
+  }
+
   await commitIdentity(athleteId, state);
   await commitGoal(athleteId, state);
   await commitInjury(athleteId, state);

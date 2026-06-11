@@ -81,7 +81,8 @@ export interface OutOfCatalogGoal {
   words: string;
   /** The real distance when known (miles); null for a shapeless objective. */
   distance_mi: number | null;
-  /** The nearest in-catalog structure offered — `marathon` against today's catalog. */
+  /** The nearest in-catalog structure offered — `marathon` above the catalog,
+   *  `5k` below the floor (R1 fix 1). */
   proxy: GoalDistanceValue;
   /** pending = consent turn is out; accepted = proxy taken; declined is handled
    *  by clearing the pocket (re-offer), so it's not persisted. */
@@ -120,6 +121,13 @@ export interface V3OnboardingState {
   /** An uncatalogued goal awaiting (or holding) the athlete's consent to the
    *  marathon-proxy (V3-W8). Absent until a goal lands outside the catalog. */
   out_of_catalog?: OutOfCatalogGoal;
+  /** The slot/value pairs the last outbound recap displayed (R1 fix 2). Set on
+   *  every recap resolution, cleared on any other, so it always means "the last
+   *  message was a recap". An affirmation — the recap chip, or a typed reply the
+   *  model resolves to generate — bulk-confirms every pair whose value is
+   *  unchanged, in code; an affirmed recap must never be followed by per-slot
+   *  "Quick check" turns for values it already displayed (the Nathan transcript). */
+  recap_shown?: Array<{ slot: SlotKey; value: unknown }>;
 }
 
 /** The starting v3 state, post-Strava. The fitness snapshot is cached here; the

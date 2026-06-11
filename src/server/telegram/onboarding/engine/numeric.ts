@@ -25,6 +25,11 @@ export type FinishTimeResolution =
     }
   | { status: 'no_range' }; // distance has no finish-time band (keep_fit)
 
+/** Finish-time plausibility for a CONCRETE distance: a pace envelope rather than
+ *  a per-bucket table, so any real distance — a 1-mile goal, a 44-mile run — gets
+ *  a sane band in one expression (ULTRA_SUPPORT §3.2 decision #7; bounds DRAFT). */
+export const PACE_ENVELOPE_SEC_PER_MI = { min: 230, max: 1500 }; // ~3:50 – ~25:00 /mi
+
 /**
  * Validate a proposed finish time (seconds) for a distance against
  * FINISH_TIME_RANGES_SEC. When the value is small enough that it could be a
@@ -38,7 +43,24 @@ export function resolveFinishTime(
 ): FinishTimeResolution {
   const range = FINISH_TIME_RANGES_SEC[distance];
   if (!range) return { status: 'no_range' };
+  return resolveAgainstRange(seconds, range);
+}
 
+/** The pace-envelope variant for a pocketed goal's REAL distance (R1 fix 5):
+ *  "sub-5 for the mile" is implausible against the 5k bucket band but fine
+ *  against 1 mi × the envelope. Same ambiguity handling as the bucket path. */
+export function resolveFinishTimeForMiles(seconds: number, miles: number): FinishTimeResolution {
+  if (!Number.isFinite(miles) || miles <= 0) return { status: 'no_range' };
+  return resolveAgainstRange(seconds, {
+    min: Math.round(miles * PACE_ENVELOPE_SEC_PER_MI.min),
+    max: Math.round(miles * PACE_ENVELOPE_SEC_PER_MI.max),
+  });
+}
+
+function resolveAgainstRange(
+  seconds: number,
+  range: { min: number; max: number },
+): FinishTimeResolution {
   const inRange = (s: number) => s >= range.min && s <= range.max;
 
   // The classic "4:25" case: the model may report 265 (4m25s) when the athlete
@@ -60,6 +82,11 @@ export function resolveFinishTime(
   return { status: 'ok', seconds };
 }
 
+/** The catalog floor (DRAFT — R1): below this, a distance is out of catalog on
+ *  the SHORT side and routes to the pocket, mirroring the >28 mi ceiling. The
+ *  Nathan transcript's 1-mile goal silently became a 5K because no floor existed. */
+export const CATALOG_FLOOR_MI = 2.5;
+
 /**
  * Map a concrete race/goal distance (miles) to a training bucket IN CODE — the
  * deterministic derivation the model never does (V3-W8, ONBOARDING_V3 §5.3). A
@@ -67,17 +94,18 @@ export function resolveFinishTime(
  * through here; the model only maps freeform distance *vocabulary* when no number
  * exists. Bands are wide on purpose — a 27-mile trail "marathon" trains like a
  * marathon (the full table, widened for the ultra buckets, lives in
- * ULTRA_SUPPORT.md §3.1). Returns null for anything past the current catalog
- * (~28 mi) — the caller routes that to the uncatalogued-goal pocket (§5.2).
- * `keep_fit` is never derived from miles (it's a no-race state).
+ * ULTRA_SUPPORT.md §3.1). Returns null for anything outside the current catalog
+ * (below ~2.5 mi or past ~28 mi) — the caller routes that to the uncatalogued-goal
+ * pocket (§5.2). `keep_fit` is never derived from miles (it's a no-race state).
  */
 export function deriveBucketFromMiles(mi: number): GoalDistanceValue | null {
   if (!Number.isFinite(mi) || mi <= 0) return null;
+  if (mi < CATALOG_FLOOR_MI) return null; // out of catalog (short) → the pocket
   if (mi < 4.65) return '5k'; // 5k=3.1, 10k=6.2 → split at the midpoint
   if (mi < 8) return '10k';
   if (mi < 17) return 'half';
   if (mi <= 28) return 'marathon';
-  return null; // out of catalog → the pocket
+  return null; // out of catalog (long) → the pocket
 }
 
 /** Implied finish time for a goal pace (seconds per mile) over a distance.
@@ -96,4 +124,24 @@ export function formatPace(secPerMile: number): string {
   const m = Math.floor(secPerMile / 60);
   const s = Math.round(secPerMile % 60);
   return `${m}:${String(s).padStart(2, '0')}/mi`;
+}
+
+/** Today's date as YYYY-MM-DD in a timezone (en-CA formats ISO-style). Mirrors
+ *  plan-gen's todayInTz — duplicated so guardrails/commit don't pull plan-gen
+ *  into their static graph (the router lazy-imports it deliberately). */
+export function todayISOInTz(tz: string): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
+  } catch {
+    // A junk timezone slot value must not crash the turn.
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date());
+  }
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Whether a value is a full ISO date strictly before today. Non-ISO strings
+ *  (e.g. an intended-branch placeholder) are never "past". */
+export function isPastISODate(value: string, todayISO: string): boolean {
+  return ISO_DATE.test(value) && value < todayISO;
 }
