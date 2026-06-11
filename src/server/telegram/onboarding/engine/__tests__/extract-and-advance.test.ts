@@ -5,7 +5,7 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('@/lib/anthropic', () => ({ anthropicClient: vi.fn() }));
 vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
 
-import { summarizeState, ExtractAdvanceSchema } from '../extract-and-advance';
+import { buildSystemPrompt, summarizeState, ExtractAdvanceSchema } from '../extract-and-advance';
 import { initialV3State, type V3OnboardingState } from '../../slots/slot-state';
 import type { SlotState } from '../../slots/schema';
 import type { Provenance, SlotValue } from '../../slots/provenance';
@@ -61,5 +61,49 @@ describe('ExtractAdvanceSchema — lenient intents parse (R2)', () => {
     const parsed = ExtractAdvanceSchema.parse(base);
     expect(parsed.intents).toEqual([]);
     expect(parsed.reflection).toBeNull();
+  });
+});
+
+describe('ExtractAdvanceSchema — volume_goal (staging fix)', () => {
+  const base = { fills: [], next_action: 'ask', message: 'm' };
+
+  it('parses a valid volume goal', () => {
+    const parsed = ExtractAdvanceSchema.parse({
+      ...base,
+      volume_goal: { miles: 100, period: 'month' },
+    });
+    expect(parsed.volume_goal).toEqual({ miles: 100, period: 'month' });
+  });
+
+  it('a junk shape parses to null instead of failing the tool call', () => {
+    const parsed = ExtractAdvanceSchema.parse({
+      ...base,
+      volume_goal: { miles: 'lots', period: 'fortnight' },
+    });
+    expect(parsed.volume_goal).toBeNull();
+  });
+
+  it('defaults to null when absent', () => {
+    expect(ExtractAdvanceSchema.parse(base).volume_goal).toBeNull();
+  });
+});
+
+describe('system prompt — the staging-fix rules are pinned', () => {
+  const prompt = buildSystemPrompt();
+
+  it('marks the short side of the catalog (the mile enum-bypass)', () => {
+    expect(prompt).toContain('"a mile" (goal_distance_mi: 1)');
+    expect(prompt).toContain(
+      'Never map a stated distance to the nearest bucket in either direction',
+    );
+  });
+
+  it('requires a stated time goal to land as a target_time fill on the same turn', () => {
+    expect(prompt).toContain('target_time fill on that same turn');
+  });
+
+  it('routes periodic mileage targets to volume_goal and forbids promising them', () => {
+    expect(prompt).toContain('emit it as volume_goal');
+    expect(prompt).toContain('never promise the schedule will hit it');
   });
 });

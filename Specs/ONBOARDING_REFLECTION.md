@@ -58,6 +58,15 @@ Decided with David at plan time: on a pocket-opening reflection turn the message
 
 Two accepted consequences, found at design time: (a) when intents arrive *before* the headline goal, the reflection fires on the intents and the later-arriving goal never gets its own mirror — the race confirm / pocket offer / recap each echo it; (b) a first-ever pocket decline mid-flow (after a normal reflection) takes the redo path once — watch for it in the staging pass. Mid-flight pre-R2 athletes are grandfathered as reflected (no late mirror); the state fields shipped without a `V3_SCHEMA_VERSION` bump because a bump resets mid-flight athletes.
 
+### 2.4.2 Staging findings (2026-06-10, David's five-test pass) and the same-day fixes
+
+Transcript: `transcripts/davidjtemple_gmail.com.md` 19:00–19:20. The shape held — mirrors fired in all five tests, the 50-mile boundary + `[Not quite my goal]` redo landed exactly as §2.4 sketches. Two misses, fixed same day (CHANGELOG v0.7.35):
+
+1. **The mile got no boundary.** The model bypassed the catalog floor by filling the `goal_distance: '5k'` enum directly instead of emitting `goal_distance_mi: 1` — the floor lives on the latter path. "Sub-5" was also never extracted as a target_time. Fixed with short-side prompt rules plus a deterministic cross-fire: a `goal_distance` fill against an already-held implausible target time fires the backstop, which questions the pairing.
+2. **"100 miles every month" was happily agreed to** and committed as a plain keep_fit base; the number existed nowhere structured. **David's decision: not the ULTRA_SUPPORT §6-interim proxy pocket — the bot acknowledges the goal, says plainly it can't coach toward it at the moment, and redirects to what it can do (general fitness or a race), via `[Keep me fit]` / `[Train for a race]` chips.** The clause rides as an intent (context, not a commitment), so the recap/preview show it and the daily coach sees it; a boundary turn blocks a same-turn generate. §6's full volume support stays deferred.
+
+Also fixed from the same review: the plan preview claimed "No time goal locked in yet" unconditionally, even for an athlete with a locked target.
+
 ### 2.5 Known risks
 
 - **Misreflection is the new worst case.** A reflection that misses or invents a thread is worse than no reflection, because it's framed as comprehension. The `[Not quite my goal]` path must take a graceful freeform redo, and reflection quality is the thing to test hardest (§R2 verification).

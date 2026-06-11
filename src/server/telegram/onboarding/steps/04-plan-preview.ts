@@ -1,5 +1,6 @@
 import { InlineKeyboard } from 'grammy';
 import type { Plan } from '@/lib/plan-schema';
+import { formatFinishTime } from '../parsing/durations';
 import type { GoalDistance, RenderParams } from '@/lib/plan-templates';
 import { enqueueJob } from '@/server/jobs/enqueue';
 import { sendDavidAlert } from '@/server/admin/alerts';
@@ -63,11 +64,15 @@ export function formatPreview(
   if (params.race) {
     lines.push(
       `Here's your starting plan: **${ps.total_weeks} week${ps.total_weeks === 1 ? '' : 's'} to ${params.race.name}, ` +
-        `building from ~${startMi} to ~${peakMi} mi/wk, long runs on ${lrDay}, peaking at ${peakLong}.**`,
+        `building from ~${startMi} to ~${peakMi} mi/wk, long runs on ${lrDay}, peaking at ${peakLong} mi.**`,
     );
+    // A locked time goal drives the paces — saying "no time goal" to an athlete
+    // who just set one reads as if the target was dropped (2026-06-10 staging).
     lines.push(
-      "No time goal locked in yet, so I've set everything by feel — we can dial in paces once " +
-        "you've got a target. It's a starting point; we'll adjust as we go.",
+      params.targetTimeSec != null
+        ? `Aiming at ${formatFinishTime(params.targetTimeSec)} — paces are set off that. It's a starting point; we'll adjust as we go.`
+        : "No time goal locked in yet, so I've set everything by feel — we can dial in paces once " +
+            "you've got a target. It's a starting point; we'll adjust as we go.",
     );
   } else if (params.distance === 'keep_fit') {
     lines.push(
@@ -137,10 +142,10 @@ export function formatPreview(
     );
   }
 
+  // "The plan carries those too" would over-promise for an intent the engine
+  // explicitly declined to build toward (a volume target) — keep it to awareness.
   if (opts?.intents?.length) {
-    lines.push(
-      `Also on the radar: ${opts.intents.join(', ')}. The plan carries those too — I'll keep them in view as we go.`,
-    );
+    lines.push(`Also on the radar: ${opts.intents.join(', ')}. I'll keep those in view as we go.`);
   }
 
   return lines.join('\n\n');

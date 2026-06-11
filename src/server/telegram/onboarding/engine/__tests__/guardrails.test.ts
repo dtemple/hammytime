@@ -54,6 +54,7 @@ function out(partial: Partial<ExtractAdvanceOutput>): ExtractAdvanceOutput {
     numeric_unresolved: null,
     intents: [],
     reflection: null,
+    volume_goal: null,
     ...partial,
   };
 }
@@ -1009,5 +1010,23 @@ describe('recapDisplayedSlots — unaffected by intents (R2)', () => {
     const withIntents = stateWith(coreSlots('race'), { intents: ['get faster'] });
     const without = stateWith(coreSlots('race'));
     expect(recapDisplayedSlots(withIntents)).toEqual(recapDisplayedSlots(without));
+  });
+});
+
+describe('enforceGuardrails — volume_goal is goal-bearing (staging fix)', () => {
+  it('a volume-only ramble flips reflected', () => {
+    const r = enforceGuardrails(
+      stateWith({}),
+      out({ volume_goal: { miles: 100, period: 'month' } }),
+    );
+    expect(r.state.reflected).toBe(true);
+  });
+
+  it('synthetic turns stay inert (volume_goal: null)', () => {
+    const slots = coreSlots('race');
+    const r = resolveRecapAffirmAndAdvance(
+      stateWith(slots, { recap_shown: recapDisplayedSlots(stateWith(slots)) }),
+    );
+    expect(r.state.intents).toBeUndefined();
   });
 });

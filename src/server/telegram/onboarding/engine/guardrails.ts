@@ -232,6 +232,7 @@ const GOAL_SLOTS: ReadonlySet<SlotKey> = new Set([
 function isGoalBearing(state: V3OnboardingState, output: ExtractAdvanceOutput): boolean {
   if (output.fills.some((f) => GOAL_SLOTS.has(f.slot))) return true;
   if (output.goal_distance_mi != null || output.race_lookup_query != null) return true;
+  if (output.volume_goal != null) return true; // a volume-only ramble is still THE goal
   return output.intents.some((raw) => {
     const v = raw.trim();
     return !!v && !(state.intents ?? []).some((e) => e.toLowerCase() === v.toLowerCase());
@@ -682,6 +683,7 @@ export const SYNTHETIC_GENERATE: ExtractAdvanceOutput = {
   // goal-bearing (mergeIntents is append-only; isGoalBearing sees nothing).
   intents: [],
   reflection: null,
+  volume_goal: null,
 };
 
 /**

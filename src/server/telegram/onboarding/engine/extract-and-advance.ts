@@ -91,6 +91,14 @@ export const ExtractAdvanceSchema = z.object({
     .string()
     .nullish()
     .transform((v) => v ?? null),
+  // A periodic mileage target stated as a goal ("100 miles a month") — the app
+  // owns the boundary (it can't be built into the schedule yet; ULTRA_SUPPORT §6
+  // is deferred). Lenient: a junk shape parses to null, never burns the retry.
+  volume_goal: z
+    .object({ miles: z.number(), period: z.enum(['week', 'month']) })
+    .nullish()
+    .catch(null)
+    .transform((v) => v ?? null),
 });
 export type ExtractAdvanceOutput = z.infer<typeof ExtractAdvanceSchema>;
 
@@ -160,7 +168,7 @@ const EXTRACT_TOOL = {
       goal_distance_mi: {
         type: 'number',
         description:
-          "A concrete goal distance in MILES that isn't one of the standard buckets (5k/10k/half/marathon) — e.g. '44 miles', '50k' (≈31), '100 miler'. The app maps it to a bucket or handles it specially. Don't set this if you set race_lookup_query (the lookup carries the distance), and don't guess goal_distance from a number yourself.",
+          "A concrete goal distance in MILES that isn't one of the standard buckets (5k/10k/half/marathon) — longer ('44 miles', '50k' ≈ 31, '100 miler') OR shorter ('a mile' → 1, '1500m' ≈ 0.93). The app maps it to a bucket or handles it specially. Don't set this if you set race_lookup_query (the lookup carries the distance), and don't guess goal_distance from a number yourself.",
       },
       contradiction: {
         type: 'string',
@@ -183,6 +191,16 @@ const EXTRACT_TOOL = {
         description:
           "The mirror of the athlete's first goal statement (only when the turn context asks for one). Pure reflection prose in the athlete's own terms — see the reflection rules.",
       },
+      volume_goal: {
+        type: 'object',
+        required: ['miles', 'period'],
+        properties: {
+          miles: { type: 'number' },
+          period: { type: 'string', enum: ['week', 'month'] },
+        },
+        description:
+          'A periodic mileage target the athlete states as a goal — "100 miles a month" → {miles: 100, period: "month"}, "20 a week" → {miles: 20, period: "week"}. Always emit it when stated; the app decides what to say about it. This is not a race distance — never put it in goal_distance or goal_distance_mi.',
+      },
     },
   },
 } as const;
@@ -201,6 +219,7 @@ const VOICE_RULES = [
 const NUMERIC_RULES = [
   'Numbers: never accept a bare number. A time goal is a finish time OR a pace — resolve which.',
   '"10 minute miles" is a pace; compute the implied finish for the distance. "4:25" for a marathon is hours, not minutes.',
+  'A stated time goal ("sub-5 mile", "around 3:55") is a target_time fill on that same turn — never leave it living in prose only.',
   'Always state the unit back when you echo a time ("a 4:25 finish — four hours twenty-five").',
   'If a number is genuinely ambiguous, set numeric_unresolved and let the app offer the two readings.',
 ].join(' ');
@@ -217,7 +236,7 @@ const INJURY_RULES = [
 const ENUM_RULES = [
   'Closed-enum slots take ONLY these exact literal values — never a paraphrase:',
   '- experience_tier: "beginner" (new to running), "for_fun" (runs but no structure), "some_training" (some structured training), "experienced" (years of consistent training). There is no "intermediate" — map it to some_training or experienced.',
-  '- goal_distance: "5k", "10k", "half", "marathon", "keep_fit" (no race, staying fit). For ANY other stated distance — a number of miles/km, or a named distance like "50k" / "50 miler" / "44 miles" — do NOT guess a bucket; set goal_distance_mi (in miles) and leave goal_distance alone.',
+  '- goal_distance: "5k", "10k", "half", "marathon", "keep_fit" (no race, staying fit). For ANY other stated distance — a number of miles/km, or a named distance like "50k" / "50 miler" / "44 miles" — do NOT guess a bucket; set goal_distance_mi (in miles) and leave goal_distance alone. The boundary cuts both ways: anything SHORTER than a 5K — "a mile" (goal_distance_mi: 1), "1500m" (≈ 0.93), "800m" (≈ 0.5) — is also not a bucket. Never map a stated distance to the nearest bucket in either direction.',
   '- goal_type: "race", "general_fitness".',
   '- injury_status: "none", "active", "monitoring", "past", "unknown".',
   '- injury_detail.status: "active", "monitoring", "past".',
@@ -234,6 +253,8 @@ const FLOW_RULES = [
   "When the goal race changes, restate goal_date in the same turn (a fill) or mark it open — never let the old race's date ride on the new goal. When a former goal race becomes a tune-up, carry its name AND its date into tune_up_races.",
   'Dates: any goal_date you emit must be in the future relative to today (the turn context states today\'s date). A bare month like "September" means its next future occurrence — pick the year accordingly.',
   'Generate the plan only once every required slot is filled and the injury beat is answered; recap the whole picture first.',
+  'When you write the recap yourself, include every captured intent and the goal time when one is set — the recap shows the whole picture, not just the slots.',
+  'A periodic mileage target ("100 miles a month", "20 a week") is not a plan you can build — emit it as volume_goal and never promise the schedule will hit it; the app states the boundary. If the athlete pushes back on that boundary, hold it plainly and re-offer the two paths: general fitness, or training for a race.',
   "After the goal is settled, frame the remaining slot questions as quick logistics — scheduling details so the plan can land on a calendar — never as checking whether you understood. A form feels fine when it's labeled a form.",
   'On your very first question (conversation phase "orientation"), end the message with exactly this sentence so the athlete knows the chips are optional: "Tap a button or type an answer if it\'s not in the list." Only on that first question — never repeat it.',
 ].join(' ');

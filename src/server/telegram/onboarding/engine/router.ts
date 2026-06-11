@@ -50,12 +50,16 @@ import {
 import {
   acceptPocketAndAdvance,
   applyStatedDistance,
+  applyVolumeGoal,
   declinePocket,
+  formatShortTarget,
   pocketBody,
   POCKET_CHIPS,
   REFLECTION_POCKET_CHIPS,
   reconcilePocket,
   setPocket,
+  volumeBoundaryBody,
+  VOLUME_REDIRECT_CHIPS,
 } from './pocket';
 import { withTyping } from './typing';
 
@@ -311,6 +315,24 @@ async function runTurn({
       }
     }
 
+    // A stated periodic volume goal ("100 miles a month") — ULTRA_SUPPORT §6 is
+    // deferred, so the engine doesn't build toward it. The clause always rides to
+    // the intents; when it's the headline goal (newly stated, no race in play),
+    // this turn states the boundary plainly and redirects to the two things the
+    // engine CAN do. Deliberately not an `else` branch: a volume target alongside
+    // a race turn still demotes to an intent without touching that turn's message.
+    let volumeBoundaryFired = false;
+    if (result.output.volume_goal && !resolved.overridden) {
+      const vg = applyVolumeGoal(working, result.output.volume_goal, result.output);
+      working = vg.state;
+      if (vg.boundary) {
+        volumeBoundaryFired = true;
+        message = volumeBoundaryBody(result.output.volume_goal.period);
+        chips = VOLUME_REDIRECT_CHIPS;
+        pocketOfferOwnsMessage = true; // the boundary reads under the mirror's lead
+      }
+    }
+
     // A pocket opening ON the reflection turn gets the reflection chip set — the
     // decline there means "you misread me" (the redo path), not "not now" (R2).
     if (
@@ -337,10 +359,22 @@ async function runTurn({
     // opens the pocket AND fills target_time; R1 fix 5). When the backstop and the
     // pocket both want the turn, the backstop's message wins — the pocket stays
     // pending in state and summarizeState/reconcilePocket settle it next turn.
+    // Cross-fire: the trigger also fires when this turn FILLED goal_distance
+    // against an already-set target time — the mile enum-bypass (the model maps
+    // "a mile" straight to the '5k' bucket, skipping the goal_distance_mi path
+    // and the catalog floor with it; 2026-06-10 staging). The implausible pair is
+    // the deterministic tell. Model fills only: a race-lookup-derived bucket is a
+    // direct state write, never in output.fills, so a confirmed race can't trip
+    // this; a typed pocket-accept can't either (reconcilePocket ran above, so the
+    // ooc-miles envelope validates the time against the real distance).
     const touchedTarget = result.output.fills.some((f) => f.slot === 'target_time');
+    const distanceCrossFire =
+      !touchedTarget &&
+      result.output.fills.some((f) => f.slot === 'goal_distance') &&
+      working.slots.target_time?.value != null;
     let backstopFired = false;
-    if (touchedTarget) {
-      const backstop = backstopTargetTime(working);
+    if (touchedTarget || distanceCrossFire) {
+      const backstop = backstopTargetTime(working, distanceCrossFire);
       if (backstop) {
         backstopFired = true;
         working = backstop.state;
@@ -352,7 +386,9 @@ async function runTurn({
 
     // A fired backstop owns the turn even against a generate — building the plan
     // now would silently drop the athlete's goal time (the "sub-5 evaporated" bug).
-    if (resolved.action === 'generate' && !backstopFired) {
+    // Same for a volume boundary: generating past it is the "happily agreed to
+    // 100 miles a month" failure all over again.
+    if (resolved.action === 'generate' && !backstopFired && !volumeBoundaryFired) {
       await finishOnboarding(athlete, chatId, working);
       return;
     }
@@ -373,9 +409,11 @@ async function runTurn({
 
 function backstopTargetTime(
   state: V3OnboardingState,
+  distanceTriggered = false,
 ): { state: V3OnboardingState; message: string; chips: Chip[] } | null {
   const tt = state.slots.target_time;
   if (!tt || typeof tt.value !== 'number') return null;
+  const heldTime = tt.value;
 
   // A pocketed goal validates against its REAL distance via the pace envelope —
   // 300s is implausible for the 5k bucket but right for the mile behind the proxy
@@ -414,7 +452,16 @@ function backstopTargetTime(
       ],
     };
   }
-  // out_of_range
+  // out_of_range. On a distance-triggered fire the DISTANCE may be the wrong half
+  // of the pair (the mile enum-bypass: 5:00 was right, '5k' was the model's
+  // invention) — question the pairing instead of inviting the same time again.
+  if (distanceTriggered) {
+    return {
+      state: next,
+      message: `Hold on — I had ${formatShortTarget(heldTime)} as your goal time, but that doesn't fit ${forLabel}. Is the distance actually different, or should we set a new time for ${forLabel}?`,
+      chips: [],
+    };
+  }
   const units =
     oocMiles != null && oocMiles < CATALOG_FLOOR_MI ? 'minutes and seconds' : 'hours and minutes';
   return {

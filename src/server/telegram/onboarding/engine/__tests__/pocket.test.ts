@@ -1,17 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import {
   applyStatedDistance,
+  applyVolumeGoal,
   acceptPocketAndAdvance,
   declinePocket,
+  formatShortTarget,
   pocketBody,
   POCKET_CHIPS,
   REFLECTION_POCKET_CHIPS,
   reconcilePocket,
   setPocket,
+  volumeBoundaryBody,
+  VOLUME_REDIRECT_CHIPS,
 } from '../pocket';
 import { initialV3State, type V3OnboardingState } from '../../slots/slot-state';
 import type { SlotState } from '../../slots/schema';
 import type { Provenance, SlotValue } from '../../slots/provenance';
+import type { ExtractAdvanceOutput } from '../extract-and-advance';
 
 function sv<const T>(value: T, provenance: Provenance = 'stated', confirmed = true): SlotValue<T> {
   return { value, provenance, confirmed };
@@ -226,5 +231,108 @@ describe('declinePocket — the reflection redo (R2)', () => {
     const r = declinePocket(setPocket(stateWith(shapeSlots()), 'Western States, 100mi', 100));
     expect(r.state.reflected).toBeUndefined();
     expect(r.message).toMatch(/want to aim at something/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Volume goals (ULTRA_SUPPORT §6 interim — acknowledge, boundary, redirect)
+// ---------------------------------------------------------------------------
+
+function vout(partial: Partial<ExtractAdvanceOutput> = {}): ExtractAdvanceOutput {
+  return {
+    fills: [],
+    next_action: 'ask',
+    message: 'msg',
+    chips: [],
+    asked_slot: null,
+    race_lookup_query: null,
+    goal_distance_mi: null,
+    contradiction: null,
+    numeric_unresolved: null,
+    intents: [],
+    reflection: null,
+    volume_goal: null,
+    ...partial,
+  };
+}
+
+describe('applyVolumeGoal', () => {
+  it('normalizes a monthly target to weekly miles and appends the clause as an intent', () => {
+    const r = applyVolumeGoal(stateWith({}), { miles: 100, period: 'month' }, vout());
+    expect(r.miPerWeek).toBe(23); // 100 / 4.345
+    expect(r.boundary).toBe(true);
+    expect(r.state.intents).toEqual(['100 miles a month']);
+  });
+
+  it('a weekly target passes through unconverted', () => {
+    const r = applyVolumeGoal(stateWith({}), { miles: 20, period: 'week' }, vout());
+    expect(r.miPerWeek).toBe(20);
+    expect(r.state.intents).toEqual(['20 miles a week']);
+  });
+
+  it('a restated target is not new — no boundary, no duplicate intent', () => {
+    const r = applyVolumeGoal(
+      stateWith({}, { intents: ['100 miles a month'] }),
+      { miles: 100, period: 'month' },
+      vout(),
+    );
+    expect(r.boundary).toBe(false);
+    expect(r.state.intents).toEqual(['100 miles a month']);
+  });
+
+  it('a race in state demotes silently (goal_type race / named race / non-keep_fit distance)', () => {
+    for (const slots of [
+      { goal_type: sv('race') },
+      { goal_race: sv('CIM') },
+      { goal_distance: sv('marathon') },
+    ]) {
+      const r = applyVolumeGoal(stateWith(slots), { miles: 100, period: 'month' }, vout());
+      expect(r.boundary).toBe(false);
+      expect(r.state.intents).toEqual(['100 miles a month']);
+    }
+  });
+
+  it('keep_fit in state is NOT a race in play — the boundary still fires', () => {
+    const r = applyVolumeGoal(
+      stateWith({ goal_distance: sv('keep_fit') }),
+      { miles: 100, period: 'month' },
+      vout(),
+    );
+    expect(r.boundary).toBe(true);
+  });
+
+  it('same-turn race signals demote silently (lookup query / stated distance)', () => {
+    for (const o of [vout({ race_lookup_query: 'CIM' }), vout({ goal_distance_mi: 44 })]) {
+      const r = applyVolumeGoal(stateWith({}), { miles: 60, period: 'month' }, o);
+      expect(r.boundary).toBe(false);
+      expect(r.state.intents).toEqual(['60 miles a month']);
+    }
+  });
+});
+
+describe('volumeBoundaryBody + VOLUME_REDIRECT_CHIPS', () => {
+  it('states the boundary plainly and offers the two paths', () => {
+    const monthly = volumeBoundaryBody('month');
+    expect(monthly).toContain(
+      "A monthly mileage target isn't something I can coach you toward yet",
+    );
+    expect(monthly).toContain('keep you generally fit');
+    expect(monthly).toContain('train you for a race');
+    expect(monthly.endsWith('?')).toBe(true);
+    expect(volumeBoundaryBody('week')).toContain('A weekly mileage target');
+  });
+
+  it('redirect chips are plain typed-text values, not consent tokens', () => {
+    expect(VOLUME_REDIRECT_CHIPS.map((c) => c.label)).toEqual(['Keep me fit', 'Train for a race']);
+    for (const c of VOLUME_REDIRECT_CHIPS) {
+      expect(['yes', 'no']).not.toContain(c.value); // never trips the consent fast path
+    }
+  });
+});
+
+describe('formatShortTarget', () => {
+  it('renders sub-hour targets as M:SS and longer ones as H:MM:SS', () => {
+    expect(formatShortTarget(300)).toBe('5:00');
+    expect(formatShortTarget(14154)).toBe('3:55:54');
   });
 });

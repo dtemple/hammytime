@@ -17,8 +17,14 @@ import { slotValue } from '../slots/provenance';
 import type { GoalDistanceValue } from '../slots/schema';
 import type { OutOfCatalogGoal, V3OnboardingState } from '../slots/slot-state';
 import { CATALOG_FLOOR_MI, deriveBucketFromMiles } from './numeric';
-import type { Chip } from './extract-and-advance';
-import { enforceGuardrails, mergeFills, SYNTHETIC_GENERATE, type ResolvedTurn } from './guardrails';
+import type { Chip, ExtractAdvanceOutput } from './extract-and-advance';
+import {
+  enforceGuardrails,
+  mergeFills,
+  mergeIntents,
+  SYNTHETIC_GENERATE,
+  type ResolvedTurn,
+} from './guardrails';
 
 /** The nearest in-catalog structure, by direction (R1 fix 1): a goal below the
  *  catalog floor proxies to the smallest bucket, anything else (oversize, or a
@@ -44,8 +50,9 @@ export const REFLECTION_POCKET_CHIPS: Chip[] = [
 ];
 
 /** A short-race target reads as M:SS ("5:00"), not the H:MM:SS finish-time form
- *  ("0:05:00") the bucket distances use. */
-function formatShortTarget(seconds: number): string {
+ *  ("0:05:00") the bucket distances use. Exported for the cross-fire backstop's
+ *  pairing question (router), which echoes the cleared value the same way. */
+export function formatShortTarget(seconds: number): string {
   if (seconds >= 3600) return formatFinishTime(seconds);
   return `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, '0')}`;
 }
@@ -192,4 +199,70 @@ export function reconcilePocket(
     return { ...working, out_of_catalog: { ...prev, consent: 'accepted' } };
   }
   return { ...working, out_of_catalog: undefined };
+}
+
+// ---------------------------------------------------------------------------
+// Periodic volume goals (ULTRA_SUPPORT §6 — deferred feature, interim boundary)
+// ---------------------------------------------------------------------------
+// "100 miles a month" is a goal shape the catalog can't hold, and per David's
+// 2026-06-10 decision the engine doesn't proxy it: it acknowledges the goal,
+// states plainly that it can't coach toward it yet, and redirects to the two
+// things it CAN do — general fitness, or training for a race. The number rides
+// as an intent (context, not a commitment), so the recap and the preview still
+// show it and the daily coach sees it in the profile.
+
+/** Weeks per month, for normalizing a monthly target ("100 a month ≈ 23 a week"). */
+const WEEKS_PER_MONTH = 4.345;
+
+/** Redirect chips on the volume-boundary turn. Plain typed-text values the model
+ *  interprets — these are NOT consent tokens, so no router fast path keys on them. */
+export const VOLUME_REDIRECT_CHIPS: Chip[] = [
+  { label: 'Keep me fit', value: 'just keep me generally fit, no race' },
+  { label: 'Train for a race', value: 'I want to train for a race' },
+];
+
+/** The boundary + redirect body. Reads standalone AND after the composed
+ *  "One thing to be straight about: " lead (first char gets lowercased there). */
+export function volumeBoundaryBody(period: 'week' | 'month'): string {
+  return `A ${period}ly mileage target isn't something I can coach you toward yet — I build training around runs per week, and races. What I can do: keep you generally fit with a rolling base, or train you for a race. Which sounds right?`;
+}
+
+export interface VolumeGoalResult {
+  state: V3OnboardingState;
+  /** True when this turn should be the boundary + redirect: the target is newly
+   *  stated AND no race goal is in play. False = silent demote (the clause still
+   *  rides as an intent — e.g. "60 miles a month" alongside a September race). */
+  boundary: boolean;
+  /** The normalized weekly read of the target (month ÷ 4.345, rounded). */
+  miPerWeek: number;
+}
+
+/**
+ * Fold a stated volume goal into state: the athlete-phrased clause joins the
+ * intents (append-only, deduped — a restated target is not "new", so the
+ * deterministic boundary fires at most once per distinct target; the model
+ * holds the line conversationally after that). Race-in-play is read off the
+ * POST-MERGE state (same-turn goal fills are already in the slots) plus the
+ * turn's routing signals, so a volume target can never displace a race goal.
+ */
+export function applyVolumeGoal(
+  state: V3OnboardingState,
+  vg: { miles: number; period: 'week' | 'month' },
+  output: ExtractAdvanceOutput,
+): VolumeGoalResult {
+  const miPerWeek = Math.round(vg.period === 'month' ? vg.miles / WEEKS_PER_MONTH : vg.miles);
+  const clause = `${vg.miles} miles a ${vg.period}`;
+  const added = !(state.intents ?? []).some((e) => e.toLowerCase() === clause.toLowerCase());
+  const s = state.slots;
+  const raceInPlay =
+    output.race_lookup_query != null ||
+    output.goal_distance_mi != null ||
+    s.goal_type?.value === 'race' ||
+    s.goal_race?.value != null ||
+    (s.goal_distance?.value != null && s.goal_distance.value !== 'keep_fit');
+  return {
+    state: { ...state, intents: mergeIntents(state.intents, [clause]) },
+    boundary: added && !raceInPlay,
+    miPerWeek,
+  };
 }

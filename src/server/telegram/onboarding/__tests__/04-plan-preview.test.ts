@@ -258,3 +258,42 @@ describe('formatPreview — intents (R2)', () => {
     expect(formatPreview(plan, params, { intents: [] })).not.toContain('Also on the radar');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Staging fixes (2026-06-10): time-goal truthfulness + copy
+// ---------------------------------------------------------------------------
+
+describe('formatPreview — locked time goal (staging fix)', () => {
+  it('renders the target instead of claiming there is no time goal', () => {
+    const { plan, params } = render(COMMITTED);
+    const text = formatPreview(plan, { ...params, targetTimeSec: 14154 });
+    expect(text).toContain('Aiming at 3:55:54');
+    expect(text).not.toContain('No time goal');
+  });
+
+  it('keeps the no-time-goal line when none is set', () => {
+    const { plan, params } = render(COMMITTED);
+    expect(formatPreview(plan, params)).toContain('No time goal locked in yet');
+  });
+
+  it('a discouraged time goal (targetTimeSec nulled by the selector) keeps the line + the nudge', () => {
+    const { plan, params } = render(COMMITTED);
+    const text = formatPreview(plan, { ...params, timeGoalDiscouraged: true });
+    expect(text).toContain('No time goal locked in yet');
+    expect(text).toContain('finishing strong before chasing');
+  });
+
+  it('the peak long run carries its unit', () => {
+    const { plan, params } = render(COMMITTED);
+    expect(formatPreview(plan, params)).toMatch(/peaking at \d+ mi\./);
+  });
+
+  it('the intents line stays awareness-only (no "the plan carries those" promise)', () => {
+    const { plan, params } = render(COMMITTED);
+    const text = formatPreview(plan, params, { intents: ['100 miles a month'] });
+    expect(text).toContain(
+      "Also on the radar: 100 miles a month. I'll keep those in view as we go.",
+    );
+    expect(text).not.toContain('The plan carries those too');
+  });
+});

@@ -115,6 +115,7 @@ function out(p: Partial<ExtractAdvanceOutput>): ExtractAdvanceOutput {
     numeric_unresolved: null,
     intents: [],
     reflection: null,
+    volume_goal: null,
     ...p,
   };
 }
@@ -1089,5 +1090,246 @@ describe('router — the reflection turn (R2)', () => {
       expect.anything(),
       expect.objectContaining({ intents: ['build muscle strength'] }),
     );
+  });
+});
+
+// --- staging fixes (2026-06-10): volume-goal boundary + the distance cross-fire ---
+
+describe('router — volume-goal boundary (ULTRA_SUPPORT §6 interim)', () => {
+  const MIRROR = "Here's what I'm hearing — 100 miles every month, sustained for a year.";
+
+  function freshIntake(): V3OnboardingState {
+    return { ...initialV3State(null), phase: 'intake', slots: {} };
+  }
+
+  it('a volume-only ramble gets mirror + boundary + the two redirect chips; the clause rides as an intent', async () => {
+    loadV3State.mockResolvedValue(freshIntake());
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'ask',
+        message: 'sounds good',
+        reflection: MIRROR,
+        volume_goal: { miles: 100, period: 'month' },
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(90, 'I wanna run 100 miles every month for the next year'), athlete);
+
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toMatch(/^Here's what I'm hearing/);
+    expect(call[1]).toContain(
+      "One thing to be straight about: a monthly mileage target isn't something I can coach you toward yet",
+    );
+    expect(labels(call)).toEqual(['Keep me fit', 'Train for a race']);
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.intents).toEqual(['100 miles a month']);
+    expect(saved.reflected).toBe(true);
+    expect(saved.out_of_catalog).toBeUndefined(); // no pocket — this is a redirect
+  });
+
+  it('a volume target alongside a race lookup demotes silently — the race turn stands', async () => {
+    loadV3State.mockResolvedValue(freshIntake());
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'confirm',
+        message: 'looking',
+        race_lookup_query: 'CIM',
+        volume_goal: { miles: 60, period: 'month' },
+        fills: [{ slot: 'goal_type', value: 'race', provenance: 'stated' }],
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+    vi.mocked(lookupRace).mockResolvedValue({
+      ok: true,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      found: { canonical_name: 'CIM', date: '2026-12-06', distance_mi: 26.2 } as any,
+    });
+
+    await handleV3Message(ctx(91, 'CIM in December, and at least 60 miles a month'), athlete);
+
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toContain('Found it — CIM');
+    expect(call[1]).not.toContain('mileage target');
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.intents).toEqual(['60 miles a month']);
+  });
+
+  it('a race already in state demotes silently too (the existing-race hole)', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race'), goal_distance: sv('marathon') },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'ask',
+        message: 'noted — when is the race?',
+        volume_goal: { miles: 100, period: 'month' },
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(92, 'also I want 100 miles a month'), athlete);
+
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toBe('noted — when is the race?');
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.intents).toEqual(['100 miles a month']);
+  });
+
+  it('a restated volume target does not re-fire the boundary (intent dedupe is the gate)', async () => {
+    loadV3State.mockResolvedValue({
+      ...freshIntake(),
+      reflected: true,
+      intents: ['100 miles a month'],
+    });
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'ask',
+        message: 'I hear you — the two paths are still general fitness or a race.',
+        volume_goal: { miles: 100, period: 'month' },
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(93, 'no really, 100 miles a month'), athlete);
+
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).not.toContain("isn't something I can coach you toward");
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.intents).toEqual(['100 miles a month']); // no dupe
+  });
+
+  it('a boundary turn blocks a same-turn generate — never "happily agree" into the plan', async () => {
+    const slots: SlotState = {
+      goal_type: sv('general_fitness'),
+      goal_distance: sv('keep_fit'),
+      experience_tier: sv('some_training'),
+      days_per_week: sv(3),
+      long_run_day: sv(3),
+      injury_status: sv('none'),
+    };
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots,
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'generate',
+        message: 'building it',
+        volume_goal: { miles: 100, period: 'month' },
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(94, '100 miles a month, build it'), athlete);
+
+    expect(commitSlots).not.toHaveBeenCalled();
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toContain("isn't something I can coach you toward yet");
+  });
+});
+
+describe('router — target/distance cross-fire (the mile enum-bypass net)', () => {
+  it('a fresh 5k fill against a held 5:00 fires and questions the pairing', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race'), target_time: sv(300) },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'ask',
+        message: 'a 5k then',
+        fills: [{ slot: 'goal_distance', value: '5k', provenance: 'stated' }],
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(95, 'call it a 5k'), athlete);
+
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toContain('I had 5:00 as your goal time');
+    expect(call[1]).toMatch(/doesn't fit a 5k/i);
+    expect(call[1]).toMatch(/distance actually different/i);
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.slots.target_time?.value).toBeNull();
+  });
+
+  it('a legitimate pair never fires (3:55 marathon)', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race'), target_time: sv(14154) },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'ask',
+        message: 'marathon it is',
+        fills: [{ slot: 'goal_distance', value: 'marathon', provenance: 'stated' }],
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(96, 'a marathon'), athlete);
+
+    expect(sendMessage.mock.calls.at(-1)![1]).toBe('marathon it is');
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.slots.target_time?.value).toBe(14154);
+  });
+
+  it('a typed pocket-accept is protected: reconcile runs first, the envelope validates the real mile', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race'), target_time: sv(300) },
+      out_of_catalog: { words: 'a sub-5 mile', distance_mi: 1, proxy: '5k', consent: 'pending' },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'ask',
+        message: 'great — locking in the 5K block',
+        fills: [{ slot: 'goal_distance', value: '5k', provenance: 'stated' }],
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(97, 'yeah do that'), athlete);
+
+    expect(sendMessage.mock.calls.at(-1)![1]).toBe('great — locking in the 5K block');
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.out_of_catalog?.consent).toBe('accepted');
+    expect(saved.slots.target_time?.value).toBe(300); // sub-5 survives, again
+  });
+
+  it('a keep_fit fill with a held time never fires (no range to validate)', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { target_time: sv(300) },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'ask',
+        message: 'keeping you fit then',
+        fills: [{ slot: 'goal_distance', value: 'keep_fit', provenance: 'stated' }],
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(98, 'just keep me fit'), athlete);
+
+    expect(sendMessage.mock.calls.at(-1)![1]).toBe('keeping you fit then');
   });
 });
