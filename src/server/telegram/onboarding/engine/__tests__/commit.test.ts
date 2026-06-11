@@ -22,6 +22,7 @@ vi.mock('../../known-gaps-memory', () => ({
 }));
 
 import { buildGoalWrite, commitSlots, mapInjuryStatus } from '../commit';
+import { enforceGuardrails } from '../guardrails';
 import { initialV3State, type V3OnboardingState } from '../../slots/slot-state';
 import type { SlotState } from '../../slots/schema';
 import type { SlotValue, Provenance } from '../../slots/provenance';
@@ -214,5 +215,70 @@ describe('commitSlots — the "Also working toward" profile section (R2)', () =>
     await commitSlots('ath-1', intendedState());
     const sections = writeHelpers.upsertProfileSection.mock.calls.map((c) => c[1]);
     expect(sections).not.toContain('Also working toward');
+  });
+});
+
+describe('commitSlots — a superseded pocket leaves no trace (stale-pocket fix)', () => {
+  // The full pipeline for the flagged bug: an ACCEPTED 44-mi pocket, then a
+  // pivot to a real marathon. The engine (enforceGuardrails) clears the pocket;
+  // this asserts the commit consequences — the race row carries the bucket
+  // nominal (not 44), no North-star section is written, and the old goal rides
+  // in "Also working toward".
+  it('writes the bucket nominal and no North-star section after the pivot', async () => {
+    const raceInsert = vi.fn((_row: { distance_mi: number; name: string }) => ({
+      select: () => ({ single: async () => ({ data: { id: 'race-1' } }) }),
+    }));
+    dbFrom.mockImplementation((table: string) => ({
+      insert: table === 'races' ? raceInsert : vi.fn(async () => ({ error: null })),
+      upsert: vi.fn(async () => ({})),
+      update: vi.fn(() => ({ eq: async () => ({}) })),
+    }));
+
+    const accepted: V3OnboardingState = {
+      ...state({
+        ...trainingBase,
+        goal_type: sv('race'),
+        goal_distance: sv('marathon'), // the accepted proxy
+        injury_status: sv('none'),
+      }),
+      out_of_catalog: {
+        words: '44 miles in the mountains',
+        distance_mi: 44,
+        proxy: 'marathon',
+        consent: 'accepted',
+      },
+    };
+    const pivoted = enforceGuardrails(accepted, {
+      fills: [
+        { slot: 'goal_race', value: 'CIM', provenance: 'stated' },
+        { slot: 'goal_date', value: '2026-12-06', provenance: 'stated' },
+        { slot: 'goal_distance', value: 'marathon', provenance: 'stated' },
+      ],
+      next_action: 'ask',
+      message: '',
+      chips: [],
+      asked_slot: null,
+      race_lookup_query: null,
+      goal_distance_mi: null,
+      contradiction: null,
+      numeric_unresolved: null,
+      intents: [],
+      reflection: null,
+      volume_goal: null,
+    }).state;
+
+    await commitSlots('ath-1', pivoted);
+
+    expect(raceInsert).toHaveBeenCalledOnce();
+    const row = raceInsert.mock.calls[0]![0];
+    expect(row.name).toBe('CIM');
+    expect(row.distance_mi).toBeCloseTo(26.2, 1); // the nominal, not the stale 44
+    const sections = writeHelpers.upsertProfileSection.mock.calls.map((c) => c[1]);
+    expect(sections).not.toContain('North-star goal');
+    expect(writeHelpers.upsertProfileSection).toHaveBeenCalledWith(
+      'ath-1',
+      'Also working toward',
+      '- 44 miles in the mountains',
+    );
   });
 });

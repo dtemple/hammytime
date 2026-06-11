@@ -58,6 +58,7 @@ import {
   REFLECTION_POCKET_CHIPS,
   reconcilePocket,
   setPocket,
+  supersedePocket,
   volumeBoundaryBody,
   VOLUME_REDIRECT_CHIPS,
 } from './pocket';
@@ -523,7 +524,10 @@ async function resolveRace(
       goal_distance: derived ? mkSlot(derived, 'stated', true) : state.slots.goal_distance,
     };
     return {
-      state: { ...state, slots },
+      // An in-catalog race supersedes any open or accepted pocket — without this
+      // an accepted pocket's distance_mi survives the pivot and poisons the new
+      // race's row at commit (the stale-pocket bug, 2026-06-10 pressure-test).
+      state: supersedePocket({ ...state, slots }),
       message: `Found it — ${f.canonical_name}, ${dateStr}. That the one?`,
       chips: [
         { label: "That's it", value: 'yes' },

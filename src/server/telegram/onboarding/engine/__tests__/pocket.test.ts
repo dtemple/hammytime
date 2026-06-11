@@ -10,6 +10,7 @@ import {
   REFLECTION_POCKET_CHIPS,
   reconcilePocket,
   setPocket,
+  supersedePocket,
   volumeBoundaryBody,
   VOLUME_REDIRECT_CHIPS,
 } from '../pocket';
@@ -158,6 +159,53 @@ describe('reconcilePocket (typed path)', () => {
       { out_of_catalog: shortPocket },
     );
     expect(reconcilePocket(shortPocket, working).out_of_catalog?.consent).toBe('accepted');
+  });
+});
+
+describe('supersedePocket (the stale-pocket pivot fix)', () => {
+  it('clears an ACCEPTED pocket and demotes its words to the intents', () => {
+    const state = stateWith(
+      {},
+      {
+        out_of_catalog: {
+          words: '44 miles in the mountains',
+          distance_mi: 44,
+          proxy: 'marathon',
+          consent: 'accepted',
+        },
+      },
+    );
+    const next = supersedePocket(state);
+    expect(next.out_of_catalog).toBeUndefined();
+    expect(next.intents).toEqual(['44 miles in the mountains']);
+  });
+
+  it('clears a PENDING pocket too — a confirmed race supersedes either way', () => {
+    const state = setPocket(stateWith({}), 'Western States, 100mi', 100);
+    const next = supersedePocket(state);
+    expect(next.out_of_catalog).toBeUndefined();
+    expect(next.intents).toEqual(['Western States, 100mi']);
+  });
+
+  it('is the identity without a pocket', () => {
+    const state = stateWith({}, { intents: ['build strength'] });
+    expect(supersedePocket(state)).toBe(state);
+  });
+
+  it('dedupes against an intent already carrying the words', () => {
+    const state = stateWith(
+      {},
+      {
+        intents: ['44 miles in the mountains'],
+        out_of_catalog: {
+          words: '44 miles in the mountains',
+          distance_mi: 44,
+          proxy: 'marathon',
+          consent: 'accepted',
+        },
+      },
+    );
+    expect(supersedePocket(state).intents).toEqual(['44 miles in the mountains']);
   });
 });
 

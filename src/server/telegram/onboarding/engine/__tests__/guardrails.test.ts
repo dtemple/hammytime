@@ -14,6 +14,7 @@ import {
   mergeIntents,
   INTENTS_CAP,
 } from '../guardrails';
+import { buildGoalWrite } from '../commit';
 import { INJURY_CHIPS, SLOT_CHIPS } from '../../slots/chips';
 import { hasReflected, initialV3State, type V3OnboardingState } from '../../slots/slot-state';
 import type { SlotKey, SlotState } from '../../slots/schema';
@@ -1028,5 +1029,94 @@ describe('enforceGuardrails — volume_goal is goal-bearing (staging fix)', () =
       stateWith(slots, { recap_shown: recapDisplayedSlots(stateWith(slots)) }),
     );
     expect(r.state.intents).toBeUndefined();
+  });
+});
+
+describe('enforceGuardrails — a pivot supersedes an ACCEPTED pocket (stale-pocket fix)', () => {
+  // Chase's shape after accepting the 44-mi proxy: goal_distance holds the
+  // marathon proxy, the pocket rides accepted, every other required slot filled.
+  function acceptedPocketState(over: Partial<V3OnboardingState> = {}): V3OnboardingState {
+    return stateWith(coreSlots('race'), {
+      out_of_catalog: {
+        words: '44 miles in the mountains',
+        distance_mi: 44,
+        proxy: 'marathon',
+        consent: 'accepted',
+      },
+      ...over,
+    });
+  }
+
+  it('a different in-catalog distance clears the pocket and demotes the words', () => {
+    const r = enforceGuardrails(
+      acceptedPocketState(),
+      out({ fills: [fill('goal_distance', 'half')] }),
+    );
+    expect(r.state.out_of_catalog).toBeUndefined();
+    expect(r.state.intents).toEqual(['44 miles in the mountains']);
+  });
+
+  it('a goal-race change clears it even when the new bucket EQUALS the proxy', () => {
+    // The residual the distance check alone misses: 44-mi pocket → a real
+    // marathon. goal_distance stays 'marathon' (= proxy); the race change is
+    // the only tell.
+    const r = enforceGuardrails(
+      acceptedPocketState(),
+      out({ fills: [fill('goal_race', 'CIM'), fill('goal_date', '2026-12-06')] }),
+    );
+    expect(r.state.out_of_catalog).toBeUndefined();
+    expect(r.state.intents).toEqual(['44 miles in the mountains']);
+  });
+
+  it('a re-emit of the proxy is not a pivot — the pocket survives', () => {
+    const r = enforceGuardrails(
+      acceptedPocketState(),
+      out({ fills: [fill('goal_distance', 'marathon')] }),
+    );
+    expect(r.state.out_of_catalog?.consent).toBe('accepted');
+    expect(r.state.intents).toBeUndefined();
+  });
+
+  it('a turn that touches nothing goal-shaped leaves the pocket alone', () => {
+    const r = enforceGuardrails(acceptedPocketState(), out({ fills: [fill('age', 41)] }));
+    expect(r.state.out_of_catalog?.consent).toBe('accepted');
+  });
+
+  it('a PENDING pocket is not this check, by design (reconcilePocket owns it)', () => {
+    const pending = acceptedPocketState();
+    pending.out_of_catalog = { ...pending.out_of_catalog!, consent: 'pending' };
+    const r = enforceGuardrails(pending, out({ fills: [fill('goal_distance', 'half')] }));
+    expect(r.state.out_of_catalog?.consent).toBe('pending');
+  });
+
+  it('the synthetic generate path cannot trip it (state is its own baseline)', () => {
+    const r = resolveRecapAffirmAndAdvance(
+      acceptedPocketState({
+        recap_shown: recapDisplayedSlots(acceptedPocketState()),
+        slots: { ...coreSlots('race'), injury_status: sv('none') },
+      }),
+    );
+    expect(r.state.out_of_catalog?.consent).toBe('accepted');
+  });
+
+  it('end-to-end: the pivoted state recaps the new race and commits the bucket nominal', () => {
+    const r = enforceGuardrails(
+      acceptedPocketState(),
+      out({
+        fills: [
+          fill('goal_race', 'CIM'),
+          fill('goal_date', '2026-12-06'),
+          fill('goal_distance', 'marathon'),
+        ],
+      }),
+    );
+    // Recap: the new race owns the goal line; the old goal rides as an intent.
+    const recap = buildRecapMessage(r.state);
+    expect(recap).toContain('• Race: CIM — Dec 6, 2026 (marathon)');
+    expect(recap).not.toMatch(/• Goal: 44 miles in the mountains/);
+    expect(recap).toContain('• Also working toward: 44 miles in the mountains');
+    // Commit: the race row gets the marathon nominal, not the stale 44.
+    const { race } = buildGoalWrite(r.state);
+    expect(race!.distance_mi).toBeCloseTo(26.2, 1);
   });
 });

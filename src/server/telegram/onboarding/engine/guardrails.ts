@@ -534,6 +534,30 @@ export function enforceGuardrails(
     merged = { ...merged, goal_date: unknownSlot<string>() };
   }
 
+  // A pivot away from an ACCEPTED pocket clears it (the stale-pocket bug,
+  // 2026-06-10 pressure-test): left in place, the pocket's distance_mi poisons
+  // the new race's row at commit, its words hijack the recap's goal line, and a
+  // stale North-star section gets written. Two deterministic tells: the merged
+  // goal_distance holds a value that isn't the proxy, or this turn changed the
+  // goal race — which catches a pivot whose bucket EQUALS the proxy (a 44-mi
+  // pocket followed by a real marathon). The words demote to the intents merge
+  // below, so the old goal rides as context instead of vanishing. The
+  // race-lookup path clears in code (supersedePocket, router); a PENDING pocket
+  // stays reconcilePocket's job.
+  let outOfCatalog = state.out_of_catalog;
+  let demotedWords: string[] = [];
+  if (outOfCatalog?.consent === 'accepted') {
+    const gd = merged.goal_distance;
+    const distancePivot =
+      !!gd && gd.value != null && gd.provenance !== 'unknown' && gd.value !== outOfCatalog.proxy;
+    const newRace = merged.goal_race?.value ?? null;
+    const racePivot = newRace != null && newRace !== (state.slots.goal_race?.value ?? null);
+    if (distancePivot || racePivot) {
+      demotedWords = [outOfCatalog.words];
+      outOfCatalog = undefined;
+    }
+  }
+
   // Recap bulk-confirm, typed path (R1 fix 2): the last message out was a recap
   // and this turn resolves to generate — that's an affirmation of the displayed
   // picture, so every displayed slot whose value is unchanged is re-emitted as
@@ -570,13 +594,14 @@ export function enforceGuardrails(
   // goal-bearing turn itself — even an overridden one, because the router
   // composes the model's `reflection` onto whatever message wins the turn, so
   // "flipped" always coincides with "mirror delivered".
-  const intents = mergeIntents(state.intents, output.intents);
+  const intents = mergeIntents(state.intents, [...demotedWords, ...output.intents]);
   const reflected = hasReflected(state) || isGoalBearing(state, output) ? true : state.reflected;
 
   const working: V3OnboardingState = {
     ...state,
     slots: merged,
     asked,
+    out_of_catalog: outOfCatalog,
     intents: intents.length ? intents : state.intents,
     reflected,
     optional_budget_remaining: budget,

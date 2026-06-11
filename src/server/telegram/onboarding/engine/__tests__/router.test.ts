@@ -398,6 +398,73 @@ describe('router — confirmed-race distance derivation (V3-W8)', () => {
     });
     expect(saved.out_of_catalog).toBeUndefined();
   });
+
+  it('an in-catalog race supersedes an ACCEPTED pocket — same-bucket pivot (stale-pocket fix)', async () => {
+    // Chase's shape post-accept: 44-mi pocket accepted, marathon proxy in the
+    // slots. Pivoting to CIM (also a marathon) must clear the pocket so commit
+    // writes the bucket nominal, not 44, onto the new race's row.
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race'), goal_distance: sv('marathon') },
+      out_of_catalog: {
+        words: '44 miles in the mountains',
+        distance_mi: 44,
+        proxy: 'marathon',
+        consent: 'accepted',
+      },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({ next_action: 'confirm', race_lookup_query: 'CIM', message: 'looking' }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+    vi.mocked(lookupRace).mockResolvedValue({
+      ok: true,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      found: { canonical_name: 'CIM', date: '2026-12-06', distance_mi: 26.2 } as any,
+    });
+
+    await handleV3Message(ctx(54, 'actually let me do CIM instead'), athlete);
+
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.out_of_catalog).toBeUndefined();
+    expect(saved.slots.goal_race?.value).toBe('CIM');
+    expect(saved.slots.goal_distance?.value).toBe('marathon');
+    expect(saved.intents).toEqual(['44 miles in the mountains']);
+  });
+
+  it('an in-catalog race supersedes a PENDING pocket too (no false reconcile-accept)', async () => {
+    // Without the clear, reconcilePocket sees goal_distance = proxy and wrongly
+    // marks the pocket accepted — the same stale state by another road.
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race') },
+      out_of_catalog: {
+        words: '44 miles in the mountains',
+        distance_mi: 44,
+        proxy: 'marathon',
+        consent: 'pending',
+      },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({ next_action: 'confirm', race_lookup_query: 'CIM', message: 'looking' }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+    vi.mocked(lookupRace).mockResolvedValue({
+      ok: true,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      found: { canonical_name: 'CIM', date: '2026-12-06', distance_mi: 26.2 } as any,
+    });
+
+    await handleV3Message(ctx(55, 'nah, make it CIM'), athlete);
+
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.out_of_catalog).toBeUndefined();
+    expect(saved.intents).toEqual(['44 miles in the mountains']);
+  });
 });
 
 describe('router — out-of-catalog race opens the pocket (V3-W8)', () => {

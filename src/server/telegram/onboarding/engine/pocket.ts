@@ -201,6 +201,27 @@ export function reconcilePocket(
   return { ...working, out_of_catalog: undefined };
 }
 
+/**
+ * A confirmed in-catalog race supersedes the pocket, whatever its consent (the
+ * stale accepted-pocket pivot, 2026-06-10 pressure-test): left in place, an
+ * accepted pocket poisons the new race's `distance_mi` at commit, hijacks the
+ * recap's goal line, and writes a stale North-star section — and reconcilePocket
+ * can't help, since it only runs while consent is pending (and would wrongly
+ * mark a pending pocket accepted when the new race's bucket equals the proxy).
+ * The pocket's words demote to the intents, so the old goal rides as context
+ * for the daily coach instead of vanishing. enforceGuardrails carries the
+ * matching post-merge check for a typed pivot that skips the race lookup.
+ */
+export function supersedePocket(state: V3OnboardingState): V3OnboardingState {
+  const pocket = state.out_of_catalog;
+  if (!pocket) return state;
+  return {
+    ...state,
+    out_of_catalog: undefined,
+    intents: mergeIntents(state.intents, [pocket.words]),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Periodic volume goals (ULTRA_SUPPORT §6 — deferred feature, interim boundary)
 // ---------------------------------------------------------------------------
