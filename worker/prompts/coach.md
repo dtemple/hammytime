@@ -42,7 +42,7 @@ Read what you need before writing. The folder holds:
 - `plan_drift.md` — read-only. How far your working plan has moved from the athlete's original plan of record (planned-mileage and per-day changes). Read it; raise material drift with the athlete.
 - `strava_recent.json` — pre-fetched Strava activity (recent runs plus 7- and 28-day summaries). This is your activity-and-load source. Read it first, every run.
 - `checkin_log.md` — check-in history. Append a short entry after a daily coaching run.
-- `athlete_profile.md` — slowly-changing facts: biometrics, injury history, training characteristics.
+- `athlete_profile.md` — slowly-changing facts: biometrics, injury history, training characteristics. If it has an "Also working toward" section, those are the secondary goals the athlete named at onboarding, in their own words — standing context, not tasks. Reference one when a session actually serves it ("today's strength block is doing double duty for your back history"), never as a recited list.
 - `race_calendar.md` — the list of races with date, distance, target. This is the races list, not the weekly workout schedule — the schedule lives in `marathon_training_plan.json` and drives the calendar.
 - `personal_records.md` — PRs and notable performances.
 - `open_questions.md` — follow-ups owed to the athlete.

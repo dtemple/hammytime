@@ -11,9 +11,11 @@ import {
   applyChipPolicy,
   buildRecapMessage,
   formatSlotValue,
+  mergeIntents,
+  INTENTS_CAP,
 } from '../guardrails';
 import { INJURY_CHIPS, SLOT_CHIPS } from '../../slots/chips';
-import { initialV3State, type V3OnboardingState } from '../../slots/slot-state';
+import { hasReflected, initialV3State, type V3OnboardingState } from '../../slots/slot-state';
 import type { SlotKey, SlotState } from '../../slots/schema';
 import type { SlotValue, Provenance } from '../../slots/provenance';
 import type { ExtractAdvanceOutput, SlotFill } from '../extract-and-advance';
@@ -50,6 +52,8 @@ function out(partial: Partial<ExtractAdvanceOutput>): ExtractAdvanceOutput {
     goal_distance_mi: null,
     contradiction: null,
     numeric_unresolved: null,
+    intents: [],
+    reflection: null,
     ...partial,
   };
 }
@@ -873,5 +877,137 @@ describe('recapDisplayedSlots — mirrors what the recap shows', () => {
     const keys = shown.map((s) => s.slot);
     expect(keys).toContain('goal_distance'); // the proxy is what the recap displays
     expect(keys).not.toContain('goal_race'); // the ooc goal line replaces the race line
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R2 — intents + the reflection flip (ONBOARDING_REFLECTION §2)
+// ---------------------------------------------------------------------------
+
+describe('mergeIntents (R2)', () => {
+  it('appends new intents and is the identity on an empty delta', () => {
+    expect(mergeIntents(undefined, ['speed at shorter distances'])).toEqual([
+      'speed at shorter distances',
+    ]);
+    expect(mergeIntents(['a', 'b'], [])).toEqual(['a', 'b']);
+  });
+
+  it('dedupes case-insensitively and drops blank entries', () => {
+    expect(mergeIntents(['Build strength'], ['build strength', '  ', 'stay healthy'])).toEqual([
+      'Build strength',
+      'stay healthy',
+    ]);
+  });
+
+  it('caps at INTENTS_CAP with newest winning', () => {
+    const five = ['a', 'b', 'c', 'd', 'e'];
+    expect(mergeIntents(five, ['f'])).toEqual(['b', 'c', 'd', 'e', 'f']);
+    expect(five.length).toBe(INTENTS_CAP);
+  });
+});
+
+describe('hasReflected (R2) — the grandfather rule', () => {
+  it('honors an explicit flag in either direction', () => {
+    expect(hasReflected(stateWith({}, { reflected: true }))).toBe(true);
+    // explicit false wins even with goal slots filled (the redo path clears the
+    // slots, but a race-lookup redo can refill them the same turn)
+    expect(hasReflected(stateWith(coreSlots('race'), { reflected: false }))).toBe(false);
+  });
+
+  it('grandfathers a pre-R2 state that already carries goal content', () => {
+    expect(hasReflected(stateWith(coreSlots('race')))).toBe(true);
+    expect(hasReflected(stateWith({ goal_race: sv('CIM') }))).toBe(true);
+  });
+
+  it('a fresh state with no goal content is unreflected', () => {
+    expect(hasReflected(stateWith({}))).toBe(false);
+    expect(hasReflected(stateWith({ days_per_week: sv(4) }))).toBe(false);
+  });
+});
+
+describe('enforceGuardrails — intents merge + reflected flip (R2)', () => {
+  it('merges the model intents into state and flips reflected on a goal fill', () => {
+    const r = enforceGuardrails(
+      stateWith({}),
+      out({
+        fills: [fill('goal_type', 'race')],
+        intents: ['speed at shorter distances', 'build muscle strength'],
+      }),
+    );
+    expect(r.state.intents).toEqual(['speed at shorter distances', 'build muscle strength']);
+    expect(r.state.reflected).toBe(true);
+  });
+
+  it.each([
+    ['goal_distance_mi', out({ goal_distance_mi: 1 })],
+    ['race_lookup_query', out({ race_lookup_query: 'CIM' })],
+    ['a new intent alone', out({ intents: ['get stronger'] })],
+  ])('flips reflected on %s', (_label, output) => {
+    const r = enforceGuardrails(stateWith({}), output);
+    expect(r.state.reflected).toBe(true);
+  });
+
+  it('does not flip on a non-goal-bearing turn (and a duplicate intent is not "new")', () => {
+    const dupOnly = enforceGuardrails(
+      stateWith({ days_per_week: sv(4) }, { reflected: false, intents: ['get stronger'] }),
+      out({ fills: [fill('long_run_day', 0)], intents: ['Get Stronger'] }),
+    );
+    expect(dupOnly.state.reflected).toBe(false);
+    expect(dupOnly.state.intents).toEqual(['get stronger']);
+  });
+
+  it('flips even when the turn is overridden — the router composes the mirror onto the override', () => {
+    const r = enforceGuardrails(
+      stateWith({}),
+      out({
+        next_action: 'generate', // open required slots → overridden to ask
+        fills: [fill('goal_type', 'race')],
+        reflection: 'Here is what I am hearing',
+      }),
+    );
+    expect(r.overridden).toBe(true);
+    expect(r.state.reflected).toBe(true);
+  });
+
+  it('synthetic turns can neither append intents nor count as goal-bearing', () => {
+    const slots = coreSlots('race');
+    const before = stateWith(slots, {
+      intents: ['stay durable'],
+      pending_confirm: { slot: 'days_per_week', value: 4, attempts: 1 },
+    });
+    const r = resolveConfirmAndAdvance(before);
+    expect(r.state.intents).toEqual(['stay durable']);
+
+    const recapState = stateWith(slots, {
+      intents: ['stay durable'],
+      recap_shown: recapDisplayedSlots(stateWith(slots)),
+    });
+    const r2 = resolveRecapAffirmAndAdvance(recapState);
+    expect(r2.state.intents).toEqual(['stay durable']);
+  });
+});
+
+describe('buildRecapMessage — the intents line (R2)', () => {
+  it('renders "Also working toward" from intents', () => {
+    const msg = buildRecapMessage(
+      stateWith(coreSlots('race'), {
+        intents: ['speed at shorter distances', 'build muscle strength'],
+      }),
+    );
+    expect(msg).toContain(
+      '• Also working toward: speed at shorter distances, build muscle strength',
+    );
+  });
+
+  it('omits the line when there are no intents', () => {
+    expect(buildRecapMessage(stateWith(coreSlots('race')))).not.toContain('Also working toward');
+  });
+});
+
+describe('recapDisplayedSlots — unaffected by intents (R2)', () => {
+  it('intents are not slots: never displayed-as-confirmable, never bulk-confirmed', () => {
+    const withIntents = stateWith(coreSlots('race'), { intents: ['get faster'] });
+    const without = stateWith(coreSlots('race'));
+    expect(recapDisplayedSlots(withIntents)).toEqual(recapDisplayedSlots(without));
   });
 });

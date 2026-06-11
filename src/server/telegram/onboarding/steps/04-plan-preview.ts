@@ -44,7 +44,13 @@ function peakLongRunMi(plan: Plan): number {
 
 // The B1 preview copy. Two variants: a committed-race countdown (dated, with a
 // peak), and an open-ended base+build block (no race locked → no taper yet).
-export function formatPreview(plan: Plan, params: RenderParams): string {
+// `opts.intents` (v3 / R2) closes the loop on the athlete's non-plan threads —
+// one deterministic line, no model call; v2 callers pass nothing.
+export function formatPreview(
+  plan: Plan,
+  params: RenderParams,
+  opts?: { intents?: string[] },
+): string {
   const ps = plan.metadata.plan_structure;
   const lrDay = ps.long_run_day ?? DAY_NAMES[params.longRunDay] ?? 'your usual long-run day';
   const vol = plan.metadata.athlete?.baseline_weekly_miles;
@@ -128,6 +134,12 @@ export function formatPreview(plan: Plan, params: RenderParams): string {
     lines.push(
       `I've also slotted in ${n} short strength session${n > 1 ? 's' : ''} a week — bodyweight for ` +
         "now. Not into it? Let me know and I'll pull it out.",
+    );
+  }
+
+  if (opts?.intents?.length) {
+    lines.push(
+      `Also on the radar: ${opts.intents.join(', ')}. The plan carries those too — I'll keep them in view as we go.`,
     );
   }
 

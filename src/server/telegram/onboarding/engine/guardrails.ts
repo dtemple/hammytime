@@ -11,6 +11,7 @@
 
 import { formatFinishTime } from '../parsing/durations';
 import {
+  hasReflected,
   isV3OnboardingComplete,
   type PendingConfirm,
   type V3OnboardingState,
@@ -195,6 +196,48 @@ function goalTypeOf(slots: SlotState): GoalTypeValue | null {
   return (slots.goal_type?.value as GoalTypeValue | null) ?? null;
 }
 
+// ---------------------------------------------------------------------------
+// Intents (R2) — the goal portfolio beside the one plan-driving goal
+// ---------------------------------------------------------------------------
+
+/** DRAFT (ONBOARDING_REFLECTION §5 open decision #4) — flag for David's review. */
+export const INTENTS_CAP = 5;
+
+/** Append the model's new intents to the running list: trimmed, deduped
+ *  case-insensitively, capped at INTENTS_CAP with newest winning. Append-only —
+ *  an empty `incoming` is always the identity, which is what makes the synthetic
+ *  turns (SYNTHETIC_GENERATE) provably unable to touch intents. */
+export function mergeIntents(existing: string[] | undefined, incoming: string[]): string[] {
+  const out = [...(existing ?? [])];
+  for (const raw of incoming) {
+    const v = raw.trim();
+    if (!v) continue;
+    if (out.some((e) => e.toLowerCase() === v.toLowerCase())) continue;
+    out.push(v);
+  }
+  return out.slice(-INTENTS_CAP);
+}
+
+const GOAL_SLOTS: ReadonlySet<SlotKey> = new Set([
+  'goal_type',
+  'goal_distance',
+  'goal_race',
+  'goal_date',
+]);
+
+/** Whether this turn carried goal content — the reflection trigger (R2 §2). Any
+ *  of: a fill on a goal slot, a stated out-of-bucket distance, a race to look up,
+ *  or a new intent. Computable purely from (state, output), which is what lets
+ *  the reflected flip live here instead of the router. */
+function isGoalBearing(state: V3OnboardingState, output: ExtractAdvanceOutput): boolean {
+  if (output.fills.some((f) => GOAL_SLOTS.has(f.slot))) return true;
+  if (output.goal_distance_mi != null || output.race_lookup_query != null) return true;
+  return output.intents.some((raw) => {
+    const v = raw.trim();
+    return !!v && !(state.intents ?? []).some((e) => e.toLowerCase() === v.toLowerCase());
+  });
+}
+
 /** The first required-core slot still open, or null. */
 export function firstOpenRequired(slots: SlotState): SlotKey | null {
   for (const key of requiredCoreSlots(goalTypeOf(slots))) {
@@ -269,25 +312,30 @@ const YES_FIX_CHIPS: Chip[] = [
   { label: 'Fix it', value: 'let me fix that' },
 ];
 
+// R2 copy reframe (DRAFT — David's voice pass): the old "Quick check —" opener
+// framed the confirm as a comprehension test; the value statement alone reads as
+// bookkeeping, which is what this actually is.
 function buildConfirmMessage(slot: SlotKey, value: unknown): string {
-  return `Quick check — I've got your ${slotLabel(slot)} as ${formatSlotValue(slot, value)}. Right?`;
+  return `I've got your ${slotLabel(slot)} as ${formatSlotValue(slot, value)} — that right?`;
 }
 
 // Plain-words asks for the never-three-times backstop: once a confirm has gone
 // out twice unresolved, stop echoing the value and ask the field outright, so the
 // athlete's restatement arrives as a fresh `stated` fill instead of a yes/no the
 // model keeps failing to land.
+// R2 copy reframe (DRAFT — David's voice pass): scheduling framing, not
+// comprehension-checking ("Want to be sure I have this").
 const DIRECT_ASKS: Partial<Record<SlotKey, string>> = {
-  days_per_week: 'Want to be sure I have this — how many days a week are you running?',
-  long_run_day: 'Want to be sure I have this — which day do you do your long run?',
-  goal_distance: 'Want to be sure I have this — what distance are you targeting?',
-  experience_tier: 'Want to be sure I have this — how would you describe your running background?',
-  target_time: 'Want to be sure I have this — what finish time are you aiming for?',
-  goal_date: 'Want to be sure I have this — what date is your race?',
+  days_per_week: "Let's pin this one down — how many days a week are you running?",
+  long_run_day: "Let's pin this one down — which day do you do your long run?",
+  goal_distance: "Let's pin this one down — what distance are you targeting?",
+  experience_tier: "Let's pin this one down — how would you describe your running background?",
+  target_time: "Let's pin this one down — what finish time are you aiming for?",
+  goal_date: "Let's pin this one down — what date is your race?",
 };
 
 function buildDirectAskMessage(slot: SlotKey): string {
-  return DIRECT_ASKS[slot] ?? `Want to be sure I have this — what's your ${slotLabel(slot)}?`;
+  return DIRECT_ASKS[slot] ?? `Let's pin this one down — what's your ${slotLabel(slot)}?`;
 }
 
 function buildAskMessage(slot: SlotKey): string {
@@ -360,6 +408,12 @@ export function buildRecapMessage(state: V3OnboardingState): string {
 
   const injury = recapInjuryLine(s);
   if (injury) lines.push(injury);
+
+  // The portfolio, not just the slots (R2): intents are never confirmed, so the
+  // recap is the athlete's one chance to correct a missed or misread thread.
+  if (state.intents?.length) {
+    lines.push(`• Also working toward: ${state.intents.join(', ')}`);
+  }
 
   if (typeof s.target_time?.value === 'number') {
     lines.push(`• Goal time: ${formatSlotValue('target_time', s.target_time.value)}`);
@@ -511,10 +565,19 @@ export function enforceGuardrails(
   // cleared (left undefined) on every other resolution.
   let pendingConfirm: PendingConfirm | undefined;
 
+  // Intents append + the one-time reflected flip (R2). The flip rides the
+  // goal-bearing turn itself — even an overridden one, because the router
+  // composes the model's `reflection` onto whatever message wins the turn, so
+  // "flipped" always coincides with "mirror delivered".
+  const intents = mergeIntents(state.intents, output.intents);
+  const reflected = hasReflected(state) || isGoalBearing(state, output) ? true : state.reflected;
+
   const working: V3OnboardingState = {
     ...state,
     slots: merged,
     asked,
+    intents: intents.length ? intents : state.intents,
+    reflected,
     optional_budget_remaining: budget,
     phase: state.phase === 'orientation' ? 'intake' : state.phase,
   };
@@ -615,6 +678,10 @@ export const SYNTHETIC_GENERATE: ExtractAdvanceOutput = {
   goal_distance_mi: null,
   contradiction: null,
   numeric_unresolved: null,
+  // Empty/absent so a synthetic turn can never append an intent or count as
+  // goal-bearing (mergeIntents is append-only; isGoalBearing sees nothing).
+  intents: [],
+  reflection: null,
 };
 
 /**

@@ -17,7 +17,7 @@ import { anthropicClient } from '@/lib/anthropic';
 import { supabaseAdmin } from '@/lib/db';
 import { ProvenanceSchema } from '../slots/provenance';
 import { SLOTS, SLOT_KEYS, requiredCoreSlots, type SlotKey } from '../slots/schema';
-import type { V3OnboardingState } from '../slots/slot-state';
+import { hasReflected, type V3OnboardingState } from '../slots/slot-state';
 import { formatFinishTime } from '../parsing/durations';
 import { todayISOInTz } from './numeric';
 import type { HistoryTurn } from './history';
@@ -75,6 +75,20 @@ export const ExtractAdvanceSchema = z.object({
   // A numeric the model couldn't pin to a unit — the deterministic layer disambiguates.
   numeric_unresolved: z
     .object({ slot: SlotKeyEnum, raw: z.string() })
+    .nullish()
+    .transform((v) => v ?? null),
+  // NEW clauses for the athlete's goal portfolio (R2) — everything stated that
+  // isn't the plan-driving slots. Lenient on shape: a stray non-string entry is
+  // filtered here rather than failing the whole tool call and burning the retry.
+  intents: z
+    .array(z.unknown())
+    .nullish()
+    .transform((v) => (v ?? []).filter((s): s is string => typeof s === 'string')),
+  // The one-time mirror of the athlete's whole first goal statement (R2). Pure
+  // reflection prose — no question, no catalog talk. The router composes it onto
+  // whatever message wins the turn, so it survives overrides and the pocket.
+  reflection: z
+    .string()
     .nullish()
     .transform((v) => v ?? null),
 });
@@ -158,6 +172,17 @@ const EXTRACT_TOOL = {
         properties: { slot: { type: 'string', enum: SLOT_KEYS }, raw: { type: 'string' } },
         description: "A number whose unit you couldn't resolve — let the app disambiguate.",
       },
+      intents: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'Secondary goals, qualities, or standing concerns the athlete STATED that are not the plan-driving slots — e.g. "speed at shorter distances", "build muscle strength and resilience". Short clauses in the athlete\'s own words, compressed, never invented. Emit ONLY new ones this message added (the app keeps the running list and shows it to you). Injury specifics are NOT intents — those go to the injury slots.',
+      },
+      reflection: {
+        type: 'string',
+        description:
+          "The mirror of the athlete's first goal statement (only when the turn context asks for one). Pure reflection prose in the athlete's own terms — see the reflection rules.",
+      },
     },
   },
 } as const;
@@ -209,7 +234,21 @@ const FLOW_RULES = [
   "When the goal race changes, restate goal_date in the same turn (a fill) or mark it open — never let the old race's date ride on the new goal. When a former goal race becomes a tune-up, carry its name AND its date into tune_up_races.",
   'Dates: any goal_date you emit must be in the future relative to today (the turn context states today\'s date). A bare month like "September" means its next future occurrence — pick the year accordingly.',
   'Generate the plan only once every required slot is filled and the injury beat is answered; recap the whole picture first.',
+  "After the goal is settled, frame the remaining slot questions as quick logistics — scheduling details so the plan can land on a calendar — never as checking whether you understood. A form feels fine when it's labeled a form.",
   'On your very first question (conversation phase "orientation"), end the message with exactly this sentence so the athlete knows the chips are optional: "Tap a button or type an answer if it\'s not in the list." Only on that first question — never repeat it.',
+].join(' ');
+
+// The one-time reflection beat (R2, ONBOARDING_REFLECTION §2.1): before any slot
+// question, the athlete's whole first goal statement gets mirrored back. The
+// mirror is model-written (it must echo the athlete's words; canned copy can't)
+// but rides in its own `reflection` field — the app composes it onto the turn's
+// message, so it survives whatever the deterministic layer decides (a pocket
+// offer, a race lookup, an override). The state summary says when one is due.
+const REFLECTION_RULES = [
+  'The reflection: when the turn context says the athlete has not been reflected yet AND their message carries goal content (a goal, a race, a distance, or intents), fill the `reflection` field with a short mirror of their WHOLE statement — the headline goal plus every other thread they named (qualities they want, standing concerns), in their own words, compressed. Name every thread; invent none.',
+  "The reflection is pure mirror prose: no questions, no advice, no talk of what plans you can or can't build (the app handles that boundary). It reads like \"Here's what I'm hearing — …\".",
+  'If the message carries only the single goal and nothing else ("I want to run CIM"), leave `reflection` empty — a mirror of one thread is padding.',
+  "Never restate the athlete's goals inside `message` on that turn — the mirror lives in `reflection` only; `message` carries your next move as usual (the orientation-sentence rule still applies to `message`).",
 ].join(' ');
 
 export function buildSystemPrompt(): string {
@@ -217,6 +256,7 @@ export function buildSystemPrompt(): string {
     'You are running the onboarding conversation for a marathon coaching app over Telegram.',
     VOICE_RULES,
     FLOW_RULES,
+    REFLECTION_RULES,
     ENUM_RULES,
     NUMERIC_RULES,
     INJURY_RULES,
@@ -262,10 +302,24 @@ export function summarizeState(state: V3OnboardingState): string {
       ? `An out-of-catalog goal is pending consent: "${ooc.words}"${ooc.distance_mi != null ? ` (~${Math.round(ooc.distance_mi)} mi)` : ''}. If the athlete accepts a ${ooc.proxy}-shaped plan toward it, emit goal_distance = "${ooc.proxy}" (provenance "stated"). If they'd rather aim at something else, emit their new goal instead.`
       : null;
 
+  // The reflection beat is still owed (R2) — the rules tell the model what a due
+  // reflection looks like; this line is the trigger.
+  const reflectionLine = !hasReflected(state)
+    ? 'The athlete has NOT been reflected yet: if this message carries goal content, fill `reflection` per the reflection rules.'
+    : null;
+
+  // The running intents list, so the model emits only NEW ones (the app appends,
+  // dedupes, and caps in code).
+  const intentsLine = state.intents?.length
+    ? `Intents already captured (emit only new ones): ${state.intents.map((i) => `"${i}"`).join(', ')}.`
+    : null;
+
   return [
     `Conversation phase: ${state.phase}. Goal type: ${goalType ?? 'unknown'}. Optional-question budget remaining: ${state.optional_budget_remaining}.`,
     pendingLine,
     oocLine,
+    reflectionLine,
+    intentsLine,
     'Slots:',
     lines.join('\n'),
   ]

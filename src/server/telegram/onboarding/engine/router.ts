@@ -18,7 +18,12 @@ import { botApiForChat } from '../../bot';
 import { selectionKeyboardFromTap, labelForTap } from '../dispatcher';
 import { lookupRace } from '@/server/agent/race-lookup';
 import { KNOWN_GAPS, type KnownGapKey } from '@/lib/known-gaps';
-import { loadV3State, saveV3State, type V3OnboardingState } from '../slots/slot-state';
+import {
+  hasReflected,
+  loadV3State,
+  saveV3State,
+  type V3OnboardingState,
+} from '../slots/slot-state';
 import { slotsToGaps, type GoalDistanceValue, type SlotState } from '../slots/schema';
 import { slotValue } from '../slots/provenance';
 import {
@@ -48,6 +53,7 @@ import {
   declinePocket,
   pocketBody,
   POCKET_CHIPS,
+  REFLECTION_POCKET_CHIPS,
   reconcilePocket,
   setPocket,
 } from './pocket';
@@ -98,6 +104,28 @@ function nextActionsKeyboard(): InlineKeyboard {
 }
 
 const mkSlot = slotValue;
+
+/**
+ * Prefix the model's one-time mirror onto whatever message won the turn (R2).
+ * Composition happens at the single send point, AFTER the override / race-lookup
+ * / pocket / backstop logic has settled `message` — that's what lets the mirror
+ * survive every turn shape instead of dying with the model's discarded message.
+ * `boundaryLead` is set when the message is the bare stated-distance pocket offer:
+ * with a mirror in front, the offer reads as a turn ("One thing to be straight
+ * about: a mile race is shorter than…") instead of a cold open.
+ */
+function composeReflection(
+  reflection: string | null,
+  message: string,
+  boundaryLead: boolean,
+): string {
+  const mirror = reflection?.trim();
+  if (!mirror) return message;
+  const body = boundaryLead
+    ? `One thing to be straight about: ${message.charAt(0).toLowerCase()}${message.slice(1)}`
+    : message;
+  return `${mirror}\n\n${body}`;
+}
 
 // ---------------------------------------------------------------------------
 // The turn
@@ -264,6 +292,10 @@ async function runTurn({
     // confirmed race's distance drives goal_distance in code (resolveRace);
     // otherwise a stated out-of-bucket distance the model surfaced is bucketed (or
     // pocketed) here. Mutually exclusive: the lookup already carries a distance.
+    // `pocketOfferOwnsMessage` marks the bare stated-distance offer for the
+    // reflection composition's boundary lead (the race-lookup variant carries its
+    // own "Found it — … Heads up though:" lead already).
+    let pocketOfferOwnsMessage = false;
     if (result.output.race_lookup_query && !resolved.overridden) {
       const lr = await resolveRace(athleteId, chatId, result.output.race_lookup_query, working);
       working = lr.state;
@@ -275,7 +307,18 @@ async function runTurn({
       if (sd.pocket) {
         message = sd.message;
         chips = sd.chips;
+        pocketOfferOwnsMessage = true;
       }
+    }
+
+    // A pocket opening ON the reflection turn gets the reflection chip set — the
+    // decline there means "you misread me" (the redo path), not "not now" (R2).
+    if (
+      working.out_of_catalog?.consent === 'pending' &&
+      !state.out_of_catalog &&
+      !hasReflected(state)
+    ) {
+      chips = REFLECTION_POCKET_CHIPS;
     }
 
     // Settle a pocket that was pending BEFORE this turn and answered in prose (the
@@ -303,6 +346,7 @@ async function runTurn({
         working = backstop.state;
         message = backstop.message;
         chips = backstop.chips;
+        pocketOfferOwnsMessage = false;
       }
     }
 
@@ -314,7 +358,12 @@ async function runTurn({
     }
 
     await saveV3State(athleteId, working);
-    await sendV3(athleteId, chatId, message, chipsKeyboard(chips));
+    await sendV3(
+      athleteId,
+      chatId,
+      composeReflection(result.output.reflection, message, pocketOfferOwnsMessage),
+      chipsKeyboard(chips),
+    );
   });
 }
 
@@ -515,7 +564,7 @@ async function finishOnboarding(
     const { generateAndPersistPlan } = await import('../plan-gen');
     const { formatPreview } = await import('../steps/04-plan-preview');
     const { plan, params } = await generateAndPersistPlan(athleteId); // idempotent
-    preview = formatPreview(plan, params);
+    preview = formatPreview(plan, params, { intents: state.intents });
   } catch (err) {
     console.error('[v3] plan generation failed', err);
     await sendDavidAlert(`v3 plan gen failed for ${athleteId}: ${String(err)}`).catch(() => {});

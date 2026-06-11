@@ -12,6 +12,7 @@
 //
 // These are pure functions; the router wires them and talks to Telegram.
 
+import { formatFinishTime } from '../parsing/durations';
 import { slotValue } from '../slots/provenance';
 import type { GoalDistanceValue } from '../slots/schema';
 import type { OutOfCatalogGoal, V3OnboardingState } from '../slots/slot-state';
@@ -34,16 +35,34 @@ export const POCKET_CHIPS: Chip[] = [
   { label: 'Not now', value: 'no' },
 ];
 
+/** The consent chips when the pocket opens ON the reflection turn (R2): the
+ *  decline reads as "you misread me", not "not interested" — it takes the redo
+ *  path (declinePocket). Same `yes`/`no` values, so the fast path is untouched. */
+export const REFLECTION_POCKET_CHIPS: Chip[] = [
+  { label: 'Do that', value: 'yes' },
+  { label: 'Not quite my goal', value: 'no' },
+];
+
+/** A short-race target reads as M:SS ("5:00"), not the H:MM:SS finish-time form
+ *  ("0:05:00") the bucket distances use. */
+function formatShortTarget(seconds: number): string {
+  if (seconds >= 3600) return formatFinishTime(seconds);
+  return `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, '0')}`;
+}
+
 /** The acknowledge + offer body. Daybreak voice, no hedging. The caller may
  *  prepend race context ("Found it — Western States, June 28. Heads up though: …").
  *  Branches by direction: the short side (below the catalog floor) offers a 5K
- *  block; the long side keeps the marathon offer byte-for-byte. */
-export function pocketBody(distanceMi: number | null): string {
+ *  block; the long side keeps the marathon offer byte-for-byte. A known goal time
+ *  is templated in deterministically on the short side ("treating 5:00 as the
+ *  goal") — R2's smoothing, no model involved. */
+export function pocketBody(distanceMi: number | null, targetTimeSec?: number | null): string {
   if (distanceMi != null && distanceMi < CATALOG_FLOOR_MI) {
     const rounded = Math.round(distanceMi);
     const race = rounded === 1 ? 'A mile race' : `A ${rounded}-mile race`;
     const pace = rounded === 1 ? 'mile-pace' : 'race-pace';
-    return `${race} is shorter than what I build a full plan for right now — I bottom out at the 5K. What I can do: a 5K block with ${pace} work in the mix, treating your target as the goal the whole way. Want that?`;
+    const target = targetTimeSec != null ? formatShortTarget(targetTimeSec) : 'your target';
+    return `${race} is shorter than what I build a full plan for right now — I bottom out at the 5K. What I can do: a 5K block with ${pace} work in the mix, treating ${target} as the goal the whole way. Want that?`;
   }
   const lead = distanceMi != null ? `${Math.round(distanceMi)} miles is` : "That's";
   const target = distanceMi != null ? 'it' : 'your goal';
@@ -89,10 +108,13 @@ export function applyStatedDistance(
     const slots = { ...state.slots, goal_distance: slotValue(bucket, 'stated', true) };
     return { state: { ...state, slots }, pocket: false, message: '', chips: [] };
   }
+  // The same turn often fills target_time ("1 mile in under 5") — the caller
+  // merges fills before this runs, so the slot is current here.
+  const targetTime = state.slots.target_time?.value as number | null | undefined;
   return {
     state: setPocket(state, words, miles),
     pocket: true,
-    message: pocketBody(miles),
+    message: pocketBody(miles, targetTime ?? null),
     chips: POCKET_CHIPS,
   };
 }
@@ -121,6 +143,12 @@ export function acceptPocketAndAdvance(state: V3OnboardingState): ResolvedTurn {
  * Decline the proxy (the `no` chip → re-offer / leave open). Clear the pocket and
  * the goal slots it was built from, so the goal starts fresh and the open-required
  * gate re-asks; the athlete names something in-catalog (or stays fit) next.
+ *
+ * R2 redo: the first decline after a reflection is read as "you misread me", not
+ * "not interested" — it re-arms the reflection (`reflected: false`) and asks for a
+ * restatement, once (`reflection_redone`). Intents survive; they're top-level
+ * state, not goal slots. After the one redo (or for a pre-R2 state), the standard
+ * re-offer copy stands and the recap is the net.
  */
 export function declinePocket(state: V3OnboardingState): {
   state: V3OnboardingState;
@@ -131,10 +159,17 @@ export function declinePocket(state: V3OnboardingState): {
   delete slots.goal_race;
   delete slots.goal_date;
   delete slots.goal_distance;
+  const redo = state.reflected === true && !state.reflection_redone;
   return {
-    state: { ...state, slots, out_of_catalog: undefined },
-    message:
-      'No problem — want to aim at something I can build a full plan for? Anything from a 5K to a marathon, or just staying fit.',
+    state: {
+      ...state,
+      slots,
+      out_of_catalog: undefined,
+      ...(redo ? { reflected: false, reflection_redone: true } : {}),
+    },
+    message: redo
+      ? "My read was off, then — tell me again what you're going for, in a line or two, and I'll take another swing."
+      : 'No problem — want to aim at something I can build a full plan for? Anything from a 5K to a marathon, or just staying fit.',
     chips: [],
   };
 }

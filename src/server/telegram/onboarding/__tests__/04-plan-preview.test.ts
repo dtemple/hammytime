@@ -238,3 +238,23 @@ describe('planPreviewStep.handleCallback', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// R2: the intents line ("Also on the radar")
+// ---------------------------------------------------------------------------
+
+describe('formatPreview — intents (R2)', () => {
+  it('closes the loop on the athlete portfolio with one deterministic line', () => {
+    const { plan, params } = render(COMMITTED);
+    const text = formatPreview(plan, params, {
+      intents: ['speed at shorter distances', 'build muscle strength'],
+    });
+    expect(text).toContain('Also on the radar: speed at shorter distances, build muscle strength');
+  });
+
+  it('renders nothing extra without intents (v2 callers pass no opts)', () => {
+    const { plan, params } = render(COMMITTED);
+    expect(formatPreview(plan, params)).not.toContain('Also on the radar');
+    expect(formatPreview(plan, params, { intents: [] })).not.toContain('Also on the radar');
+  });
+});

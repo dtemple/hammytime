@@ -38,7 +38,8 @@ vi.mock('../commit', () => ({ commitSlots }));
 vi.mock('../../plan-gen', () => ({
   generateAndPersistPlan: vi.fn().mockResolvedValue({ plan: {}, params: {} }),
 }));
-vi.mock('../../steps/04-plan-preview', () => ({ formatPreview: () => 'YOUR PLAN' }));
+const { formatPreview } = vi.hoisted(() => ({ formatPreview: vi.fn(() => 'YOUR PLAN') }));
+vi.mock('../../steps/04-plan-preview', () => ({ formatPreview }));
 
 const { callExtractAndAdvance, logOnboardingRun } = vi.hoisted(() => ({
   callExtractAndAdvance: vi.fn(),
@@ -112,6 +113,8 @@ function out(p: Partial<ExtractAdvanceOutput>): ExtractAdvanceOutput {
     goal_distance_mi: null,
     contradiction: null,
     numeric_unresolved: null,
+    intents: [],
+    reflection: null,
     ...p,
   };
 }
@@ -854,6 +857,237 @@ describe('edit_profile — gap-walk turn', () => {
       99,
       expect.stringMatching(/that's everything/i),
       expect.anything(),
+    );
+  });
+});
+
+// --- R2: the reflection turn — mirror composition, chips, redo, intents ---
+
+describe('router — the reflection turn (R2)', () => {
+  const MIRROR =
+    "Here's what I'm hearing — the headline is a sub-5 mile, and behind it speed, strength, and staying ahead of injury.";
+
+  function freshIntake(): V3OnboardingState {
+    return { ...initialV3State(null), phase: 'intake', slots: {} };
+  }
+
+  it('the Nathan ramble: mirror + boundary lead + reflection chips, intents and 300s saved', async () => {
+    loadV3State.mockResolvedValue(freshIntake());
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'ask',
+        goal_distance_mi: 1,
+        message: 'got it',
+        reflection: MIRROR,
+        intents: ['speed at shorter distances', 'build muscle strength and resilience'],
+        fills: [
+          { slot: 'goal_type', value: 'race', provenance: 'stated' },
+          { slot: 'target_time', value: 300, provenance: 'stated' },
+        ],
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(80, 'long ramble about a sub-5 mile'), athlete);
+
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toMatch(/^Here's what I'm hearing/);
+    expect(call[1]).toContain('One thing to be straight about: a mile race is shorter');
+    expect(call[1]).toContain('treating 5:00 as the goal'); // deterministic templating
+    expect(labels(call)).toEqual(['Do that', 'Not quite my goal']);
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.reflected).toBe(true);
+    expect(saved.intents).toEqual([
+      'speed at shorter distances',
+      'build muscle strength and resilience',
+    ]);
+    expect(saved.out_of_catalog).toMatchObject({ distance_mi: 1, proxy: '5k', consent: 'pending' });
+    expect(saved.slots.target_time?.value).toBe(300);
+  });
+
+  it('the mirror survives a guardrail override (composition happens at the send point)', async () => {
+    loadV3State.mockResolvedValue(freshIntake());
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'generate', // open required slots → overridden to a deterministic ask
+        message: 'building it now',
+        reflection: MIRROR,
+        fills: [{ slot: 'goal_type', value: 'race', provenance: 'stated' }],
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(81, 'I want to race'), athlete);
+
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toMatch(/^Here's what I'm hearing/);
+    expect(call[1]).toContain('One more thing before I build your plan'); // the override's ask
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.reflected).toBe(true);
+  });
+
+  it('the mirror survives the numeric backstop (no boundary lead on a backstop message)', async () => {
+    loadV3State.mockResolvedValue(freshIntake());
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'ask',
+        goal_distance_mi: 1,
+        message: 'noted',
+        reflection: MIRROR,
+        fills: [
+          { slot: 'goal_type', value: 'race', provenance: 'stated' },
+          { slot: 'target_time', value: 30, provenance: 'stated' }, // a 30-second mile
+        ],
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(82, 'a 30 second mile'), athlete);
+
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toMatch(/^Here's what I'm hearing/);
+    expect(call[1]).toMatch(/doesn't look right for the mile/i);
+    expect(call[1]).not.toContain('One thing to be straight about'); // backstop owns the body
+  });
+
+  it('the mirror rides the race-lookup result ("Found it — …")', async () => {
+    loadV3State.mockResolvedValue(freshIntake());
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'confirm',
+        race_lookup_query: 'CIM',
+        message: 'looking',
+        reflection: MIRROR,
+        fills: [{ slot: 'goal_type', value: 'race', provenance: 'stated' }],
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+    vi.mocked(lookupRace).mockResolvedValue({
+      ok: true,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      found: { canonical_name: 'CIM', date: '2026-12-06', distance_mi: 26.2 } as any,
+    });
+
+    await handleV3Message(ctx(83, 'CIM, plus a ramble'), athlete);
+
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toMatch(/^Here's what I'm hearing/);
+    expect(call[1]).toContain('Found it — CIM');
+    expect(labels(call)).toEqual(["That's it", 'Not quite']); // no pocket → race-confirm chips
+  });
+
+  it('an empty reflection adds no prefix; the flip still happens off the goal content', async () => {
+    loadV3State.mockResolvedValue(freshIntake());
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'ask',
+        message: 'CIM — nice. When is it?',
+        fills: [{ slot: 'goal_type', value: 'race', provenance: 'stated' }],
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(84, 'I want to run CIM'), athlete);
+
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toBe('CIM — nice. When is it?');
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.reflected).toBe(true);
+  });
+
+  it('a pocket opening past the reflection turn keeps the standard chips', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race') }, // goal content already present → reflected (grandfather)
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({ next_action: 'ask', goal_distance_mi: 44, message: 'got it' }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(85, '44 miles actually'), athlete);
+
+    expect(labels(sendMessage.mock.calls.at(-1)!)).toEqual(['Do that', 'Not now']);
+  });
+
+  it('"Not quite my goal" takes the redo: restatement ask, reflected re-armed, intents kept', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race') },
+      reflected: true,
+      intents: ['speed at shorter distances'],
+      out_of_catalog: {
+        words: '1 mile in under 5 minutes',
+        distance_mi: 1,
+        proxy: '5k',
+        consent: 'pending',
+      },
+    } as V3OnboardingState);
+
+    await handleV3Callback(cbCtx('cbredo'), athlete, 'v3:no');
+
+    expect(callExtractAndAdvance).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith(
+      99,
+      expect.stringMatching(/tell me again what you're going for/i),
+      expect.anything(),
+    );
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.reflected).toBe(false);
+    expect(saved.reflection_redone).toBe(true);
+    expect(saved.intents).toEqual(['speed at shorter distances']);
+    expect(saved.out_of_catalog).toBeUndefined();
+  });
+
+  it('the gap-walk ignores model intents (post-commit they reach nothing)', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'complete',
+      slots: completeSlots(),
+      edit_mode: { kind: 'finish_gaps', current_gap: 'age', remaining: [] },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        fills: [{ slot: 'age', value: 42, provenance: 'stated' }],
+        intents: ['a stray intent'],
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(86, "I'm 42 and want to get stronger"), athlete);
+
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.intents).toBeUndefined();
+  });
+
+  it('finishOnboarding hands the intents to the preview', async () => {
+    const slots: SlotState = {
+      ...completeSlots(),
+    };
+    const base = {
+      ...initialV3State(null),
+      phase: 'recap' as const,
+      slots,
+      intents: ['build muscle strength'],
+    };
+    loadV3State.mockResolvedValue({ ...base, recap_shown: recapDisplayedSlots(base) });
+
+    await handleV3Callback(cbCtx('cbgenintents'), athlete, 'v3:yes');
+
+    expect(commitSlots).toHaveBeenCalledOnce();
+    expect(formatPreview).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ intents: ['build muscle strength'] }),
     );
   });
 });

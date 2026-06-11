@@ -182,3 +182,37 @@ describe('commitSlots — past target_date refusal (R1 fix 3 / T-9)', () => {
     expect(dbFrom).not.toHaveBeenCalled();
   });
 });
+
+describe('commitSlots — the "Also working toward" profile section (R2)', () => {
+  // An intended goal (no race row, future-safe) keeps the DB surface to the
+  // mocked helpers, so the section write is the only thing under test.
+  function intendedState(over: Partial<V3OnboardingState> = {}): V3OnboardingState {
+    return {
+      ...state({
+        ...trainingBase,
+        goal_type: sv('race'),
+        goal_distance: sv('marathon'),
+        injury_status: sv('none'),
+      }),
+      ...over,
+    };
+  }
+
+  it('writes the section from intents, one bullet per clause', async () => {
+    await commitSlots(
+      'ath-1',
+      intendedState({ intents: ['speed at shorter distances', 'build muscle strength'] }),
+    );
+    expect(writeHelpers.upsertProfileSection).toHaveBeenCalledWith(
+      'ath-1',
+      'Also working toward',
+      '- speed at shorter distances\n- build muscle strength',
+    );
+  });
+
+  it('skips the section when there are no intents', async () => {
+    await commitSlots('ath-1', intendedState());
+    const sections = writeHelpers.upsertProfileSection.mock.calls.map((c) => c[1]);
+    expect(sections).not.toContain('Also working toward');
+  });
+});

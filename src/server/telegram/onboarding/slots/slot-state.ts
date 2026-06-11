@@ -128,6 +128,33 @@ export interface V3OnboardingState {
    *  unchanged, in code; an affirmed recap must never be followed by per-slot
    *  "Quick check" turns for values it already displayed (the Nathan transcript). */
   recap_shown?: Array<{ slot: SlotKey; value: unknown }>;
+  /** Everything the athlete is working toward BESIDES the plan-driving goal —
+   *  short athlete-voiced clauses ("speed at shorter distances", "build muscle
+   *  strength"), appended across turns, deduped, capped at 5 (R2). Context, not
+   *  commitments: never required, never confirmed, no guardrails. Committed to
+   *  the profile's "Also working toward" section for the daily coach. */
+  intents?: string[];
+  /** Whether the one-time reflection beat has fired (R2): the bot mirrored the
+   *  athlete's whole first goal statement back before any slot question. Reset
+   *  once by a pocket decline so the athlete can restate (`reflection_redone`). */
+  reflected?: boolean;
+  /** The one allowed reflection redo has been spent. After this, a declined
+   *  pocket takes the standard re-offer path; the recap is the net. */
+  reflection_redone?: boolean;
+}
+
+/**
+ * Whether the reflection beat is behind this athlete (R2). `reflected` is the
+ * real flag; `undefined` means the state predates R2, and an athlete already
+ * carrying goal content mid-flight is grandfathered as reflected — a late mirror
+ * of a half-finished conversation would read as a non sequitur. NOTE: this is
+ * why R2 added fields WITHOUT bumping V3_SCHEMA_VERSION — a bump resets every
+ * mid-flight athlete (loadV3State), which is far worse than a missing mirror.
+ */
+export function hasReflected(state: V3OnboardingState): boolean {
+  if (state.reflected != null) return state.reflected;
+  const s = state.slots;
+  return s.goal_type?.value != null || s.goal_distance?.value != null || s.goal_race?.value != null;
 }
 
 /** The starting v3 state, post-Strava. The fitness snapshot is cached here; the

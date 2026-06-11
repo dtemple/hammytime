@@ -223,6 +223,17 @@ async function commitGoal(athleteId: string, state: V3OnboardingState): Promise<
     );
   }
 
+  // The goal portfolio (R2, ONBOARDING_REFLECTION §2.2): everything else the
+  // athlete said they're working toward, in their words. The daily coach reads
+  // this as standing context and references it when a session serves it.
+  if (state.intents?.length) {
+    await upsertProfileSection(
+      athleteId,
+      'Also working toward',
+      state.intents.map((i) => `- ${i}`).join('\n'),
+    );
+  }
+
   if (race) {
     const target = race.target_time_sec ? formatFinishTime(race.target_time_sec) : 'Finish';
     await supabaseAdmin()

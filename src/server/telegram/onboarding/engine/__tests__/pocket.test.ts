@@ -3,6 +3,9 @@ import {
   applyStatedDistance,
   acceptPocketAndAdvance,
   declinePocket,
+  pocketBody,
+  POCKET_CHIPS,
+  REFLECTION_POCKET_CHIPS,
   reconcilePocket,
   setPocket,
 } from '../pocket';
@@ -150,5 +153,78 @@ describe('reconcilePocket (typed path)', () => {
       { out_of_catalog: shortPocket },
     );
     expect(reconcilePocket(shortPocket, working).out_of_catalog?.consent).toBe('accepted');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R2 — reflection chips, target templating, the decline-as-redo path
+// ---------------------------------------------------------------------------
+
+describe('pocketBody — target-time templating (R2)', () => {
+  it('templates a known short-side target deterministically, M:SS form', () => {
+    expect(pocketBody(1, 300)).toContain('treating 5:00 as the goal');
+  });
+
+  it('falls back to "your target" when no time is known', () => {
+    expect(pocketBody(1)).toContain('treating your target as the goal');
+  });
+
+  it('leaves the long side untouched (no target templating)', () => {
+    expect(pocketBody(100, 86400)).toMatch(/point you at it as the target/);
+  });
+});
+
+describe('applyStatedDistance — carries the same-turn target into the offer (R2)', () => {
+  it('reads target_time off the (already merged) state', () => {
+    const r = applyStatedDistance(
+      stateWith({ target_time: sv(300) }),
+      1,
+      '1 mile in under 5 minutes',
+    );
+    expect(r.message).toContain('treating 5:00 as the goal');
+  });
+});
+
+describe('REFLECTION_POCKET_CHIPS (R2)', () => {
+  it('keeps the fast-path values, renames only the decline', () => {
+    expect(REFLECTION_POCKET_CHIPS.map((c) => c.value)).toEqual(['yes', 'no']);
+    expect(REFLECTION_POCKET_CHIPS.map((c) => c.label)).toEqual(['Do that', 'Not quite my goal']);
+    expect(POCKET_CHIPS.map((c) => c.label)).toEqual(['Do that', 'Not now']);
+  });
+});
+
+describe('declinePocket — the reflection redo (R2)', () => {
+  function reflectedPocket(over: Partial<V3OnboardingState> = {}): V3OnboardingState {
+    return setPocket(
+      stateWith(shapeSlots(), {
+        reflected: true,
+        intents: ['speed at shorter distances', 'build strength'],
+        ...over,
+      }),
+      '1 mile in under 5 minutes',
+      1,
+    );
+  }
+
+  it('the first decline after a reflection re-arms it and asks for a restatement', () => {
+    const r = declinePocket(reflectedPocket());
+    expect(r.state.reflected).toBe(false);
+    expect(r.state.reflection_redone).toBe(true);
+    expect(r.message).toMatch(/tell me again what you're going for/i);
+    // intents survive — they're context, not goal slots
+    expect(r.state.intents).toEqual(['speed at shorter distances', 'build strength']);
+    expect(r.state.out_of_catalog).toBeUndefined();
+  });
+
+  it('the redo is spent after one use — a second decline takes the standard path', () => {
+    const r = declinePocket(reflectedPocket({ reflection_redone: true }));
+    expect(r.state.reflected).toBe(true);
+    expect(r.message).toMatch(/want to aim at something/i);
+  });
+
+  it('a pre-R2 state (reflected undefined) declines on the standard path', () => {
+    const r = declinePocket(setPocket(stateWith(shapeSlots()), 'Western States, 100mi', 100));
+    expect(r.state.reflected).toBeUndefined();
+    expect(r.message).toMatch(/want to aim at something/i);
   });
 });

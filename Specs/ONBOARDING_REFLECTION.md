@@ -1,6 +1,6 @@
 # Onboarding reflection — capture the ramble, mirror it back, carry it forward
 
-_Status: proposal, awaiting David's sign-off. Written 2026-06-10 after the Nathan transcript (`transcripts/nspady_gmail.com.md`) and a design conversation. Two sessions: R1 is the bug-fix bundle the transcript exposed (independently shippable, no sign-off dependency beyond this doc existing), R2 is the new shape. `SPEC.md`/`CLAUDE.md` stay untouched until sign-off, per the `ONBOARDING_V3.md` convention._
+_Status: **both sessions built.** R1 shipped 2026-06-10 (session 57, commit `a813ea3`). **R2 built 2026-06-10 (session 58; CHANGELOG v0.7.34 is the build log)** — David approved the plan and decided the pocket-turn message shape (see the build-record note below §2.4). Written 2026-06-10 after the Nathan transcript (`transcripts/nspady_gmail.com.md`) and a design conversation. `SPEC.md` §3.9 still untouched pending David's explicit sign-off on folding this in, per the `ONBOARDING_V3.md` convention. Still owed before friends onboard: David's voice pass on the new copy + a staging-group pass._
 
 ---
 
@@ -51,6 +51,12 @@ Condensed; the full rewrite is the design conversation of 2026-06-10. Nathan's a
 Then: race timing ("I'll pencil mid-September 2026, about 14 weeks out"), the logistics beat (Strava read + experience, one turn), one injury-status question referencing the history he already gave, **one** recap showing the structured goal *and* the intents *and* the watch-outs, one "Looks right" that confirms everything, and a preview that closes the loop on all four threads with a correct horizon.
 
 Original: 15 bot turns, 5 serial confirms, 3 of 4 goals dropped, wrong date, nonsense horizon. Target: 8 bot turns, 1 confirm, every thread reflected at least twice. Shorter, and reads as if more was understood — the richness comes from reflecting, not from asking more.
+
+### 2.4.1 Build record (R2, 2026-06-10) — the composed-message decision
+
+Decided with David at plan time: on a pocket-opening reflection turn the message is **composed**, not fully model-written. The model emits the mirror in a dedicated `reflection` output field (pure reflection prose — no question, no catalog talk, empty when the goal is the only thread); the engine prepends it to whatever message wins the turn at the single send point, with a canned transition ("One thing to be straight about:") ahead of the deterministic `pocketBody`, which now templates a known short-side goal time ("treating 5:00 as the goal"). Rationale: the boundary copy never drifts or hedges (§2.5's misreflection worst case), the model never needs to learn the catalog bounds, and the same composition path carries the mirror through race-lookup, guardrail-override, and backstop turns — paths where the model's message is discarded.
+
+Two accepted consequences, found at design time: (a) when intents arrive *before* the headline goal, the reflection fires on the intents and the later-arriving goal never gets its own mirror — the race confirm / pocket offer / recap each echo it; (b) a first-ever pocket decline mid-flow (after a normal reflection) takes the redo path once — watch for it in the staging pass. Mid-flight pre-R2 athletes are grandfathered as reflected (no late mirror); the state fields shipped without a `V3_SCHEMA_VERSION` bump because a bump resets mid-flight athletes.
 
 ### 2.5 Known risks
 
