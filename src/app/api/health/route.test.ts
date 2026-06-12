@@ -12,10 +12,16 @@ vi.mock('@/server/strava/client', () => ({
   pingStrava: vi.fn(),
 }));
 
+vi.mock('@/server/telegram/bot', () => ({
+  pingTelegram: vi.fn(),
+  pingTelegramWebhook: vi.fn(),
+}));
+
 import { GET } from './route';
 import { supabaseAdmin } from '@/lib/db';
 import { pingAnthropic } from '@/lib/anthropic';
 import { pingStrava } from '@/server/strava/client';
+import { pingTelegram, pingTelegramWebhook } from '@/server/telegram/bot';
 
 function makeSupabaseMock(result: { data?: unknown; error: null | { message: string } }) {
   const limit = vi.fn().mockResolvedValue(result);
@@ -48,6 +54,7 @@ describe('GET /api/health', () => {
     expect(body).toHaveProperty('checks.postgres.latency_ms');
     expect(body).toHaveProperty('checks.anthropic');
     expect(body).toHaveProperty('checks.telegram');
+    expect(body).toHaveProperty('checks.telegramWebhook');
     expect(body).toHaveProperty('checks.strava');
   });
 
@@ -139,6 +146,91 @@ describe('GET /api/health', () => {
       expect(body.checks.anthropic.ok).toBe(false);
       expect(body.checks.anthropic.error).toContain('api error');
       expect(body.status).toBe('degraded');
+    });
+  });
+
+  describe('telegram webhook check', () => {
+    beforeEach(() => {
+      // Setting TELEGRAM_BOT_TOKEN also activates the getMe (checkTelegram) ping;
+      // keep it green so it doesn't perturb the status we're asserting on.
+      vi.mocked(pingTelegram).mockResolvedValue({ latency_ms: 5 });
+    });
+    afterEach(() => {
+      delete process.env.TELEGRAM_BOT_TOKEN;
+      delete process.env.TELEGRAM_BOT_MODE;
+    });
+
+    it('is configured=false (and does not call Telegram) when the token is unset', async () => {
+      mockPostgresOk();
+
+      const body = await (await GET()).json();
+
+      expect(body.checks.telegramWebhook.configured).toBe(false);
+      expect(body.checks.telegramWebhook.ok).toBe(false);
+      expect(pingTelegramWebhook).not.toHaveBeenCalled();
+      expect(body.status).toBe('ok');
+    });
+
+    it('returns ok=true when a webhook is registered (webhook mode)', async () => {
+      mockPostgresOk();
+      process.env.TELEGRAM_BOT_TOKEN = 'tok';
+      vi.mocked(pingTelegramWebhook).mockResolvedValue({
+        url: 'https://www.daybreak.run/api/tg/webhook',
+        pending_update_count: 0,
+        latency_ms: 7,
+      });
+
+      const body = await (await GET()).json();
+
+      expect(body.checks.telegramWebhook.ok).toBe(true);
+      expect(body.checks.telegramWebhook.url).toContain('www.daybreak.run');
+      expect(body.status).toBe('ok');
+    });
+
+    it('returns ok=false and status=degraded when no webhook is registered', async () => {
+      mockPostgresOk();
+      process.env.TELEGRAM_BOT_TOKEN = 'tok';
+      vi.mocked(pingTelegramWebhook).mockResolvedValue({
+        url: '',
+        pending_update_count: 4,
+        latency_ms: 7,
+      });
+
+      const body = await (await GET()).json();
+
+      expect(body.checks.telegramWebhook.ok).toBe(false);
+      expect(body.checks.telegramWebhook.error).toBe('no webhook registered');
+      expect(body.checks.telegramWebhook.pending_update_count).toBe(4);
+      expect(body.status).toBe('degraded');
+    });
+
+    it('returns ok=false and status=degraded when Telegram reports a delivery error', async () => {
+      mockPostgresOk();
+      process.env.TELEGRAM_BOT_TOKEN = 'tok';
+      vi.mocked(pingTelegramWebhook).mockResolvedValue({
+        url: 'https://www.daybreak.run/api/tg/webhook',
+        pending_update_count: 12,
+        last_error_message: 'Wrong response from the webhook: 500 Internal Server Error',
+        latency_ms: 7,
+      });
+
+      const body = await (await GET()).json();
+
+      expect(body.checks.telegramWebhook.ok).toBe(false);
+      expect(body.checks.telegramWebhook.last_error).toContain('500');
+      expect(body.status).toBe('degraded');
+    });
+
+    it('is a no-op (ok=true, no Telegram call) in polling mode', async () => {
+      mockPostgresOk();
+      process.env.TELEGRAM_BOT_TOKEN = 'tok';
+      process.env.TELEGRAM_BOT_MODE = 'polling';
+
+      const body = await (await GET()).json();
+
+      expect(body.checks.telegramWebhook.ok).toBe(true);
+      expect(pingTelegramWebhook).not.toHaveBeenCalled();
+      expect(body.status).toBe('ok');
     });
   });
 

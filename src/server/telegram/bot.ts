@@ -1158,6 +1158,29 @@ export async function pingTelegram(): Promise<{ latency_ms: number }> {
   return { latency_ms: Date.now() - start };
 }
 
+// Webhook-registration health, distinct from pingTelegram's getMe (token validity).
+// getMe stays green even when no webhook is registered, so the bot can be silently
+// deaf to every update while /api/health reports telegram: ok — exactly the failure
+// that went unnoticed once. The health check reads url (empty == unregistered),
+// last_error_message (Telegram's delivery failures), and pending_update_count.
+export async function pingTelegramWebhook(): Promise<{
+  url: string;
+  pending_update_count: number;
+  last_error_message?: string;
+  last_error_date?: number;
+  latency_ms: number;
+}> {
+  const start = Date.now();
+  const info = await getBot().api.getWebhookInfo();
+  return {
+    url: info.url ?? '',
+    pending_update_count: info.pending_update_count ?? 0,
+    last_error_message: info.last_error_message,
+    last_error_date: info.last_error_date,
+    latency_ms: Date.now() - start,
+  };
+}
+
 /**
  * Resets the bot singleton. Test-only — allows tests to reinitialize the Bot
  * mock between cases without module re-imports.
