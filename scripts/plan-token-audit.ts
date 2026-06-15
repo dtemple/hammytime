@@ -9,8 +9,9 @@
 // (-> a plan-patch tool). Also serves as a before/after baseline for the
 // compact-serializer change (compare median input_tokens across a deploy).
 //
-//   npx tsx scripts/plan-token-audit.ts            # all runs
-//   npx tsx scripts/plan-token-audit.ts 30         # runs from the last 30 days
+//   npx tsx scripts/plan-token-audit.ts                       # all runs
+//   npx tsx scripts/plan-token-audit.ts 30                    # runs from the last 30 days
+//   npx tsx scripts/plan-token-audit.ts 2026-06-08T01:42:00Z  # before vs after a cutoff (A/B a deploy)
 
 import { config } from 'dotenv';
 config({ path: '.env.local' });
@@ -26,6 +27,7 @@ type Run = {
   cache_read_input_tokens: number | null;
   cache_creation_input_tokens: number | null;
   cost_usd: number | null;
+  started_at: string;
 };
 
 function quantile(sorted: number[], q: number): number {
@@ -69,7 +71,14 @@ function report(label: string, runs: Run[]) {
 }
 
 async function main() {
-  const days = process.argv[2] ? Number(process.argv[2]) : null;
+  // Arg is either a trailing-day count (e.g. "30") or an ISO cutoff timestamp
+  // (e.g. "2026-06-08T01:42:00Z") which reports before-vs-after that instant.
+  const arg = process.argv[2];
+  const days = arg && /^\d+$/.test(arg) ? Number(arg) : null;
+  const cutoff = arg && !/^\d+$/.test(arg) ? new Date(arg) : null;
+  if (cutoff && Number.isNaN(cutoff.getTime())) {
+    throw new Error(`Unrecognized arg "${arg}" — pass a day count or an ISO timestamp.`);
+  }
   const db = supabaseAdmin();
 
   let runQuery = db
@@ -106,6 +115,19 @@ async function main() {
 
   console.log(`Window: ${days ? `last ${days} days` : 'all time'}`);
   console.log(`Total runs: ${runs.length}  |  plan-editing: ${editing.length}  |  non-editing: ${nonEditing.length}`);
+
+  if (cutoff) {
+    const iso = cutoff.toISOString();
+    const before = (rs: Run[]) => rs.filter((r) => r.started_at < iso);
+    const after = (rs: Run[]) => rs.filter((r) => r.started_at >= iso);
+    console.log(`\nSplitting before/after cutoff ${iso}`);
+    report('Non-editing — BEFORE cutoff', before(nonEditing));
+    report('Non-editing — AFTER cutoff', after(nonEditing));
+    report('Plan-editing — BEFORE cutoff', before(editing));
+    report('Plan-editing — AFTER cutoff', after(editing));
+    return;
+  }
+
   report('Non-editing runs (recurring daily/adhoc input)', nonEditing);
   report('Plan-editing runs (structural-edit output)', editing);
 }
