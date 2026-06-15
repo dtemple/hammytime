@@ -11,7 +11,9 @@ import {
   hardResetOnboarding,
   isOnboarded,
 } from './onboarding/index';
-import { handleCheckinCommand, handleWellnessMessage } from './checkin/dispatcher';
+import { handleCheckinCommand, handleWellnessMessage, nowInTimezone } from './checkin/dispatcher';
+import { selectionKeyboardFromTap } from './onboarding/dispatcher';
+import { clearAutoInactivityPause, RESUME_AUTO_CALLBACK } from './pause';
 import { handleV3Message, handleV3Callback } from './onboarding/engine/router';
 import { fetchRecentActivities, hasStravaConnection } from '@/server/strava/activities';
 import { disconnectStrava } from '@/server/strava/disconnect';
@@ -168,6 +170,15 @@ export async function handleInboundText(ctx: Context): Promise<void> {
   if (error || !athlete) {
     await ctx.reply('Use your invite link to get started.');
     return;
+  }
+
+  // An athlete who went quiet and got auto-paused is back the moment they send
+  // anything — clear the inactivity pause, then handle the message normally. A
+  // manual /pause is left intact (clearAutoInactivityPause gates on pause_reason),
+  // so a friend can still ask an ad-hoc question while on vacation (§10.5).
+  if (await clearAutoInactivityPause(athlete)) {
+    athlete.paused_at = null;
+    athlete.pause_reason = null;
   }
 
   // Route to wellness battery if a check-in is in progress.
@@ -584,6 +595,46 @@ export async function handleNextAction(
   }
 
   await ctx.answerCallbackQuery();
+}
+
+// The "Turn daily check-ins back on" button on the auto-pause notice (§10.5).
+// Clears the inactivity pause, collapses the button so it can't re-fire, and
+// enqueues today's check-in so coming back feels live rather than "tomorrow."
+export async function handleResumeAuto(ctx: Context, athlete: AthleteRow): Promise<void> {
+  const chatId = ctx.chat?.id ?? ctx.from!.id;
+
+  await supabaseAdmin()
+    .from('athletes')
+    .update({ paused_at: null, pause_reason: null })
+    .eq('id', athlete.id);
+
+  // Log the tap as inbound — it's the athlete re-engaging.
+  const msg = ctx.callbackQuery?.message;
+  const rows = msg && 'reply_markup' in msg ? msg.reply_markup?.inline_keyboard : undefined;
+  await supabaseAdmin().from('messages').insert({
+    athlete_id: athlete.id,
+    channel: 'tg',
+    direction: 'in',
+    body: labelForTap(rows, RESUME_AUTO_CALLBACK) ?? RESUME_AUTO_CALLBACK,
+  });
+
+  await ctx.answerCallbackQuery();
+
+  // Collapse the tapped keyboard to a "✅ <choice>" record so it can't repeat.
+  const collapsed = selectionKeyboardFromTap(rows, RESUME_AUTO_CALLBACK);
+  if (collapsed) {
+    try {
+      await ctx.editMessageReplyMarkup({ reply_markup: collapsed });
+    } catch (err) {
+      console.warn('[bot] resume button collapse failed', err);
+    }
+  }
+
+  await sendAndLog(athlete.id, chatId, "Back on. I'll check in with you in the morning.");
+
+  // Enqueue today's check-in now; the per-day key dedups if one already exists.
+  const { date } = nowInTimezone(athlete.timezone);
+  await enqueueJob('daily_checkin', `daily-${athlete.id}-${date}`, { athlete_id: athlete.id });
 }
 
 // Calendar-confirm taps (Specs/CALENDAR_CONFIRM.md). The worker stages a coach
@@ -1061,6 +1112,16 @@ function getBot(): Bot {
         await ctx.answerCallbackQuery();
         return;
       }
+
+      // The auto-pause resume button: its own confirmation + immediate check-in.
+      if (data === RESUME_AUTO_CALLBACK) {
+        await handleResumeAuto(ctx, athlete);
+        return;
+      }
+
+      // Any other tap from an auto-paused athlete also counts as re-engagement —
+      // wake them, then let the tap route normally (§10.5).
+      await clearAutoInactivityPause(athlete);
 
       // Phase D next-actions are tapped after onboarding is terminal, so they
       // must be handled before the onboarding-state gate below (which otherwise

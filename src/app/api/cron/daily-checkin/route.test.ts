@@ -6,12 +6,21 @@ vi.mock('@/server/telegram/checkin/dispatcher', () => ({
   nowInTimezone: vi.fn().mockReturnValue({ date: '2026-05-27', time: '06:30' }),
 }));
 vi.mock('@sentry/nextjs', () => ({ captureException: vi.fn() }));
+// pause.ts pulls in the heavy bot module; stub it so isInactive stays real but
+// the auto-pause notice is a no-op spy we can assert on.
+vi.mock('@/server/telegram/bot', () => ({ telegramBot: vi.fn() }));
+vi.mock('@/server/telegram/pause', async (importActual) => {
+  const actual = await importActual<typeof import('@/server/telegram/pause')>();
+  return { ...actual, sendAutoPauseNotice: vi.fn().mockResolvedValue(undefined) };
+});
 
 import { GET } from './route';
 import { supabaseAdmin } from '@/lib/db';
 import { enqueueJob } from '@/server/jobs/enqueue';
+import { sendAutoPauseNotice } from '@/server/telegram/pause';
 
 const SECRET = 'test-secret-12345';
+const DAY = 86_400_000;
 
 function makeReq(headers: Record<string, string> = {}) {
   return new Request('https://example.com/api/cron/daily-checkin', { headers });
@@ -28,22 +37,56 @@ function makeAthlete(overrides: Record<string, unknown> = {}) {
     onboarding_state: { step: 7 },
     checkin_state: {},
     timezone: 'America/Los_Angeles',
+    paused_at: null,
+    pause_reason: null,
+    // Recent by default: the created_at floor keeps a freshly-created athlete
+    // active even with no inbound, so the existing enqueue tests still pass.
+    created_at: new Date(Date.now() - DAY).toISOString(),
     ...overrides,
   };
 }
 
-function mockAthletes(rows: unknown[], error: { message: string } | null = null) {
-  const notMock = vi.fn().mockResolvedValue({ data: rows, error });
-  const selectMock = vi.fn().mockReturnValue({ not: notMock });
+// Routes from(table) by name: athletes select/update, messages select/insert.
+function setupDb({
+  athletes,
+  recentInbound = [],
+}: {
+  athletes: unknown[];
+  recentInbound?: { athlete_id: string }[];
+}) {
+  const updateEq = vi.fn().mockResolvedValue({ error: null });
+  const update = vi.fn().mockReturnValue({ eq: updateEq });
+  const insert = vi.fn().mockResolvedValue({ error: null });
+
+  const athletesSelect = vi.fn().mockReturnValue({
+    not: vi.fn().mockResolvedValue({ data: athletes, error: null }),
+  });
+  const messagesSelect = vi.fn().mockReturnValue({
+    eq: vi.fn().mockReturnValue({
+      gte: vi.fn().mockResolvedValue({ data: recentInbound, error: null }),
+    }),
+  });
+
   vi.mocked(supabaseAdmin).mockReturnValue({
-    from: vi.fn().mockReturnValue({ select: selectMock }),
+    from: vi.fn((table: string) => {
+      if (table === 'athletes') return { select: athletesSelect, update };
+      if (table === 'messages') return { select: messagesSelect, insert };
+      throw new Error(`unexpected table ${table}`);
+    }),
   } as unknown as ReturnType<typeof supabaseAdmin>);
+
+  return { update, updateEq, insert };
+}
+
+function mockAthletes(rows: unknown[]) {
+  return setupDb({ athletes: rows });
 }
 
 describe('GET /api/cron/daily-checkin', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.CRON_SECRET = SECRET;
+    delete process.env.AUTO_PAUSE_DRY_RUN;
   });
 
   it('rejects when Authorization header is missing', async () => {
@@ -76,7 +119,7 @@ describe('GET /api/cron/daily-checkin', () => {
     mockAthletes([makeAthlete()]);
     const res = await GET(authedReq());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, enqueued: 1 });
+    expect(await res.json()).toEqual({ ok: true, enqueued: 1, paused: [], dryRun: false });
     expect(vi.mocked(enqueueJob)).toHaveBeenCalledWith(
       'daily_checkin',
       'daily-athlete-1-2026-05-27',
@@ -92,7 +135,7 @@ describe('GET /api/cron/daily-checkin', () => {
     ]);
     const res = await GET(authedReq());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, enqueued: 3 });
+    expect(await res.json()).toEqual({ ok: true, enqueued: 3, paused: [], dryRun: false });
     expect(vi.mocked(enqueueJob)).toHaveBeenCalledTimes(3);
     expect(vi.mocked(enqueueJob)).toHaveBeenCalledWith(
       'daily_checkin',
@@ -108,13 +151,21 @@ describe('GET /api/cron/daily-checkin', () => {
     ]);
     const res = await GET(authedReq());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, enqueued: 1 });
+    expect(await res.json()).toEqual({ ok: true, enqueued: 1, paused: [], dryRun: false });
     expect(vi.mocked(enqueueJob)).toHaveBeenCalledOnce();
     expect(vi.mocked(enqueueJob)).toHaveBeenCalledWith(
       'daily_checkin',
       'daily-real-2026-05-27',
       { athlete_id: 'real' },
     );
+  });
+
+  it('skips already-paused athletes', async () => {
+    mockAthletes([makeAthlete({ id: 'paused', paused_at: new Date().toISOString(), pause_reason: 'manual' })]);
+    const res = await GET(authedReq());
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, skipped: 'no_onboarded_athlete' });
+    expect(vi.mocked(enqueueJob)).not.toHaveBeenCalled();
   });
 
   it("filters out athletes who haven't completed onboarding", async () => {
@@ -129,7 +180,7 @@ describe('GET /api/cron/daily-checkin', () => {
     mockAthletes([makeAthlete({ id: 'v3-done', onboarding_state: { flow: 'v3', phase: 'complete' } })]);
     const res = await GET(authedReq());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, enqueued: 1 });
+    expect(await res.json()).toEqual({ ok: true, enqueued: 1, paused: [], dryRun: false });
     expect(vi.mocked(enqueueJob)).toHaveBeenCalledWith(
       'daily_checkin',
       'daily-v3-done-2026-05-27',
@@ -143,5 +194,41 @@ describe('GET /api/cron/daily-checkin', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, skipped: 'no_onboarded_athlete' });
     expect(vi.mocked(enqueueJob)).not.toHaveBeenCalled();
+  });
+
+  it('auto-pauses a silent athlete instead of enqueuing', async () => {
+    const silent = makeAthlete({
+      id: 'silent',
+      created_at: new Date(Date.now() - 30 * DAY).toISOString(),
+    });
+    const { update, updateEq } = setupDb({ athletes: [silent], recentInbound: [] });
+    const res = await GET(authedReq());
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, enqueued: 0, paused: ['silent'], dryRun: false });
+    expect(vi.mocked(enqueueJob)).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith({
+      paused_at: expect.any(String),
+      pause_reason: 'auto_inactivity',
+    });
+    expect(updateEq).toHaveBeenCalledWith('id', 'silent');
+    expect(vi.mocked(sendAutoPauseNotice)).toHaveBeenCalledOnce();
+  });
+
+  it('keeps a silent athlete active when they have recent inbound', async () => {
+    const a = makeAthlete({ id: 'chatty', created_at: new Date(Date.now() - 30 * DAY).toISOString() });
+    setupDb({ athletes: [a], recentInbound: [{ athlete_id: 'chatty' }] });
+    const res = await GET(authedReq());
+    expect(await res.json()).toEqual({ ok: true, enqueued: 1, paused: [], dryRun: false });
+    expect(vi.mocked(sendAutoPauseNotice)).not.toHaveBeenCalled();
+  });
+
+  it('dry run reports the pause candidate but writes nothing', async () => {
+    process.env.AUTO_PAUSE_DRY_RUN = '1';
+    const silent = makeAthlete({ id: 'silent', created_at: new Date(Date.now() - 30 * DAY).toISOString() });
+    const { update } = setupDb({ athletes: [silent], recentInbound: [] });
+    const res = await GET(authedReq());
+    expect(await res.json()).toEqual({ ok: true, enqueued: 0, paused: ['silent'], dryRun: true });
+    expect(update).not.toHaveBeenCalled();
+    expect(vi.mocked(sendAutoPauseNotice)).not.toHaveBeenCalled();
   });
 });

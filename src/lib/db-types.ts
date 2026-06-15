@@ -260,6 +260,8 @@ export type Database = {
           name: string
           notes: string | null
           onboarding_state: Json
+          pause_reason: string | null
+          paused_at: string | null
           sex: string | null
           shadow_bcc_until: string | null
           telegram_chat_id: string | null
@@ -276,6 +278,8 @@ export type Database = {
           name: string
           notes?: string | null
           onboarding_state?: Json
+          pause_reason?: string | null
+          paused_at?: string | null
           sex?: string | null
           shadow_bcc_until?: string | null
           telegram_chat_id?: string | null
@@ -292,6 +296,8 @@ export type Database = {
           name?: string
           notes?: string | null
           onboarding_state?: Json
+          pause_reason?: string | null
+          paused_at?: string | null
           sex?: string | null
           shadow_bcc_until?: string | null
           telegram_chat_id?: string | null
