@@ -22,6 +22,7 @@
     "worker:start": "tsx worker/index.ts",
     "clear:plans": "tsx scripts/clear-athlete-plans.ts",
     "transcript": "tsx scripts/export-transcript.ts",
+    "transcripts:daily": "tsx scripts/export-daily-transcripts.ts",
     "token:mint": "tsx scripts/mint-link-token.ts",
     "test:reset": "tsx scripts/reset-test-athlete.ts",
     "plan:verify": "tsx scripts/verify-plan.ts",
