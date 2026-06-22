@@ -65,33 +65,38 @@ Stars carry Telegram's revenue share **plus** the Apple/Google in-app-purchase c
 
 ## 4. Data model
 
-New tables/columns (migration in `supabase/migrations/`):
+**Built 2026-06-22 — migration `20260622000000_metering_credits.sql`.** The draw-down/Stripe/auto-reload columns exist but stay unused until their later steps.
 
 ```
 athlete_credits        (athlete_id PK/FK, balance_cents int not null default 0,
                         comped bool not null default false,
                         stripe_customer_id text,            -- set on first Checkout
-                        auto_reload_enabled bool default false,
-                        auto_reload_threshold_cents int default 300,   -- $3
-                        auto_reload_amount_cents int default 2500,     -- $25
+                        auto_reload_enabled bool not null default false,
+                        auto_reload_threshold_cents int not null default 300,   -- $3
+                        auto_reload_amount_cents int not null default 2500,     -- $25
                         default_pm_id text,                 -- saved card for off-session
                         low_balance_warned_at timestamptz,  -- dedupe the ~1wk heads-up
-                        updated_at timestamptz)
+                        updated_at timestamptz not null default now())
 
-credit_ledger          (id, athlete_id FK, kind[grant|topup|debit|refund|adjust],
-                        amount_cents int,                   -- signed: +credit, -debit
-                        balance_after_cents int,
-                        related_run_id FK nullable,         -- for debits
-                        stripe_payment_intent text nullable,-- for topups/refunds
+credit_ledger          (id PK, athlete_id FK, kind text not null
+                          check (kind in ('grant','topup','debit','refund','adjust')),
+                        amount_cents int not null,          -- signed: +credit, -debit
+                        balance_after_cents int not null,
+                        related_run_id FK→agent_runs nullable,  -- for debits
+                        stripe_payment_intent text nullable,    -- for topups/refunds
                         note text, created_at)
 ```
+
+Indexes: `credit_ledger(athlete_id, created_at desc)` for per-athlete history, plus a **partial unique index `credit_ledger(athlete_id) where kind='grant'`** — the DB-level guard that makes the signup grant idempotent (one grant per athlete, ever). RLS is enabled with no policies on both tables, matching the rest of the schema (all access is via the service-role key).
 
 - **`athlete_credits` is the live balance; `credit_ledger` is the append-only audit.** Every mutation writes both in one transaction. Balance is reconstructable from the ledger — the table is a cache for the hot path.
 - Cents, not dollars, everywhere. No floats on money.
 - `comped = true` short-circuits all billing: no debit, no warning, no gate.
 - This reuses David's familiar shape — a never-overwritten log (`credit_ledger`) plus an overwritten latest-state (`athlete_credits`).
 
-The `$5` grant is a single `kind=grant` ledger row written at the moment the athlete row is created (end of onboarding).
+**The $5 grant** is a single `kind=grant` ledger row (+ matching balance) written at **onboarding completion** (`finishOnboarding` → `phase='complete'` in `src/server/telegram/onboarding/engine/router.ts`), **not** at athlete-row creation — the athlete row is created earlier, at the Telegram link-handshake step, before onboarding finishes. It's written by the idempotent `grant_signup_credit(athlete_id, amount_cents default 500)` RPC (ledger row + balance bump in one transaction; a no-op if a grant already exists), which the migration's backfill reuses to grant every existing athlete exactly once. The TS entry point is `grantSignupCredit()` in `src/server/billing/credits.ts`.
+
+**Comp roster at launch (2026-06-22):** only David is comped — both his real athlete (`telegram_chat_id = 8940829310`) and the negative-chat test/group row. The 6 friends (Anjie, Brenden, Chase, Nathan, Kiran, Ian) are metered with the $5 grant and `comped=false`, so step 2's draw-down exercises against live traffic. Flip `comped` per friend from the admin console when the free era ends.
 
 ---
 
@@ -242,7 +247,7 @@ Follows the CLAUDE.md copy rules — short, no "Great", no exclamation-stacking,
 
 Roughly a week, gated behind the worker + agent loop already running:
 
-1. **Migration:** `athlete_credits` + `credit_ledger`; write the `$5 grant` on athlete creation. Backfill existing friends with a grant row.
+1. ✅ **Migration (done 2026-06-22):** `athlete_credits` + `credit_ledger`; the `$5 grant` fires on onboarding completion via the idempotent `grant_signup_credit` RPC. Existing friends backfilled. David comped; friends metered. See §4.
 2. **Draw-down + gate:** implement `// TODO(#12)` decrement; add the pre-run balance gate at dequeue. Unit-test the overshoot-into-negative and comped paths.
 3. **Stripe Checkout + webhook:** API route to create Sessions; `checkout.session.completed` + `charge.refunded` webhook handlers (signature-verified, idempotent on payment_intent). Test mode first.
 4. **Telegram commands:** `/balance`, `/buy` with preset buttons, confirmation messages; register in command menu + `/help`.
