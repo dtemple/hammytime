@@ -229,16 +229,24 @@ export async function handleInboundText(ctx: Context): Promise<void> {
     return;
   }
 
+  // Resolve the *working* plan version — the live plan, not the newest row.
+  // The calendar "Update your calendar?" flow inserts a `proposed` version
+  // without moving current_version_id, so an unconfirmed proposal sits as the
+  // newest plan_versions row. Ordering by created_at alone would pick it up and
+  // dead-end every inbound message (the athlete goes mute, their messages never
+  // get persisted or enqueued). Filter to the live statuses so a pending
+  // proposal — or superseded/discarded history — is ignored.
   const { data: version } = await db
     .from('plan_versions')
     .select('status')
     .eq('plan_id', plan.id)
+    .in('status', ['active', 'awaiting_paste'])
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
 
   if (!version) {
-    console.warn('[bot] athlete has a plan row but no plan_versions row', athlete.id);
+    console.warn('[bot] athlete has a plan row but no active/awaiting plan_versions row', athlete.id);
     await ctx.reply('Your onboarding is complete — your daily updates start soon.');
     return;
   }

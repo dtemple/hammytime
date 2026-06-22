@@ -138,17 +138,26 @@ function makeDb(
         };
       }
       if (table === 'plan_versions') {
+        // Honor the .in('status', [...]) filter the router applies: a row is
+        // only visible if its status is one of the requested live statuses.
+        // This is what makes a dangling `proposed` version invisible to the
+        // inbound path instead of shadowing the active plan.
         return {
           select: vi.fn().mockReturnValue({
             eq: vi.fn().mockReturnValue({
-              order: vi.fn().mockReturnValue({
-                limit: vi.fn().mockReturnValue({
-                  maybeSingle: vi.fn().mockResolvedValue({
-                    data: versionStatus ? { status: versionStatus } : null,
-                    error: null,
+              in: vi.fn().mockImplementation((_col: string, statuses: string[]) => ({
+                order: vi.fn().mockReturnValue({
+                  limit: vi.fn().mockReturnValue({
+                    maybeSingle: vi.fn().mockResolvedValue({
+                      data:
+                        versionStatus && statuses.includes(versionStatus)
+                          ? { status: versionStatus }
+                          : null,
+                      error: null,
+                    }),
                   }),
                 }),
-              }),
+              })),
             }),
           }),
         };
@@ -201,6 +210,85 @@ describe('handleInboundText — post-onboarding routing', () => {
       { athlete_id: ATHLETE_ID, text: 'how did I do?' },
     );
     // Worker owns the reply — the bot returns fast without replying inline.
+    expect(ctx.reply).not.toHaveBeenCalled();
+  });
+
+  it('ignores a dangling proposed version and routes by the active plan', async () => {
+    // Regression: the "Update your calendar?" flow leaves a `proposed` version
+    // as the newest plan_versions row. The router must filter to live statuses
+    // (active/awaiting_paste) so it reads the active plan and enqueues, rather
+    // than reading the proposal and dead-ending the message. We assert the
+    // status filter is applied and that a `proposed` row is never enqueued on.
+    const inSpy = vi.fn();
+    const db = {
+      from: vi.fn().mockImplementation((table: string) => {
+        if (table === 'athletes') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({
+                  data: {
+                    id: ATHLETE_ID,
+                    telegram_chat_id: String(CHAT_ID),
+                    onboarding_state: { step: 7 },
+                    checkin_state: {},
+                  },
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === 'messages') return { insert: vi.fn().mockResolvedValue({ error: null }) };
+        if (table === 'plans') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                order: vi.fn().mockReturnValue({
+                  limit: vi.fn().mockReturnValue({
+                    maybeSingle: vi.fn().mockResolvedValue({ data: { id: 'plan-1' }, error: null }),
+                  }),
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === 'plan_versions') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                in: vi.fn().mockImplementation((col: string, statuses: string[]) => {
+                  inSpy(col, statuses);
+                  // The proposed row is newest but excluded by the filter; the
+                  // active plan is what the live-status query returns.
+                  return {
+                    order: vi.fn().mockReturnValue({
+                      limit: vi.fn().mockReturnValue({
+                        maybeSingle: vi.fn().mockResolvedValue({
+                          data: { status: 'active' },
+                          error: null,
+                        }),
+                      }),
+                    }),
+                  };
+                }),
+              }),
+            }),
+          };
+        }
+        return {};
+      }),
+    };
+    (supabaseAdmin as AnyMock).mockReturnValue(db);
+    const ctx = makeCtx({ message: { text: 'knee stayed quiet', message_id: 777 } });
+
+    await handleInboundText(ctx as AnyMock);
+
+    expect(inSpy).toHaveBeenCalledWith('status', ['active', 'awaiting_paste']);
+    expect(enqueueJob).toHaveBeenCalledWith('tg_message', `tg-${ATHLETE_ID}-777`, {
+      athlete_id: ATHLETE_ID,
+      text: 'knee stayed quiet',
+    });
     expect(ctx.reply).not.toHaveBeenCalled();
   });
 
