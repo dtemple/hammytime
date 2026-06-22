@@ -193,6 +193,53 @@ export type Database = {
           },
         ]
       }
+      athlete_credits: {
+        Row: {
+          athlete_id: string
+          auto_reload_amount_cents: number
+          auto_reload_enabled: boolean
+          auto_reload_threshold_cents: number
+          balance_cents: number
+          comped: boolean
+          default_pm_id: string | null
+          low_balance_warned_at: string | null
+          stripe_customer_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          athlete_id: string
+          auto_reload_amount_cents?: number
+          auto_reload_enabled?: boolean
+          auto_reload_threshold_cents?: number
+          balance_cents?: number
+          comped?: boolean
+          default_pm_id?: string | null
+          low_balance_warned_at?: string | null
+          stripe_customer_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          athlete_id?: string
+          auto_reload_amount_cents?: number
+          auto_reload_enabled?: boolean
+          auto_reload_threshold_cents?: number
+          balance_cents?: number
+          comped?: boolean
+          default_pm_id?: string | null
+          low_balance_warned_at?: string | null
+          stripe_customer_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "athlete_credits_athlete_id_fkey"
+            columns: ["athlete_id"]
+            isOneToOne: true
+            referencedRelation: "athletes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       athlete_training_profile: {
         Row: {
           athlete_id: string
@@ -311,6 +358,57 @@ export type Database = {
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      credit_ledger: {
+        Row: {
+          amount_cents: number
+          athlete_id: string
+          balance_after_cents: number
+          created_at: string
+          id: string
+          kind: string
+          note: string | null
+          related_run_id: string | null
+          stripe_payment_intent: string | null
+        }
+        Insert: {
+          amount_cents: number
+          athlete_id: string
+          balance_after_cents: number
+          created_at?: string
+          id?: string
+          kind: string
+          note?: string | null
+          related_run_id?: string | null
+          stripe_payment_intent?: string | null
+        }
+        Update: {
+          amount_cents?: number
+          athlete_id?: string
+          balance_after_cents?: number
+          created_at?: string
+          id?: string
+          kind?: string
+          note?: string | null
+          related_run_id?: string | null
+          stripe_payment_intent?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credit_ledger_athlete_id_fkey"
+            columns: ["athlete_id"]
+            isOneToOne: false
+            referencedRelation: "athletes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_ledger_related_run_id_fkey"
+            columns: ["related_run_id"]
+            isOneToOne: false
+            referencedRelation: "agent_runs"
             referencedColumns: ["id"]
           },
         ]
@@ -940,6 +1038,10 @@ export type Database = {
       discard_proposed_version: {
         Args: { p_plan_id: string; p_token: string }
         Returns: string
+      }
+      grant_signup_credit: {
+        Args: { p_amount_cents?: number; p_athlete_id: string }
+        Returns: boolean
       }
       link_start_handshake: {
         Args: { p_telegram_chat_id: string; p_token: string }

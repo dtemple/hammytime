@@ -628,6 +628,17 @@ async function finishOnboarding(
   }
 
   await saveV3State(athleteId, { ...committed, phase: 'complete' });
+
+  // The athlete is now real — grant the one-time $5 signup credit (idempotent;
+  // METERING_PAYMENTS.md §4). Never let a billing-grant hiccup block completion.
+  try {
+    const { grantSignupCredit } = await import('@/server/billing/credits');
+    await grantSignupCredit(athleteId);
+  } catch (err) {
+    console.error('[v3] signup credit grant failed', err);
+    await sendDavidAlert(`v3 signup grant failed for ${athleteId}: ${String(err)}`).catch(() => {});
+  }
+
   await sendV3(athleteId, chatId, preview);
   await sendV3(
     athleteId,
