@@ -1,7 +1,8 @@
 import './env'; // MUST be first — loads .env.local before config.ts reads it
 
 import { POLL_INTERVAL_MS } from './config';
-import { claimJob, completeJob, dispatch, failJob } from './poll';
+import { BLOCK_REASON_INSUFFICIENT_CREDIT, enforceCreditGate } from './billing';
+import { blockJob, claimJob, completeJob, dispatch, failJob } from './poll';
 
 let shuttingDown = false;
 
@@ -10,6 +11,16 @@ async function tick(): Promise<boolean> {
   if (!job) return false;
 
   console.info(`[worker] claimed job ${job.id} kind=${job.kind} attempt=${job.attempts}`);
+
+  // Pre-run $0 gate (Specs/METERING_PAYMENTS.md §5). A non-comped athlete at
+  // <= $0 doesn't run; the job is marked terminally blocked (no retry). The
+  // in-flight run that drove them to $0 already completed — this refuses the next.
+  if ((await enforceCreditGate(job)) === 'blocked') {
+    await blockJob(job.id, BLOCK_REASON_INSUFFICIENT_CREDIT);
+    console.info(`[worker] job ${job.id} blocked — insufficient credit`);
+    return true;
+  }
+
   try {
     await dispatch(job);
     await completeJob(job.id);

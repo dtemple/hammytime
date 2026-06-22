@@ -62,6 +62,20 @@ export async function completeJob(jobId: string): Promise<void> {
   if (error) console.error(`[poll] completeJob ${jobId} failed:`, error.message);
 }
 
+/**
+ * Marks a job terminally blocked — done, but deliberately not run (e.g. the $0
+ * credit gate, Specs/METERING_PAYMENTS.md §5). Sets completed_at so
+ * claim_next_job never re-claims it, and records the reason in last_error for
+ * admin inspection. This is a refusal, not a failure: no retry, no backoff.
+ */
+export async function blockJob(jobId: string, reason: string): Promise<void> {
+  const { error } = await supabaseAdmin()
+    .from('job_queue')
+    .update({ completed_at: new Date().toISOString(), locked_at: null, last_error: reason })
+    .eq('id', jobId);
+  if (error) console.error(`[poll] blockJob ${jobId} failed:`, error.message);
+}
+
 export async function failJob(job: Job, message: string): Promise<void> {
   const db = supabaseAdmin();
   if (job.attempts >= MAX_ATTEMPTS) {

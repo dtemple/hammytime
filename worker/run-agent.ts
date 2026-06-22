@@ -14,6 +14,7 @@ import { persistPlanEdit } from './plan-version';
 import { CANCEL_SENTINEL, discardPendingProposal } from './proposal';
 import { makePlanEditHook } from './plan-edit-hook';
 import { attemptPlanRepair } from './plan-repair';
+import { chargeRun } from './billing';
 import { ALLOWED_TOOLS, makeIsolationGuard, scrubbedEnv } from './isolation';
 import { persistRun, type CapturedStep, type RunKind } from './persist';
 import { stripCoachPreamble } from './reply-sanitize';
@@ -216,7 +217,13 @@ export async function runAgent(
       error: runError,
     });
 
-    // TODO(#12): decrement athlete_credits by result.total_cost_usd * markup.
+    // Draw down the prepaid balance for this run (Specs/METERING_PAYMENTS.md §5):
+    // debit cost_usd × markup, idempotent on the run, skipped if comped.
+    // Best-effort — a debit failure never blocks delivery. Needs a persisted run
+    // to key idempotency on, so skip if persistRun returned null.
+    if (runId) {
+      await chargeRun(athleteId, runId, result?.total_cost_usd);
+    }
 
     // Any error (incl. a budget stop) sends the fallback — never ship the partial
     // text streamed before the failure as if it were a clean answer.

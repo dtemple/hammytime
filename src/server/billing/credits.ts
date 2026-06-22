@@ -25,3 +25,46 @@ export async function grantSignupCredit(athleteId: string): Promise<boolean> {
   if (error) throw error;
   return data === true;
 }
+
+/**
+ * Debit a persisted run from the athlete's balance (Specs/METERING_PAYMENTS.md
+ * §5). `amountCents` is the positive billed amount (compute it with
+ * billedCents() from ./pricing); the RPC writes a signed-negative kind='debit'
+ * ledger row referencing the run and decrements the balance, in one transaction.
+ *
+ * Idempotent on the run: a second call for the same run is a no-op (DB partial
+ * unique index). Comped athletes are a no-op too. Returns true if this call
+ * debited, false on a skip (comped or already debited).
+ */
+export async function debitRunCredit(
+  athleteId: string,
+  runId: string,
+  amountCents: number,
+): Promise<boolean> {
+  const { data, error } = await supabaseAdmin().rpc('debit_run_credit', {
+    p_athlete_id: athleteId,
+    p_run_id: runId,
+    p_amount_cents: amountCents,
+  });
+  if (error) throw error;
+  return data === true;
+}
+
+export type CreditState = { balanceCents: number; comped: boolean };
+
+/**
+ * Read an athlete's live balance + comp flag from the cache (athlete_credits).
+ * Returns null when there's no row — the caller decides how to treat a missing
+ * billing row (the §5 gate fails open). Used by the pre-run gate; the web
+ * `/balance` surface (later step) reuses it.
+ */
+export async function getCreditState(athleteId: string): Promise<CreditState | null> {
+  const { data, error } = await supabaseAdmin()
+    .from('athlete_credits')
+    .select('balance_cents, comped')
+    .eq('athlete_id', athleteId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return { balanceCents: data.balance_cents, comped: data.comped };
+}

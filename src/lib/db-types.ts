@@ -1035,6 +1035,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      debit_run_credit: {
+        Args: { p_amount_cents: number; p_athlete_id: string; p_run_id: string }
+        Returns: boolean
+      }
       discard_proposed_version: {
         Args: { p_plan_id: string; p_token: string }
         Returns: string
