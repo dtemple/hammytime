@@ -84,25 +84,24 @@ export async function enforceCreditGate(job: { kind: string; payload: unknown })
   const athleteId = String(payload.athlete_id ?? '');
   if (!athleteId) return 'allowed'; // dispatch will surface the missing-id error
 
+  // Fail open: a billing-read problem must never deny coaching. Alert David, allow.
+  const failOpen = async (why: string): Promise<GateDecision> => {
+    console.error(`[billing] gate failing open for ${athleteId}: ${why}`);
+    await sendDavidAlert(
+      `Credit gate ${why} for athlete ${athleteId} — allowing the run (fail-open).`,
+    ).catch(() => {});
+    return 'allowed';
+  };
+
   let state;
   try {
     state = await getCreditState(athleteId);
   } catch (e) {
-    console.error(`[billing] gate read failed for ${athleteId}, allowing run:`, e);
-    await sendDavidAlert(
-      `Credit gate could not read balance for athlete ${athleteId} — allowing the run (fail-open).`,
-    ).catch(() => {});
-    return 'allowed';
+    return failOpen(`could not read balance (${e instanceof Error ? e.message : String(e)})`);
   }
-
-  if (!state) {
-    // No billing row at all — shouldn't happen for an onboarded athlete (the
-    // signup grant creates it). Fail open and tell David rather than block.
-    await sendDavidAlert(
-      `Credit gate found no athlete_credits row for athlete ${athleteId} — allowing the run (fail-open).`,
-    ).catch(() => {});
-    return 'allowed';
-  }
+  // No billing row shouldn't happen for an onboarded athlete (the signup grant
+  // creates it) — fail open rather than block.
+  if (!state) return failOpen('found no athlete_credits row');
 
   if (state.comped || state.balanceCents > 0) return 'allowed';
 

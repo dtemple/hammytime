@@ -56,14 +56,16 @@ async function main() {
   console.log(`throwaway athlete ${athleteId}\n`);
 
   await grantSignupCredit(athleteId);
-  check('grant sets balance to 500¢', (await balance()) === 500, `balance=${await balance()}`);
+  let bal = await balance();
+  check('grant sets balance to 500¢', bal === 500, `balance=${bal}`);
 
   // ---- 1. one debit = round(cost×1.5) cents, balance drops ------------------
   const run1 = await newRun(0.53); // billedCents(0.53) = 80
   const cents1 = billedCents(0.53);
   const d1 = await debitRunCredit(athleteId, run1, cents1);
   check('debit returns true', d1 === true, `cents=${cents1}`);
-  check('balance drops by the debit', (await balance()) === 500 - cents1, `balance=${await balance()}`);
+  bal = await balance();
+  check('balance drops by the debit', bal === 500 - cents1, `balance=${bal}`);
 
   const { data: debitRows } = await db
     .from('credit_ledger')
@@ -81,7 +83,8 @@ async function main() {
   const balBefore = await balance();
   const d2 = await debitRunCredit(athleteId, run1, cents1);
   check('re-debit same run returns false', d2 === false, `repeat for run1`);
-  check('balance unchanged after re-debit', (await balance()) === balBefore, `balance=${await balance()}`);
+  bal = await balance();
+  check('balance unchanged after re-debit', bal === balBefore, `balance=${bal}`);
 
   // ---- 3. overshoot into negative is allowed --------------------------------
   const run2 = await newRun(1.0); // billedCents = 150, balance 420 → 270 (not negative yet)
@@ -89,14 +92,12 @@ async function main() {
   // push it negative with a big one
   const run3 = await newRun(2.5); // 375 cents, 270 → -105
   await debitRunCredit(athleteId, run3, billedCents(2.5));
-  check('overshoot lands negative (no clamp)', (await balance()) < 0, `balance=${await balance()}`);
+  bal = await balance();
+  check('overshoot lands negative (no clamp)', bal < 0, `balance=${bal}`);
 
   // ---- balance reconstructs from the ledger ---------------------------------
-  check(
-    'balance_cents == sum(ledger.amount_cents)',
-    (await balance()) === (await ledgerSum()),
-    `balance=${await balance()} ledgerSum=${await ledgerSum()}`,
-  );
+  const ledger = await ledgerSum();
+  check('balance_cents == sum(ledger.amount_cents)', bal === ledger, `balance=${bal} ledgerSum=${ledger}`);
 
   // ---- 4. comped athlete is never debited -----------------------------------
   await db.from('athlete_credits').update({ comped: true }).eq('athlete_id', athleteId);
@@ -104,7 +105,8 @@ async function main() {
   const run4 = await newRun(0.9);
   const d4 = await debitRunCredit(athleteId, run4, billedCents(0.9));
   check('comped debit returns false (skipped)', d4 === false, `comped`);
-  check('comped balance unchanged', (await balance()) === balComped, `balance=${await balance()}`);
+  bal = await balance();
+  check('comped balance unchanged', bal === balComped, `balance=${bal}`);
 
   // ---- gate decision against live data (real getCreditState read) -----------
   // Silence David alerts during the gate checks. The throwaway athlete has no
