@@ -7,8 +7,11 @@
 import { query, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { supabaseAdmin } from '@/lib/db';
 import { COACH_MODEL, MAX_BUDGET_USD, MAX_TURNS } from './config';
+import { access } from 'fs/promises';
+import path from 'path';
 import { cleanup, hydrate, syncBack } from './folder';
 import { persistPlanEdit } from './plan-version';
+import { CANCEL_SENTINEL, discardPendingProposal } from './proposal';
 import { makePlanEditHook } from './plan-edit-hook';
 import { attemptPlanRepair } from './plan-repair';
 import { ALLOWED_TOOLS, makeIsolationGuard, scrubbedEnv } from './isolation';
@@ -176,6 +179,14 @@ export async function runAgent(
         };
       }
 
+      // Agent-initiated cancel: the coach drops a pending proposal by writing
+      // CANCEL_SENTINEL into its folder (no plan edit — the working file already
+      // matches the active plan). Skipped when this run staged a fresh proposal,
+      // which supersedes the pending one anyway.
+      if (planEdit?.outcome !== 'proposed') {
+        await cancelPendingProposalIfRequested(athleteId, folder.dir);
+      }
+
       // Still dropped after the repair pass. The coach may have told the athlete
       // it changed the plan while the calendar kept the last good version — tell
       // the athlete (PLAN_DROP_NOTICE below) and alert David.
@@ -245,6 +256,32 @@ export async function runAgent(
     await cleanup(folder.dir).catch((e) =>
       console.error(`[run-agent] cleanup failed for ${athleteId}:`, e),
     );
+  }
+}
+
+// Drops a pending proposal when the coach wrote CANCEL_SENTINEL this run; a
+// no-op when the file is absent. Best-effort — a failure here never breaks the
+// run, the proposal just lingers until it expires.
+async function cancelPendingProposalIfRequested(
+  athleteId: string,
+  folderDir: string,
+): Promise<void> {
+  const requested = await access(path.join(folderDir, CANCEL_SENTINEL))
+    .then(() => true)
+    .catch(() => false);
+  if (!requested) return;
+
+  try {
+    const { discarded, staleMessageId } = await discardPendingProposal(athleteId);
+    if (discarded && staleMessageId !== undefined) {
+      await resolveStaleProposalMessage(
+        athleteId,
+        staleMessageId,
+        'Cancelled — your plan stays as it was.',
+      );
+    }
+  } catch (e) {
+    console.error(`[run-agent] cancel pending proposal failed for ${athleteId}:`, e);
   }
 }
 

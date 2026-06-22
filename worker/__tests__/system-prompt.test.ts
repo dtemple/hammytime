@@ -7,17 +7,44 @@ import {
   renderSystemPrompt,
   easeInContext,
   planExtensionContext,
+  pendingProposalContext,
 } from '../system-prompt';
+import { CANCEL_SENTINEL } from '../proposal';
 import { DRAFT_SAFETY_CAPS } from '@/lib/plan-templates/caps';
+import { supabaseAdmin } from '@/lib/db';
 import type { Plan } from '@/lib/plan-schema';
 
-// renderSystemPrompt's only DB dependency is loadAthleteData; mock it so the
-// three-way goal branch + coach.md template fill (V3-W7) is testable. The
-// template itself is read from the real worker/prompts/coach.md on disk. The
-// pure-helper suites below don't touch these mocks.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyMock = any;
+
+// renderSystemPrompt's DB dependencies are loadAthleteData (mocked) and
+// loadPendingProposal (reads `plans`). Mock both so the three-way goal branch +
+// coach.md template fill (V3-W7) is testable. The template itself is read from
+// the real worker/prompts/coach.md on disk. The pure-helper suites below don't
+// touch these mocks.
 const { mockLoadAthleteData } = vi.hoisted(() => ({ mockLoadAthleteData: vi.fn() }));
 vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
 vi.mock('@/server/agent/byo-plan', () => ({ loadAthleteData: mockLoadAthleteData }));
+
+// Default DB: no pending proposal. loadPendingProposal reads the `plans` row;
+// a null row means "nothing pending", which is the state for every existing
+// renderSystemPrompt assertion. A test that wants a pending proposal overrides
+// this.
+function noProposalDb() {
+  return {
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          order: () => ({ limit: () => ({ maybeSingle: async () => ({ data: null }) }) }),
+        }),
+      }),
+    }),
+  };
+}
+
+beforeEach(() => {
+  (supabaseAdmin as AnyMock).mockReturnValue(noProposalDb());
+});
 
 const TZ = 'America/Los_Angeles';
 
@@ -309,6 +336,30 @@ describe('planExtensionContext — announce-the-new-block signal (GF-W1)', () =>
     const out = await renderSystemPrompt('a1', null, { newEndDate: '2026-09-27', blockWeeks: 8 });
     expect(out).toContain('The plan was just extended');
     expect(out).toContain('2026-09-27');
+  });
+});
+
+describe('pendingProposalContext — outstanding-proposal awareness (B)', () => {
+  it('empty when nothing is pending', () => {
+    expect(pendingProposalContext(null)).toBe('');
+  });
+
+  it('surfaces the change summary and the cancel sentinel, no residual placeholders', () => {
+    const out = pendingProposalContext({
+      summary: 'Thu Jun 25: tempo 4mi → rest',
+      expiresAt: '2026-06-25T06:59:59Z',
+    });
+    expect(out).toContain('already pending');
+    expect(out).toContain('Thu Jun 25: tempo 4mi → rest');
+    // The coach is told how to replace and how to cancel.
+    expect(out).toContain('replaces this pending one');
+    expect(out).toContain(CANCEL_SENTINEL);
+    expect(out).not.toContain('{{');
+  });
+
+  it('coach.md carries the {{pending_proposal_context}} placeholder', () => {
+    const md = readFileSync(join(process.cwd(), 'worker/prompts/coach.md'), 'utf8');
+    expect(md).toContain('{{pending_proposal_context}}');
   });
 });
 

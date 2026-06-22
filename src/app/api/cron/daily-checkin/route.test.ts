@@ -6,6 +6,11 @@ vi.mock('@/server/telegram/checkin/dispatcher', () => ({
   nowInTimezone: vi.fn().mockReturnValue({ date: '2026-05-27', time: '06:30' }),
 }));
 vi.mock('@sentry/nextjs', () => ({ captureException: vi.fn() }));
+// The expired-proposal sweep has its own test; stub it here so this suite stays
+// focused on enqueue/auto-pause and isn't coupled to the sweep's DB shape.
+vi.mock('@/server/telegram/proposals', () => ({
+  sweepExpiredProposals: vi.fn().mockResolvedValue(0),
+}));
 // pause.ts pulls in the heavy bot module; stub it so isInactive stays real but
 // the auto-pause notice is a no-op spy we can assert on.
 vi.mock('@/server/telegram/bot', () => ({ telegramBot: vi.fn() }));
@@ -111,7 +116,7 @@ describe('GET /api/cron/daily-checkin', () => {
     mockAthletes([]);
     const res = await GET(authedReq());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, skipped: 'no_onboarded_athlete' });
+    expect(await res.json()).toEqual({ ok: true, skipped: 'no_onboarded_athlete', expiredProposalsCleared: 0 });
     expect(vi.mocked(enqueueJob)).not.toHaveBeenCalled();
   });
 
@@ -119,7 +124,7 @@ describe('GET /api/cron/daily-checkin', () => {
     mockAthletes([makeAthlete()]);
     const res = await GET(authedReq());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, enqueued: 1, paused: [], dryRun: false });
+    expect(await res.json()).toEqual({ ok: true, enqueued: 1, paused: [], dryRun: false, expiredProposalsCleared: 0 });
     expect(vi.mocked(enqueueJob)).toHaveBeenCalledWith(
       'daily_checkin',
       'daily-athlete-1-2026-05-27',
@@ -135,7 +140,7 @@ describe('GET /api/cron/daily-checkin', () => {
     ]);
     const res = await GET(authedReq());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, enqueued: 3, paused: [], dryRun: false });
+    expect(await res.json()).toEqual({ ok: true, enqueued: 3, paused: [], dryRun: false, expiredProposalsCleared: 0 });
     expect(vi.mocked(enqueueJob)).toHaveBeenCalledTimes(3);
     expect(vi.mocked(enqueueJob)).toHaveBeenCalledWith(
       'daily_checkin',
@@ -151,7 +156,7 @@ describe('GET /api/cron/daily-checkin', () => {
     ]);
     const res = await GET(authedReq());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, enqueued: 1, paused: [], dryRun: false });
+    expect(await res.json()).toEqual({ ok: true, enqueued: 1, paused: [], dryRun: false, expiredProposalsCleared: 0 });
     expect(vi.mocked(enqueueJob)).toHaveBeenCalledOnce();
     expect(vi.mocked(enqueueJob)).toHaveBeenCalledWith(
       'daily_checkin',
@@ -164,7 +169,7 @@ describe('GET /api/cron/daily-checkin', () => {
     mockAthletes([makeAthlete({ id: 'paused', paused_at: new Date().toISOString(), pause_reason: 'manual' })]);
     const res = await GET(authedReq());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, skipped: 'no_onboarded_athlete' });
+    expect(await res.json()).toEqual({ ok: true, skipped: 'no_onboarded_athlete', expiredProposalsCleared: 0 });
     expect(vi.mocked(enqueueJob)).not.toHaveBeenCalled();
   });
 
@@ -172,7 +177,7 @@ describe('GET /api/cron/daily-checkin', () => {
     mockAthletes([makeAthlete({ onboarding_state: { step: 3 } })]);
     const res = await GET(authedReq());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, skipped: 'no_onboarded_athlete' });
+    expect(await res.json()).toEqual({ ok: true, skipped: 'no_onboarded_athlete', expiredProposalsCleared: 0 });
     expect(vi.mocked(enqueueJob)).not.toHaveBeenCalled();
   });
 
@@ -180,7 +185,7 @@ describe('GET /api/cron/daily-checkin', () => {
     mockAthletes([makeAthlete({ id: 'v3-done', onboarding_state: { flow: 'v3', phase: 'complete' } })]);
     const res = await GET(authedReq());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, enqueued: 1, paused: [], dryRun: false });
+    expect(await res.json()).toEqual({ ok: true, enqueued: 1, paused: [], dryRun: false, expiredProposalsCleared: 0 });
     expect(vi.mocked(enqueueJob)).toHaveBeenCalledWith(
       'daily_checkin',
       'daily-v3-done-2026-05-27',
@@ -192,7 +197,7 @@ describe('GET /api/cron/daily-checkin', () => {
     mockAthletes([makeAthlete({ onboarding_state: { flow: 'v3', phase: 'intake' } })]);
     const res = await GET(authedReq());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, skipped: 'no_onboarded_athlete' });
+    expect(await res.json()).toEqual({ ok: true, skipped: 'no_onboarded_athlete', expiredProposalsCleared: 0 });
     expect(vi.mocked(enqueueJob)).not.toHaveBeenCalled();
   });
 
@@ -204,7 +209,7 @@ describe('GET /api/cron/daily-checkin', () => {
     const { update, updateEq } = setupDb({ athletes: [silent], recentInbound: [] });
     const res = await GET(authedReq());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, enqueued: 0, paused: ['silent'], dryRun: false });
+    expect(await res.json()).toEqual({ ok: true, enqueued: 0, paused: ['silent'], dryRun: false, expiredProposalsCleared: 0 });
     expect(vi.mocked(enqueueJob)).not.toHaveBeenCalled();
     expect(update).toHaveBeenCalledWith({
       paused_at: expect.any(String),
@@ -218,7 +223,7 @@ describe('GET /api/cron/daily-checkin', () => {
     const a = makeAthlete({ id: 'chatty', created_at: new Date(Date.now() - 30 * DAY).toISOString() });
     setupDb({ athletes: [a], recentInbound: [{ athlete_id: 'chatty' }] });
     const res = await GET(authedReq());
-    expect(await res.json()).toEqual({ ok: true, enqueued: 1, paused: [], dryRun: false });
+    expect(await res.json()).toEqual({ ok: true, enqueued: 1, paused: [], dryRun: false, expiredProposalsCleared: 0 });
     expect(vi.mocked(sendAutoPauseNotice)).not.toHaveBeenCalled();
   });
 
@@ -227,7 +232,7 @@ describe('GET /api/cron/daily-checkin', () => {
     const silent = makeAthlete({ id: 'silent', created_at: new Date(Date.now() - 30 * DAY).toISOString() });
     const { update } = setupDb({ athletes: [silent], recentInbound: [] });
     const res = await GET(authedReq());
-    expect(await res.json()).toEqual({ ok: true, enqueued: 0, paused: ['silent'], dryRun: true });
+    expect(await res.json()).toEqual({ ok: true, enqueued: 0, paused: ['silent'], dryRun: true, expiredProposalsCleared: 0 });
     expect(update).not.toHaveBeenCalled();
     expect(vi.mocked(sendAutoPauseNotice)).not.toHaveBeenCalled();
   });

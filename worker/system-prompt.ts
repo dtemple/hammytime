@@ -11,6 +11,7 @@ import { DRAFT_SAFETY_CAPS } from '@/lib/plan-templates/caps';
 import type { SafetyCaps } from '@/lib/plan-templates/types';
 import type { Plan } from '@/lib/plan-schema';
 import { PLAN_SHAPE_REFERENCE } from '@/lib/plan-shape-reference';
+import { CANCEL_SENTINEL, loadPendingProposal, type PendingProposal } from './proposal';
 import type { RunSource } from './run-agent';
 
 export type HistoryMsg = { direction: string; body: string };
@@ -135,6 +136,21 @@ export function planExtensionContext(ext: PlanExtensionInfo | undefined): string
 Their rolling plan was running low on future days, so the system appended the next ${ext.blockWeeks}-week block this morning — the calendar now runs through ${ext.newEndDate}. The new weeks start from their current volume; the structure carries on, it's not a new plan.
 
 Mention it naturally in today's message — one or two sentences, in your voice: the next block is on the calendar and what its shape is (where the volume heads, where the cutback weeks land). Don't call it "the system" or describe the mechanics; it's you keeping their plan rolling. No confirmation needed from them — if they want it shaped differently, that's a normal plan-change conversation.`;
+}
+
+// Tells the coach a plan change it already proposed is still waiting on the
+// athlete's tap, so it doesn't re-propose or re-ask. '' when nothing is pending
+// — same empty-substitution pattern as {{ease_in_context}}.
+export function pendingProposalContext(pending: PendingProposal | null): string {
+  if (!pending) return '';
+  const changes = pending.summary.trim() || 'a change to their plan';
+  return `## A plan change is already pending their tap
+
+You proposed a plan change earlier and they haven't tapped Yes or No yet — their calendar still shows the old version. What's pending:
+
+${changes}
+
+Don't propose it again or ask them to confirm it again — the button is already in front of them. If their message is them answering it, read it as their answer. If they want it shaped differently, edit \`marathon_training_plan.json\` again — your new edit replaces this pending one. If they've decided against it, write a file named \`${CANCEL_SENTINEL}\` in your folder to drop it (no plan edit needed), and tell them it's off the table.`;
 }
 
 function distanceLabel(distance: string | null): string {
@@ -303,8 +319,12 @@ export async function renderSystemPrompt(
   plan?: Plan | null,
   planExtension?: PlanExtensionInfo,
 ): Promise<string> {
-  const data = await loadAthleteData(athleteId);
-  const template = await loadTemplate();
+  // Independent reads — fetch concurrently rather than serially on the run path.
+  const [data, template, pendingProposal] = await Promise.all([
+    loadAthleteData(athleteId),
+    loadTemplate(),
+    loadPendingProposal(athleteId, plan ?? null),
+  ]);
 
   const mode = coachMode(data.goalRace, data.trainingProfile);
   const { date: today } = localDateParts(data.athlete.timezone);
@@ -326,6 +346,7 @@ export async function renderSystemPrompt(
     safety_caps: safetyCapsBlock(DRAFT_SAFETY_CAPS, data.goalRace?.distance_mi ?? null),
     ease_in_context: easeInContext(plan, today, data.goalRace),
     plan_extension_context: planExtensionContext(planExtension),
+    pending_proposal_context: pendingProposalContext(pendingProposal),
     plan_shape_reference: PLAN_SHAPE_REFERENCE,
   };
 

@@ -158,6 +158,7 @@ export async function sendCalendarConfirm(athleteId: string, token: string): Pro
 export async function resolveStaleProposalMessage(
   athleteId: string,
   messageId: number,
+  note = 'Replaced by a newer proposal — see below.',
 ): Promise<void> {
   try {
     const { data: athlete } = await supabaseAdmin()
@@ -170,7 +171,7 @@ export async function resolveStaleProposalMessage(
     await bot().api.editMessageText(
       athlete.telegram_chat_id,
       messageId,
-      `${CALENDAR_CONFIRM_TEXT}\n\nReplaced by a newer proposal — see below.`,
+      `${CALENDAR_CONFIRM_TEXT}\n\n${note}`,
     );
   } catch (e) {
     console.warn(`[worker] resolveStaleProposalMessage failed for ${athleteId}:`, e);

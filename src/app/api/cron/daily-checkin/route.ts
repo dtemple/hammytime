@@ -10,6 +10,7 @@ import {
   isInactive,
   sendAutoPauseNotice,
 } from '@/server/telegram/pause';
+import { sweepExpiredProposals } from '@/server/telegram/proposals';
 
 function dryRunRequested(req: Request): boolean {
   const param = new URL(req.url).searchParams.get('dryRun')?.toLowerCase() ?? '';
@@ -35,6 +36,15 @@ export async function GET(req: Request) {
 
   try {
     const dryRun = dryRunRequested(req);
+
+    // Hygiene: clear any proposal past its expiry and pull its stale button.
+    // Independent of the inactivity scan below — a dead proposal is dead whether
+    // or not we're dry-running auto-pause.
+    const expiredProposalsCleared = await sweepExpiredProposals().catch((e) => {
+      Sentry.captureException(e);
+      console.error('[daily-checkin cron] proposal sweep failed', e);
+      return 0;
+    });
 
     const { data: athletes, error } = await supabaseAdmin()
       .from('athletes')
@@ -63,7 +73,7 @@ export async function GET(req: Request) {
     });
 
     if (onboarded.length === 0) {
-      return NextResponse.json({ ok: true, skipped: 'no_onboarded_athlete' });
+      return NextResponse.json({ ok: true, skipped: 'no_onboarded_athlete', expiredProposalsCleared });
     }
 
     // Inactivity scan (§10.5): one bounded query for the athletes with any
@@ -116,7 +126,7 @@ export async function GET(req: Request) {
       enqueued++;
     }
 
-    return NextResponse.json({ ok: true, enqueued, paused, dryRun });
+    return NextResponse.json({ ok: true, enqueued, paused, dryRun, expiredProposalsCleared });
   } catch (err) {
     Sentry.captureException(err);
     console.error('[daily-checkin cron] error', err);
