@@ -23,6 +23,7 @@ This is the source-of-truth design for how a friend's usage is metered, how they
 | Comp | **Per-friend `comped` flag.** Billing skipped entirely (David, family, anyone). |
 | Surface | **Telegram-first.** `/balance` and `/buy` commands + help-menu entries; payment completes on Stripe's hosted page in the browser. |
 | Pause | **`/pause` (optional timed) + `/resume`.** Suspends proactive daily check-ins and the spend they cause while a friend is away; ad-hoc messages still answered. (§10) |
+| Auto-pause | **5 days of athlete silence → auto-pause daily check-ins + one static notice with a resume button.** Any inbound message or the button resumes. Inbound-messages-only signal; no weekly-downgrade tier. Build-first candidate — ships the pause primitive standalone. (§10.5; locked 2026-06-12, **shipped 2026-06-22 — window tightened 10→5 at arming**) |
 
 ---
 
@@ -175,6 +176,61 @@ Lets a friend stop proactive daily check-ins while away — vacation, travel, an
 
 ---
 
+## 10.5 Auto-pause on inactivity (build-first candidate)
+
+**Decided with David, 2026-06-12. Shipped + armed 2026-06-22** (live: `src/server/telegram/pause.ts`, the `daily-checkin` cron, migration `20260614000000_athlete_pause_columns.sql`). Standalone-buildable and shipped *first*, ahead of the rest of this doc: it introduces the pause primitive — the `paused_at` column, the enqueue skip filter, and a resume path — that §10's manual `/pause` later reuses. Nothing here depends on credits, Stripe, or the balance gate.
+
+> **Arming note (2026-06-22):** the inactivity window was tightened from the originally-locked **10 days to 5 days** when the feature went live (`INACTIVITY_WINDOW_DAYS = 5` in `pause.ts`), and the notice copy was finalized (below). There is no dry-run env flag in prod; the daily cron pauses for real. The numbers throughout this section read **5 days**.
+
+**Problem.** The product is a daily push, and Telegram gives bots no read receipts. A friend who quietly stops engaging keeps drawing a daily agent run — ~$1.28 billed/day (§2) — for messages no one reads. This pauses those runs automatically after a stretch of silence and gives a one-tap way back. It's cost-of-no-value control, same family as §10, which is why it lives here.
+
+**Trigger — 5 days of silence.**
+- "Silence" = no inbound Telegram message from the athlete (text *or* button tap — `messages` table, `direction='in'`). **Strava uploads do not count** (David's call): messages-only keeps the cron query simple, and a false positive on a quiet-but-engaged reader costs nothing more than one tap or message to undo (resume is self-service), so the tighter 5-day window is safe.
+- **Activity baseline** = the most recent of *(last inbound message, athlete-creation timestamp)*. A freshly-onboarded athlete who hasn't chatted since onboarding isn't paused on day one — their onboarding messages (and, failing those, their `created_at`) start the clock. This is why no separate new-athlete grace period is needed; 5 days covers it. (Implementation uses `athletes.created_at` as the floor — there is no `onboarded_at` column, and onboarding always produces inbound `messages` rows, so the floor only matters for an athlete who somehow has none.)
+- Evaluated inside the **existing daily enqueue cron pass** (SPEC §3.5/§3.7). The cron already skips test athletes (negative `telegram_chat_id`) and non-onboarded athletes; for each remaining athlete it now also computes the activity baseline. **Applies to comped friends too** — `comped` skips *billing*, not the cost-saving pause; the inactive comped/free friends are exactly the ~$26/mo-each subsidy this is meant to stop.
+
+**On pause:**
+- Set `paused_at = now()`, `pause_reason = 'auto_inactivity'`. Leave `pause_resumes_at` null — inactivity pause is indefinite; the friend returns by engaging, not on a timer.
+- Do **not** enqueue a run for that athlete that day.
+- Send **exactly one** static notification with an inline resume button. **This message must not itself be an agent run** — it's a hard-coded template sent straight through the Telegram API, or the feature spends model money to announce it's saving model money. Notify-once falls out of the existing filter for free: once `paused_at` is set, the enqueue predicate (`paused_at is null`) skips the athlete on every later pass, so they're never re-evaluated and never re-notified.
+
+**Notification copy (static template — hand-written, not agent-generated; finalized 2026-06-22, `AUTO_PAUSE_NOTICE` in `pause.ts`):**
+
+> It's been a little while since I heard from you, so I've paused your daily check-ins. Want them back? Tap below, or just send me anything.
+>
+> `[ Turn daily check-ins back on ]`
+
+Follows the CLAUDE.md copy rules — short, no "Great", no exclamation-stacking, no guilt trip, no AI tells. Number-agnostic on purpose ("a little while", not "10 days") so the window can move without a copy edit.
+
+**Resume — two paths, both clear the pause:**
+1. **Button** (`callback_data: resume:auto`) → clear `paused_at` + `pause_reason`, confirm, and (optional but recommended) enqueue today's check-in immediately so coming back feels live rather than "starts tomorrow."
+2. **Any inbound message** → an athlete paused with `pause_reason = 'auto_inactivity'` who sends *anything* is auto-resumed (clear the pause), then their message is handled normally. Any engagement means they're back; don't make them hunt for the button.
+
+   **This diverges from §10 on purpose, and `pause_reason` is the switch.** A *manual* (`/pause`, vacation) pause does **not** resume on an inbound — per §10 a friend can ask an ad-hoc question while still on vacation. Only `auto_inactivity` pauses resume on inbound. Same column, opposite inbound behavior, gated on `pause_reason`.
+
+**Cost of the feature itself:** zero model spend — a SQL check inside a cron that already runs, plus a static Telegram send. The savings are the suppressed daily runs.
+
+**Interaction with the $0 gate (§5, once it ships):** skip the inactivity scan for athletes already blocked at $0 — they've already stopped running and received the §8 final message; a second "paused" note would just be noise.
+
+**State / schema (what this section adds):**
+- `athletes.paused_at timestamptz null` — shared with §10; **introduced here if this ships first** (null = active).
+- `athletes.pause_reason text null` — `'auto_inactivity' | 'manual'`, null when active. New in this section; §10's `/pause` sets `'manual'`.
+- `pause_resumes_at` is a §10 concern (timed manual pause) and is **not** needed here. §10 adds it when it lands.
+- The enqueue cron's active-athlete predicate gains `paused_at is null` — the same load-bearing filter §10 needs.
+
+**Admin (§11):** surface `pause_reason` so "auto-paused, went quiet" reads differently from "on vacation (`/pause`)" and "out of credit." At <25 friends, David may just text an auto-paused friend directly rather than wait for them to tap back in.
+
+**Standalone build steps:**
+1. Migration: add `paused_at`, `pause_reason` to `athletes`.
+2. Enqueue cron: add `paused_at is null` to the active predicate; in the same pass, compute each candidate's activity baseline and, if it's older than `INACTIVITY_WINDOW_DAYS` (5), set the pause + send the static template instead of enqueuing. (A `?dryRun=1` / `AUTO_PAUSE_DRY_RUN` guard reports candidates without writing/sending — used to vet the candidate list before arming.)
+3. Resume-button callback (`resume:auto`) in the bot's callback dispatcher: clear the pause, confirm, optional immediate check-in.
+4. Inbound auto-resume: in the message handler, if the athlete is paused with `pause_reason = 'auto_inactivity'`, clear the pause before normal handling.
+5. Static notification template + button.
+
+§10 (manual `/pause`/`/resume`, timed pause, `pause_resumes_at`) then reuses steps 1–2 and the filter, reducing to a thin wrapper over the primitive shipped here.
+
+---
+
 ## 11. Comp & admin
 
 - **`comped` flag** per athlete, set from the David-only admin console. True ⇒ all billing logic is skipped.
@@ -196,6 +252,8 @@ Roughly a week, gated behind the worker + agent loop already running:
 8. **Pause:** `athletes.paused_at` / `pause_resumes_at` columns; `/pause` (incl. timed) + `/resume`; the enqueue-cron skip filter; the auto-resume cron pass.
 
 Ship 1–4 together (the minimum that lets a friend run out and pay). 5–8 follow; pause (8) can land early and independently if a friend takes a trip before the rest is built.
+
+**§10.5 (auto-pause on inactivity) is a build-first candidate that sits outside this sequence.** It ships the pause primitive — `paused_at` + `pause_reason` columns, the enqueue skip filter, and the resume paths — with no dependency on credits, Stripe, or the gate, so it can go in ahead of everything above. Once it's in, step 8 reduces to adding manual `/pause`/`/resume` (+ timed `pause_resumes_at`) on top of the primitive.
 
 ---
 
