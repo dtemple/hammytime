@@ -1,7 +1,7 @@
 // Auto-pause on inactivity (METERING_PAYMENTS.md §10.5).
 //
 // The product is a daily push and Telegram gives bots no read receipts, so a
-// friend who goes quiet keeps drawing a daily agent run no one reads. After 10
+// friend who goes quiet keeps drawing a daily agent run no one reads. After 5
 // days of silence the enqueue cron pauses their daily check-ins and sends a
 // one-tap way back. This module holds the pieces shared between the cron (the
 // pause decision + the static notice) and the bot (the inbound auto-resume).
@@ -13,9 +13,9 @@ import { telegramBot } from './bot';
 
 type AthleteRow = Database['public']['Tables']['athletes']['Row'];
 
-// 10 days of silence → auto-pause. "Silence" = no inbound Telegram message
+// 5 days of silence → auto-pause. "Silence" = no inbound Telegram message
 // (text or button tap); Strava uploads don't count (§10.5).
-export const INACTIVITY_WINDOW_DAYS = 10;
+export const INACTIVITY_WINDOW_DAYS = 5;
 
 // The resume button's callback_data. Tapping it (or sending any message) clears
 // an auto_inactivity pause; see the bot's callback router and handleInboundText.
@@ -24,9 +24,8 @@ export const RESUME_AUTO_CALLBACK = 'resume:auto';
 // Static, hand-written notice — NOT agent-generated. Sending this through the
 // agent would spend model money to announce we're saving model money (§10.5).
 export const AUTO_PAUSE_NOTICE =
-  "It's been about 10 days since I heard from you, so I've paused your daily " +
-  "check-ins — no sense crowding your chat if you're not reading them. Want " +
-  'them back? Tap below, or just send me anything.';
+  "It's been a little while since I heard from you, so I've paused your daily " +
+  'check-ins. Want them back? Tap below, or just send me anything.';
 
 /**
  * Pure inactivity decision, extracted for unit testing.
