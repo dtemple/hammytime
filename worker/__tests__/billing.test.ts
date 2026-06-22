@@ -27,7 +27,7 @@ beforeEach(() => {
   getCreditState.mockReset();
   sendDavidAlert.mockReset().mockResolvedValue(undefined);
   sendReply.mockReset().mockResolvedValue(undefined);
-  delete process.env.BILLING_GATE_NOTICE;
+  delete process.env.BILLING_GATE_ENABLED;
 });
 
 describe('chargeRun — post-run draw-down', () => {
@@ -55,56 +55,62 @@ describe('chargeRun — post-run draw-down', () => {
 });
 
 describe('enforceCreditGate — pre-run $0 gate', () => {
-  it('allows a non-gated kind without reading the balance', async () => {
-    expect(await enforceCreditGate(job('calendar_sync'))).toBe('allowed');
-    expect(getCreditState).not.toHaveBeenCalled();
-  });
-
-  it('allows a comped athlete regardless of balance', async () => {
-    getCreditState.mockResolvedValue({ balanceCents: -500, comped: true });
+  it('is OFF by default — a $0 non-comped athlete still runs, untouched', async () => {
+    getCreditState.mockResolvedValue({ balanceCents: 0, comped: false });
     expect(await enforceCreditGate(job('daily_checkin'))).toBe('allowed');
+    expect(getCreditState).not.toHaveBeenCalled(); // short-circuits before any read
     expect(sendReply).not.toHaveBeenCalled();
+    expect(sendDavidAlert).not.toHaveBeenCalled();
   });
 
-  it('allows a non-comped athlete with a positive balance', async () => {
-    getCreditState.mockResolvedValue({ balanceCents: 1, comped: false });
-    expect(await enforceCreditGate(job('tg_message'))).toBe('allowed');
-  });
+  describe('with BILLING_GATE_ENABLED on', () => {
+    beforeEach(() => {
+      process.env.BILLING_GATE_ENABLED = 'true';
+    });
 
-  it('blocks a non-comped athlete at $0 and alerts David (notice flag off)', async () => {
-    getCreditState.mockResolvedValue({ balanceCents: 0, comped: false });
-    expect(await enforceCreditGate(job('daily_checkin'))).toBe('blocked');
-    expect(sendDavidAlert).toHaveBeenCalledTimes(1);
-    expect(sendReply).not.toHaveBeenCalled(); // athlete message held behind the flag
-  });
+    it('allows a non-gated kind without reading the balance', async () => {
+      expect(await enforceCreditGate(job('calendar_sync'))).toBe('allowed');
+      expect(getCreditState).not.toHaveBeenCalled();
+    });
 
-  it('blocks a non-comped athlete who overshot into the negative', async () => {
-    getCreditState.mockResolvedValue({ balanceCents: -50, comped: false });
-    expect(await enforceCreditGate(job('daily_checkin'))).toBe('blocked');
-  });
+    it('allows a comped athlete regardless of balance', async () => {
+      getCreditState.mockResolvedValue({ balanceCents: -500, comped: true });
+      expect(await enforceCreditGate(job('daily_checkin'))).toBe('allowed');
+      expect(sendReply).not.toHaveBeenCalled();
+    });
 
-  it('sends the athlete notice when the flag is on', async () => {
-    process.env.BILLING_GATE_NOTICE = 'true';
-    getCreditState.mockResolvedValue({ balanceCents: 0, comped: false });
-    expect(await enforceCreditGate(job('daily_checkin'))).toBe('blocked');
-    expect(sendReply).toHaveBeenCalledTimes(1);
-    expect(sendReply).toHaveBeenCalledWith(ATHLETE, expect.stringContaining('/buy'));
-  });
+    it('allows a non-comped athlete with a positive balance', async () => {
+      getCreditState.mockResolvedValue({ balanceCents: 1, comped: false });
+      expect(await enforceCreditGate(job('tg_message'))).toBe('allowed');
+    });
 
-  it('fails open and alerts David when the balance read throws', async () => {
-    getCreditState.mockRejectedValue(new Error('db down'));
-    expect(await enforceCreditGate(job('daily_checkin'))).toBe('allowed');
-    expect(sendDavidAlert).toHaveBeenCalledTimes(1);
-  });
+    it('blocks a non-comped athlete at $0 — alerts David and messages them', async () => {
+      getCreditState.mockResolvedValue({ balanceCents: 0, comped: false });
+      expect(await enforceCreditGate(job('daily_checkin'))).toBe('blocked');
+      expect(sendDavidAlert).toHaveBeenCalledTimes(1);
+      expect(sendReply).toHaveBeenCalledWith(ATHLETE, expect.stringContaining('/buy'));
+    });
 
-  it('fails open when there is no billing row', async () => {
-    getCreditState.mockResolvedValue(null);
-    expect(await enforceCreditGate(job('daily_checkin'))).toBe('allowed');
-    expect(sendDavidAlert).toHaveBeenCalledTimes(1);
-  });
+    it('blocks a non-comped athlete who overshot into the negative', async () => {
+      getCreditState.mockResolvedValue({ balanceCents: -50, comped: false });
+      expect(await enforceCreditGate(job('daily_checkin'))).toBe('blocked');
+    });
 
-  it('allows (defers to dispatch) when the payload has no athlete id', async () => {
-    expect(await enforceCreditGate({ kind: 'daily_checkin', payload: {} })).toBe('allowed');
-    expect(getCreditState).not.toHaveBeenCalled();
+    it('fails open and alerts David when the balance read throws', async () => {
+      getCreditState.mockRejectedValue(new Error('db down'));
+      expect(await enforceCreditGate(job('daily_checkin'))).toBe('allowed');
+      expect(sendDavidAlert).toHaveBeenCalledTimes(1);
+    });
+
+    it('fails open when there is no billing row', async () => {
+      getCreditState.mockResolvedValue(null);
+      expect(await enforceCreditGate(job('daily_checkin'))).toBe('allowed');
+      expect(sendDavidAlert).toHaveBeenCalledTimes(1);
+    });
+
+    it('allows (defers to dispatch) when the payload has no athlete id', async () => {
+      expect(await enforceCreditGate({ kind: 'daily_checkin', payload: {} })).toBe('allowed');
+      expect(getCreditState).not.toHaveBeenCalled();
+    });
   });
 });

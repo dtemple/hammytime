@@ -23,13 +23,14 @@ const GATED_KINDS = new Set(['daily_checkin', 'tg_message']);
 
 export const BLOCK_REASON_INSUFFICIENT_CREDIT = 'blocked: insufficient_credit';
 
-// The athlete-facing "you're out of credit" message is held behind this flag
-// until the top-up infrastructure (/buy, the §8 preset buttons) is in place — a
-// friend should only be told they're paused once there's a real way to fix it.
-// Off until explicitly enabled. The block itself + the David alert fire
-// regardless, so nothing runs at $0 and David always knows.
-function gateNoticeEnabled(): boolean {
-  const v = (process.env.BILLING_GATE_NOTICE ?? '').toLowerCase();
+// The whole $0 enforcement — the block AND the athlete-facing notice — is held
+// behind this flag until the top-up path (/buy, the §8 preset buttons) exists.
+// While it's off, a non-comped athlete at <= $0 still RUNS: the post-run
+// draw-down keeps metering them (the balance can go negative), but nothing is
+// refused, no one is messaged, and David isn't alerted. Flip it on once a
+// blocked friend has a real way to pay. Off unless explicitly enabled.
+function gateEnabled(): boolean {
+  const v = (process.env.BILLING_GATE_ENABLED ?? '').toLowerCase();
   return v === 'true' || v === '1' || v === 'on';
 }
 
@@ -64,16 +65,19 @@ export async function chargeRun(
 export type GateDecision = 'allowed' | 'blocked';
 
 /**
- * Pre-run gate. Returns 'blocked' only for a gated job kind whose non-comped
- * athlete is at <= $0; the caller then marks the job blocked and skips dispatch.
- * On 'blocked' this has already emitted the side notices (David alert always;
- * athlete message behind the flag).
+ * Pre-run gate. Disabled entirely unless BILLING_GATE_ENABLED is set (see
+ * gateEnabled) — while off, always returns 'allowed', so a $0 athlete still runs
+ * and only the silent draw-down meters them. When on, returns 'blocked' for a
+ * gated job kind whose non-comped athlete is at <= $0; the caller then marks the
+ * job blocked and skips dispatch. On 'blocked' this has already alerted David and
+ * messaged the athlete.
  *
  * Fails OPEN: any error reading the balance, or a missing billing row, allows
  * the run and alerts David. A friend is never denied coaching because the
  * billing cache hiccuped.
  */
 export async function enforceCreditGate(job: { kind: string; payload: unknown }): Promise<GateDecision> {
+  if (!gateEnabled()) return 'allowed'; // enforcement off — meter silently, never block
   if (!GATED_KINDS.has(job.kind)) return 'allowed';
 
   const payload = (job.payload ?? {}) as Record<string, unknown>;
@@ -107,11 +111,9 @@ export async function enforceCreditGate(job: { kind: string; payload: unknown })
     `Athlete ${athleteId} hit $0 — ${job.kind} run blocked. Balance ${state.balanceCents}¢.`,
   ).catch((e) => console.error(`[billing] David alert (gate block) failed for ${athleteId}:`, e));
 
-  if (gateNoticeEnabled()) {
-    await sendReply(athleteId, OUT_OF_CREDIT_NOTICE).catch((e) =>
-      console.error(`[billing] out-of-credit notice failed for ${athleteId}:`, e),
-    );
-  }
+  await sendReply(athleteId, OUT_OF_CREDIT_NOTICE).catch((e) =>
+    console.error(`[billing] out-of-credit notice failed for ${athleteId}:`, e),
+  );
 
   return 'blocked';
 }

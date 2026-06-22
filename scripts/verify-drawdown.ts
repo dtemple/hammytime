@@ -70,9 +70,10 @@ async function main() {
     .select('amount_cents, related_run_id, kind')
     .eq('related_run_id', run1)
     .eq('kind', 'debit');
+  const rows = debitRows ?? [];
   check(
     'exactly one debit row for the run, signed-negative',
-    (debitRows ?? []).length === 1 && debitRows![0].amount_cents === -cents1,
+    rows.length === 1 && rows[0]?.amount_cents === -cents1,
     JSON.stringify(debitRows),
   );
 
@@ -83,10 +84,8 @@ async function main() {
   check('balance unchanged after re-debit', (await balance()) === balBefore, `balance=${await balance()}`);
 
   // ---- 3. overshoot into negative is allowed --------------------------------
-  const run2 = await newRun(1.0); // billedCents = 150, balance 420 → -... wait 420
-  const cents2 = billedCents(1.0); // 150
-  await debitRunCredit(athleteId, run2, cents2);
-  const overshot = await balance(); // 420 - 150 = 270 (not negative yet)
+  const run2 = await newRun(1.0); // billedCents = 150, balance 420 → 270 (not negative yet)
+  await debitRunCredit(athleteId, run2, billedCents(1.0));
   // push it negative with a big one
   const run3 = await newRun(2.5); // 375 cents, 270 → -105
   await debitRunCredit(athleteId, run3, billedCents(2.5));
@@ -108,23 +107,32 @@ async function main() {
   check('comped balance unchanged', (await balance()) === balComped, `balance=${await balance()}`);
 
   // ---- gate decision against live data (real getCreditState read) -----------
-  // Silence David alerts during the gate check, then exercise enforceCreditGate.
+  // Silence David alerts during the gate checks. The throwaway athlete has no
+  // telegram_chat_id, so the blocked-path athlete message throws-and-is-caught —
+  // nothing is actually sent.
   delete process.env.DAVID_TELEGRAM_CHAT_ID;
   const { enforceCreditGate } = await import('../worker/billing');
   const j = (kind: string) => ({ kind, payload: { athlete_id: athleteId } });
 
-  // comped → allowed even though balance is negative
-  check('gate allows comped at negative balance', (await enforceCreditGate(j('daily_checkin'))) === 'allowed', 'comped');
-
-  // un-comp, set $0 → blocked
+  // Gate OFF (default): the whole feature is dark — a $0 non-comped athlete still
+  // runs; only the draw-down (above) meters them.
+  delete process.env.BILLING_GATE_ENABLED;
   await db.from('athlete_credits').update({ comped: false, balance_cents: 0 }).eq('athlete_id', athleteId);
-  check('gate blocks non-comped at $0 (daily)', (await enforceCreditGate(j('daily_checkin'))) === 'blocked', 'balance=0');
-  check('gate blocks non-comped at $0 (tg_message)', (await enforceCreditGate(j('tg_message'))) === 'blocked', 'adhoc');
-  check('gate ignores non-gated kind', (await enforceCreditGate(j('calendar_sync'))) === 'allowed', 'calendar_sync');
+  check('gate OFF: non-comped at $0 still allowed', (await enforceCreditGate(j('daily_checkin'))) === 'allowed', 'flag unset');
+
+  // Gate ON: enforcement active.
+  process.env.BILLING_GATE_ENABLED = 'true';
+  check('gate ON: blocks non-comped at $0 (daily)', (await enforceCreditGate(j('daily_checkin'))) === 'blocked', 'balance=0');
+  check('gate ON: blocks non-comped at $0 (tg_message)', (await enforceCreditGate(j('tg_message'))) === 'blocked', 'adhoc');
+  check('gate ON: ignores non-gated kind', (await enforceCreditGate(j('calendar_sync'))) === 'allowed', 'calendar_sync');
+
+  // comped → allowed even at $0
+  await db.from('athlete_credits').update({ comped: true }).eq('athlete_id', athleteId);
+  check('gate ON: allows comped at $0', (await enforceCreditGate(j('daily_checkin'))) === 'allowed', 'comped');
 
   // positive balance → allowed
-  await db.from('athlete_credits').update({ balance_cents: 100 }).eq('athlete_id', athleteId);
-  check('gate allows non-comped with positive balance', (await enforceCreditGate(j('daily_checkin'))) === 'allowed', 'balance=100');
+  await db.from('athlete_credits').update({ comped: false, balance_cents: 100 }).eq('athlete_id', athleteId);
+  check('gate ON: allows non-comped with positive balance', (await enforceCreditGate(j('daily_checkin'))) === 'allowed', 'balance=100');
 
   // ---- index guard sanity: a second debit row for one run is rejected -------
   // (already proven by step 2's no-op; the unique index is what backs it.)
