@@ -43,8 +43,8 @@ export async function getBilledBurnPerDayCents(athleteId: string): Promise<numbe
   const raw7d = data.cost_usd_7d ?? 0;
   if (raw7d <= 0) return DEFAULT_BILLED_PER_DAY_CENTS;
 
-  const billed = billedCents(raw7d / 7);
-  return billed > 0 ? billed : DEFAULT_BILLED_PER_DAY_CENTS;
+  // billedCents floors at 0; a sub-cent/day pace that rounds to 0 falls back to the default.
+  return billedCents(raw7d / 7) || DEFAULT_BILLED_PER_DAY_CENTS;
 }
 
 /** Days of runway left at the athlete's current pace. balanceCents may be 0/negative

@@ -3,11 +3,9 @@ import type Stripe from 'stripe';
 import * as Sentry from '@sentry/nextjs';
 import { supabaseAdmin } from '@/lib/db';
 import { stripe } from '@/server/billing/stripe';
-import { recordStripeTopup, recordStripeRefund, getCreditState } from '@/server/billing/credits';
+import { recordStripeTopup, recordStripeRefund } from '@/server/billing/credits';
 import { storeStripeCustomerId } from '@/server/billing/checkout';
-import { estimateRunwayDays, runwayLabel } from '@/server/billing/burn-rate';
-import { dollarsLabel } from '@/server/billing/pricing';
-import { botApiForChat } from '@/server/telegram/bot';
+import { sendTopupConfirmation } from '@/server/telegram/billing-notices';
 
 /**
  * Stripe webhook receiver (Specs/METERING_PAYMENTS.md §6, §11).
@@ -106,41 +104,8 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session): Promis
   }
 
   // First time we've seen this payment — tell the friend it landed. A replay never
-  // gets here, so the confirmation sends exactly once.
+  // gets here, so the confirmation sends exactly once. Best-effort inside the helper.
   await sendTopupConfirmation(athleteId, grossCents);
-}
-
-// Confirm a top-up in Telegram (§6 step 5). Best-effort: the credit is already
-// committed, so a send failure must not 500 the webhook (a Stripe retry would replay
-// the topup as a no-op and never re-send this). botApiForChat handles the negative
-// test-group chat id like the rest of the outbound paths.
-async function sendTopupConfirmation(athleteId: string, grossCents: number): Promise<void> {
-  try {
-    const db = supabaseAdmin();
-    const { data: athlete } = await db
-      .from('athletes')
-      .select('telegram_chat_id')
-      .eq('id', athleteId)
-      .maybeSingle();
-    if (!athlete?.telegram_chat_id) return;
-
-    const state = await getCreditState(athleteId);
-    const balanceCents = state?.balanceCents ?? grossCents;
-    const days = await estimateRunwayDays(balanceCents, athleteId);
-    const text = `${dollarsLabel(grossCents)} added — you're at ${dollarsLabel(
-      balanceCents,
-    )}, ${runwayLabel(days)} at your pace.`;
-
-    const chatId = athlete.telegram_chat_id;
-    await botApiForChat(chatId).sendMessage(chatId, text);
-    await db
-      .from('messages')
-      .insert({ athlete_id: athleteId, channel: 'tg', direction: 'out', body: text });
-  } catch (err) {
-    // Credit already landed; the confirmation is cosmetic. Log and move on.
-    Sentry.captureException(err);
-    console.warn(`[stripe] topup confirmation send failed for athlete ${athleteId}:`, err);
-  }
 }
 
 async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
