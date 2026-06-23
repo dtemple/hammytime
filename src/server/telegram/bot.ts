@@ -22,6 +22,11 @@ import { enqueueCalendarSyncIfConnected } from '@/server/google/enqueue-sync';
 import { getOrCreateCalendarToken, getOrCreatePrehabToken } from '@/lib/calendar-token';
 import { enqueueJob } from '@/server/jobs/enqueue';
 import { transcribeOgg } from '@/lib/transcribe';
+import { createTopupSession } from '@/server/billing/checkout';
+import { getCreditState } from '@/server/billing/credits';
+import { estimateRunwayDays, runwayLabel } from '@/server/billing/burn-rate';
+import { TOPUP_PRESETS_CENTS, dollarsLabel, isPresetCents } from '@/server/billing/pricing';
+import { helpText } from './commands';
 
 type AthleteRow = Database['public']['Tables']['athletes']['Row'];
 
@@ -891,6 +896,132 @@ async function handleEditProfileCommand(ctx: CommandContext<Context>): Promise<v
   );
 }
 
+// /balance — dollars left + runway at the athlete's pace (Specs/METERING_PAYMENTS.md
+// §9). Comped friends see "on the house"; a paused athlete gets the pause state
+// prepended. No agent run, so no in-flight guard. Auto-reload line is step 6.
+async function handleBalanceCommand(ctx: CommandContext<Context>): Promise<void> {
+  const athlete = await loadOnboardedAthlete(ctx);
+  if (!athlete) return;
+  const db = supabaseAdmin();
+  await db
+    .from('messages')
+    .insert({ athlete_id: athlete.id, channel: 'tg', direction: 'in', body: '/balance' });
+
+  const state = await getCreditState(athlete.id);
+
+  let body: string;
+  if (!state) {
+    // Shouldn't happen post-onboarding (the $5 grant writes the row), but don't crash.
+    body = 'No credit on file yet — /buy to add some.';
+  } else if (state.comped) {
+    body = "You're on the house — no credit needed.";
+  } else if (state.balanceCents <= 0) {
+    body = "You're out of credit. /buy to add more.";
+  } else {
+    const days = await estimateRunwayDays(state.balanceCents, athlete.id);
+    body = `${dollarsLabel(state.balanceCents)} left — ${runwayLabel(days)} at your pace.`;
+  }
+
+  const prefix = athlete.paused_at ? 'Your daily check-ins are paused right now.\n\n' : '';
+  await sendAndLog(athlete.id, ctx.chat.id, prefix + body);
+}
+
+// /buy — the preset top-up flow (§6). Sends three amount buttons; the tap lands in
+// handleBuy below, which mints the Stripe link.
+async function handleBuyCommand(ctx: CommandContext<Context>): Promise<void> {
+  const athlete = await loadOnboardedAthlete(ctx);
+  if (!athlete) return;
+  const db = supabaseAdmin();
+  await db
+    .from('messages')
+    .insert({ athlete_id: athlete.id, channel: 'tg', direction: 'in', body: '/buy' });
+
+  const text = 'How much do you want to add?';
+  const keyboard = new InlineKeyboard();
+  // Presets are short ($10 · $25 · $50), so one row reads fine and labels never truncate.
+  for (const cents of TOPUP_PRESETS_CENTS) keyboard.text(dollarsLabel(cents), `buy:${cents}`);
+
+  await getBot().api.sendMessage(ctx.chat.id, text, { reply_markup: keyboard });
+  await db
+    .from('messages')
+    .insert({ athlete_id: athlete.id, channel: 'tg', direction: 'out', body: text });
+}
+
+// A "$10/$25/$50" tap from /buy. Mints a Stripe Checkout Session in-process and hands
+// back the hosted-page link. On success the keyboard collapses to a ✅ record so the
+// tap can't repeat; on failure the buttons stay live for a retry.
+export async function handleBuy(ctx: Context, athlete: AthleteRow, data: string): Promise<void> {
+  const chatId = ctx.chat?.id ?? ctx.from!.id;
+  const cents = Number(data.slice('buy:'.length));
+
+  // Log the tap as inbound (the amount the friend chose).
+  const msg = ctx.callbackQuery?.message;
+  const rows = msg && 'reply_markup' in msg ? msg.reply_markup?.inline_keyboard : undefined;
+  await supabaseAdmin().from('messages').insert({
+    athlete_id: athlete.id,
+    channel: 'tg',
+    direction: 'in',
+    body: labelForTap(rows, data) ?? data,
+  });
+
+  await ctx.answerCallbackQuery();
+
+  if (!isPresetCents(cents)) {
+    // Stale or tampered callback — nothing to do.
+    return;
+  }
+
+  try {
+    const url = await createTopupSession(athlete.id, cents);
+
+    // Collapse the keyboard only once we have a link, so a failed mint leaves the
+    // presets tappable for a retry.
+    const collapsed = selectionKeyboardFromTap(rows, data);
+    if (collapsed) {
+      try {
+        await ctx.editMessageReplyMarkup({ reply_markup: collapsed });
+      } catch (err) {
+        console.warn('[bot] buy button collapse failed', err);
+      }
+    }
+
+    await sendAndLog(
+      athlete.id,
+      chatId,
+      `Here's your checkout for ${dollarsLabel(cents)}. Pay there and I'll confirm back here:\n${url}`,
+    );
+  } catch (err) {
+    console.error('[bot] createTopupSession failed', `athlete=${athlete.id}`, err);
+    await sendAndLog(
+      athlete.id,
+      chatId,
+      "I couldn't start checkout just now — ping David and he'll sort it out.",
+    );
+  }
+}
+
+// /help — what the bot can do + the §9 credits disclosure. Reads the same catalog the
+// BotFather menu does (commands.ts), so the two never drift. Works for anyone, even
+// pre-link (no athlete row → reply without logging).
+async function handleHelpCommand(ctx: CommandContext<Context>): Promise<void> {
+  const db = supabaseAdmin();
+  const { data: athlete } = await db
+    .from('athletes')
+    .select('id')
+    .eq('telegram_chat_id', String(ctx.chat.id))
+    .maybeSingle();
+
+  const text = helpText();
+  if (athlete) {
+    await db
+      .from('messages')
+      .insert({ athlete_id: athlete.id, channel: 'tg', direction: 'in', body: '/help' });
+    await sendAndLog(athlete.id, ctx.chat.id, text);
+  } else {
+    await ctx.reply(text);
+  }
+}
+
 async function handleStravaStatusCommand(ctx: CommandContext<Context>): Promise<void> {
   const db = supabaseAdmin();
   const chatId = String(ctx.chat.id);
@@ -1055,6 +1186,9 @@ function getBot(): Bot {
     _bot.command('fresh_update', handleFreshUpdateCommand);
     _bot.command('adjust_plan', handleAdjustPlanCommand);
     _bot.command('edit_profile', handleEditProfileCommand);
+    _bot.command('balance', handleBalanceCommand);
+    _bot.command('buy', handleBuyCommand);
+    _bot.command('help', handleHelpCommand);
     _bot.command('cancel', async (ctx) => {
       const db = supabaseAdmin();
       const { data: athlete } = await db
@@ -1150,6 +1284,12 @@ function getBot(): Bot {
       // same post-onboarding routing as cal: above.
       if (data.startsWith('calpick:')) {
         await handleCalendarPick(ctx, athlete, data);
+        return;
+      }
+
+      // Top-up amount taps from /buy — post-onboarding, so ahead of the gates below.
+      if (data.startsWith('buy:')) {
+        await handleBuy(ctx, athlete, data);
         return;
       }
 
