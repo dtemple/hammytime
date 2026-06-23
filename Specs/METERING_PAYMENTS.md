@@ -14,7 +14,7 @@ This is the source-of-truth design for how a friend's usage is metered, how they
 |---|---|
 | Free credit | **$5, once per new friend at signup.** Permanent policy, not a launch promo. |
 | Credit basis | **Dollars, drawn down at 1.5× raw run cost.** Each run debits `cost_usd × 1.5`. |
-| Buffer transparency | **Disclosed.** Help text says credits aren't 1:1 with tokens — they cover our costs (fees, hosting), not profit. |
+| Buffer transparency | **Disclosed.** Help text frames credits as cost-recovery only: the majority goes to AI token costs, a small slice to Stripe fees + hosting, and the cost should fall as Daybreak gets more token-efficient. Exact copy: `CREDITS_DISCLOSURE` in `src/server/telegram/commands.ts` (reframed 2026-06-23 from the original buffer/not-profit wording). |
 | Payment rail | **Stripe Checkout via a link the bot sends.** Not Telegram Stars. (§3) |
 | Top-up amounts | **Presets $10 / $25 / $50, default $25.** |
 | Auto-reload | **Opt-in, off by default.** When on: balance **< $3 → charge $25** off-session. |
@@ -163,7 +163,7 @@ Commands, all registered in the bot command menu (alongside `/checkin`, `/edit_p
 - **`/buy`** → the preset-button flow (§6). Also the entry point to toggle auto-reload.
 - **`/pause`** / **`/resume`** → suspend and restore proactive daily check-ins (§10).
 
-Help-menu block should state plainly: credits cover model usage; they're not 1:1 with tokens because there are payment and hosting costs on top; the markup exists to cover costs, not to make money. One or two sentences, David's voice.
+Help-menu block (`/help`) states plainly that credits are cost-recovery only — the majority of a friend's credit goes to AI token costs, a small slice to Stripe fees + hosting, and the cost should come down over time as Daybreak gets more token-efficient. Two or three sentences, David's voice. Built copy lives in `CREDITS_DISCLOSURE` (`src/server/telegram/commands.ts`, shipped 2026-06-23 — reframed from the original buffer/not-profit wording, which over-emphasized the markup); edit it there, not here.
 
 Payment itself happens on Stripe's hosted page via the link — the only step that leaves Telegram. Everything else (checking balance, choosing an amount, getting confirmation, managing auto-reload) stays in the chat.
 
