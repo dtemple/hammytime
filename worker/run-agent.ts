@@ -159,10 +159,8 @@ export async function runAgent(
       // Fold the API detail (e.g. "API Error: 529 Overloaded") into runError —
       // not just the subtype — so isRetryableAgentError can see it and route a
       // transient overload back through the queue backoff.
-      const detail = result.errors?.length ? result.errors.join('; ') : '';
-      runError = detail
-        ? `agent run ended with ${result.subtype}: ${detail}`
-        : `agent run ended with ${result.subtype}`;
+      const detail = result.errors?.join('; ');
+      runError = `agent run ended with ${result.subtype}${detail ? `: ${detail}` : ''}`;
       // A budget stop isn't a crash — the folder holds partial-but-valid work
       // worth keeping. Flag it so persistence below still runs.
       budgetStopped = result.subtype === 'error_max_budget_usd';
@@ -175,13 +173,18 @@ export async function runAgent(
     console.error(`[run-agent] athlete ${athleteId} run failed:`, runError);
   }
 
+  // A transient overload (529 / 429 / 5xx) rides the queue backoff; any other
+  // error is terminal. Classified once and reused by the retry divert and the
+  // fallback-message choice below.
+  const retryable = runError ? isRetryableAgentError(runError) : false;
+
   try {
     // Transient Anthropic overload (or rate limit / 5xx) with attempts left:
     // tell the athlete once (first attempt only), then throw so the job_queue
     // backoff retries instead of dead-ending on a fallback. Skips persist /
     // billing / send below; the finally still cleans up the folder. On the final
     // attempt this branch is skipped and OVERLOADED_TERMINAL goes out instead.
-    if (runError && isRetryableAgentError(runError) && !isFinalAttempt) {
+    if (runError && retryable && !isFinalAttempt) {
       if (isFirstAttempt) {
         await sendReply(athleteId, OVERLOADED_RETRYING).catch((e) =>
           console.error(`[run-agent] overload notice send failed for ${athleteId}:`, e),
@@ -293,7 +296,7 @@ export async function runAgent(
     // for a queue retry above) — send the "still overloaded, try in 15" notice
     // rather than the generic snag.
     let finalReply = runError
-      ? isRetryableAgentError(runError)
+      ? retryable
         ? OVERLOADED_TERMINAL
         : SOFT_FALLBACK
       : stripCoachPreamble(replyText).trim() || SOFT_FALLBACK;
