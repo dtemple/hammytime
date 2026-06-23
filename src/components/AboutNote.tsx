@@ -74,12 +74,12 @@ export default function AboutNote() {
             <div className="ht-modal-body">
               <div className="ht-modal-note">
                 <p>
-                  Thanks to some very supportive and patient friends, I&rsquo;ve
-                  realized over the past few years that most running injuries can be
-                  fixed with strength training, stretching and tweaks to my calendar.
+                  Thanks to some supportive friends, I&rsquo;ve
+                  realized over the years that most running injuries can be
+                  fixed with strength training, stretching, calendar tweaking and patience.
                 </p>
                 <p>
-                  And when AI has all the right context, it can do a pretty impressive
+                  And when AI has all the right context in one place, it can do a pretty impressive
                   job of helping work through all of that.
                 </p>
                 <p>So I built a bot to do exactly that&hellip; and the result is Daybreak.</p>

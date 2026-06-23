@@ -36,7 +36,7 @@ export default function Home() {
             <span className="ht-h1-accent">Your race goals. Your schedule. Your injuries. </span>Daybreak makes it work.
           </h1>
           <p className="ht-lede">
-            Daybreak is a training companion for runners with busy schedules or nagging injuries. It reads your Strava and helps you make the right call for today — adapting to injuries, soreness or calendar conflicts.
+            Daybreak is a race training companion for runners with busy schedules or nagging injuries. It reads your Strava and helps you make the right call for today — adapting to injuries, soreness or calendar conflicts.
           </p>
           <div className="ht-cta-row">
             <Link href="/signup" className="ht-btn ht-btn-primary">
