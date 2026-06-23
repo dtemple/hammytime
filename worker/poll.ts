@@ -29,9 +29,14 @@ export async function dispatch(job: Job): Promise<void> {
   const athleteId = String(payload.athlete_id ?? '');
   if (!athleteId) throw new Error(`dispatch: job ${job.id} has no athlete_id in payload`);
 
+  // 1-based attempt for this claim (claim_next_job increments before returning).
+  // Threaded into the agent run so a transient-overload failure can ride the
+  // queue backoff instead of dead-ending on a fallback.
+  const attempt = job.attempts;
+
   switch (job.kind) {
     case 'daily_checkin':
-      await runDailyCheckin(athleteId);
+      await runDailyCheckin(athleteId, attempt);
       return;
     case 'tg_message':
       // A post_activity-flagged tg_message is a proactive run off a just-logged
@@ -41,9 +46,10 @@ export async function dispatch(job: Job): Promise<void> {
         await runPostActivity(
           athleteId,
           payload.strava_activity_id != null ? Number(payload.strava_activity_id) : undefined,
+          attempt,
         );
       } else {
-        await runTgMessage(athleteId, String(payload.text ?? ''));
+        await runTgMessage(athleteId, String(payload.text ?? ''), attempt);
       }
       return;
     case 'calendar_sync':

@@ -16,7 +16,7 @@ import { sendDavidAlert } from '../send';
 // skip if wellnessLogContains(athleteId, localDate) is true (already logged
 // today), else set checkin_state to awaiting_readiness and send READINESS_PROMPT
 // via send.ts. wellnessLogContains is kept in checkin/wellness-log.ts for that.
-export async function runDailyCheckin(athleteId: string): Promise<void> {
+export async function runDailyCheckin(athleteId: string, attempt?: number): Promise<void> {
   // GF-W1: keep an open-ended plan rolling. Runs BEFORE the agent's hydrate so
   // the folder picks up the extended plan. A failure must not block the daily
   // message — there are ~2 weeks of plan left to fix it — but it must be loud,
@@ -34,5 +34,6 @@ export async function runDailyCheckin(athleteId: string): Promise<void> {
 
   await runAgent(athleteId, 'daily_checkin', undefined, undefined, {
     planExtension: extension ?? undefined,
+    attempt,
   });
 }

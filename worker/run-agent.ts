@@ -6,7 +6,8 @@
 
 import { query, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { supabaseAdmin } from '@/lib/db';
-import { COACH_MODEL, MAX_BUDGET_USD, MAX_TURNS } from './config';
+import { COACH_MODEL, MAX_ATTEMPTS, MAX_BUDGET_USD, MAX_TURNS } from './config';
+import { isRetryableAgentError } from './retryable';
 import { access } from 'fs/promises';
 import path from 'path';
 import { cleanup, hydrate, syncBack } from './folder';
@@ -38,6 +39,12 @@ export type RunOpts = {
   // Set by daily-checkin when the plan was auto-extended just before this run
   // (GF-W1) — rides into the system prompt so the coach announces the block.
   planExtension?: PlanExtensionInfo;
+  // The job_queue attempt number for this run (1-based; set by the dispatcher).
+  // Drives the transient-overload retry: a retryable failure with attempts left
+  // throws so the job rides the queue backoff instead of shipping a fallback.
+  // Absent (direct callers / tests) → treated as the final attempt, so a run
+  // never loops without a queue behind it.
+  attempt?: number;
 };
 
 const SOURCE_TO_KIND: Record<RunSource, RunKind> = {
@@ -51,6 +58,22 @@ const SOURCE_TO_KIND: Record<RunSource, RunKind> = {
 
 const SOFT_FALLBACK =
   "Hit a snag pulling your update together — I'll sort it out and follow up. Nothing on your end to do.";
+
+// Sent on the first attempt when the run failed on a transient Anthropic
+// overload (or rate limit / 5xx). The job then rides the queue backoff and
+// retries over the next few minutes — this just tells the athlete why their
+// answer is late so the silence isn't mistaken for a dropped message.
+const OVERLOADED_RETRYING =
+  "Anthropic's servers are overloaded right now, so this didn't go through. I'll keep retrying over the next few minutes — nothing for you to do.";
+
+// Sent once the retries are exhausted and the overload still hasn't cleared.
+const OVERLOADED_TERMINAL =
+  "Anthropic's servers are still overloaded and the retries didn't get through. These spells usually clear quickly — give it about 15 minutes and message me again.";
+
+// Thrown to route a transient failure back through the job_queue backoff
+// (worker/index.ts → failJob). The message carries the underlying error so it
+// lands in job_queue.last_error.
+class RetryableAgentError extends Error {}
 
 // Appended to the coach's reply when a plan edit it described to the athlete
 // couldn't be saved (failed validation, then failed a repair pass). Without this
@@ -67,6 +90,12 @@ export async function runAgent(
   opts?: RunOpts,
 ): Promise<void> {
   const startedAt = new Date().toISOString();
+  // Absent attempt (direct callers / tests) → treat as the final attempt: a
+  // retryable failure then ships the terminal notice rather than throwing into
+  // a queue that isn't there.
+  const attempt = opts?.attempt ?? MAX_ATTEMPTS;
+  const isFirstAttempt = attempt <= 1;
+  const isFinalAttempt = attempt >= MAX_ATTEMPTS;
   const { timezone, name } = await loadAthleteMeta(athleteId);
   const folder = await hydrate(athleteId);
 
@@ -127,7 +156,13 @@ export async function runAgent(
       // The SDK can return an error result (e.g. an API 429) instead of
       // throwing. Treat it like a thrown failure so we record the error and
       // fall back to SOFT_FALLBACK — never let a raw API error reach Telegram.
-      runError = `agent run ended with ${result.subtype}`;
+      // Fold the API detail (e.g. "API Error: 529 Overloaded") into runError —
+      // not just the subtype — so isRetryableAgentError can see it and route a
+      // transient overload back through the queue backoff.
+      const detail = result.errors?.length ? result.errors.join('; ') : '';
+      runError = detail
+        ? `agent run ended with ${result.subtype}: ${detail}`
+        : `agent run ended with ${result.subtype}`;
       // A budget stop isn't a crash — the folder holds partial-but-valid work
       // worth keeping. Flag it so persistence below still runs.
       budgetStopped = result.subtype === 'error_max_budget_usd';
@@ -141,6 +176,23 @@ export async function runAgent(
   }
 
   try {
+    // Transient Anthropic overload (or rate limit / 5xx) with attempts left:
+    // tell the athlete once (first attempt only), then throw so the job_queue
+    // backoff retries instead of dead-ending on a fallback. Skips persist /
+    // billing / send below; the finally still cleans up the folder. On the final
+    // attempt this branch is skipped and OVERLOADED_TERMINAL goes out instead.
+    if (runError && isRetryableAgentError(runError) && !isFinalAttempt) {
+      if (isFirstAttempt) {
+        await sendReply(athleteId, OVERLOADED_RETRYING).catch((e) =>
+          console.error(`[run-agent] overload notice send failed for ${athleteId}:`, e),
+        );
+      }
+      console.warn(
+        `[run-agent] athlete ${athleteId} retryable failure (attempt ${attempt}/${MAX_ATTEMPTS}) — throwing for queue retry: ${runError}`,
+      );
+      throw new RetryableAgentError(runError);
+    }
+
     // Persist file edits on a clean run OR a budget stop — both leave the folder
     // usable. Only a crash/other error skips this (folder may be half-written).
     // persistPlanEdit additionally schema-gates, so a half-written plan is dropped.
@@ -221,7 +273,13 @@ export async function runAgent(
     // debit cost_usd × markup, idempotent on the run, skipped if comped.
     // Best-effort — a debit failure never blocks delivery. Needs a persisted run
     // to key idempotency on, so skip if persistRun returned null.
-    if (runId) {
+    //
+    // Successful runs only: a run that errored (final-attempt overload, budget
+    // stop, crash) shipped a fallback, not a real answer — the athlete doesn't
+    // pay for it even if the failed attempt burned tokens. Earlier retryable
+    // attempts threw for a queue retry above, so they were never persisted or
+    // charged in the first place.
+    if (runId && !runError) {
       await chargeRun(athleteId, runId, result?.total_cost_usd);
     }
 
@@ -231,8 +289,13 @@ export async function runAgent(
     // model sometimes prefixes despite the prompt forbidding it (reply-sanitize.ts).
     // If stripping empties the text (model produced only a fenced preamble), the
     // fallback below catches it.
+    // A retryable error reaching here is the final attempt (earlier ones threw
+    // for a queue retry above) — send the "still overloaded, try in 15" notice
+    // rather than the generic snag.
     let finalReply = runError
-      ? SOFT_FALLBACK
+      ? isRetryableAgentError(runError)
+        ? OVERLOADED_TERMINAL
+        : SOFT_FALLBACK
       : stripCoachPreamble(replyText).trim() || SOFT_FALLBACK;
     // A plan edit the coach described to the athlete couldn't be saved — append a
     // plain notice so they don't trust a calendar change that didn't land. Only on

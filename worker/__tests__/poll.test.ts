@@ -91,14 +91,14 @@ describe('claimJob', () => {
 describe('dispatch', () => {
   it('routes daily_checkin to the daily handler', async () => {
     await dispatch(makeJob({ kind: 'daily_checkin', payload: { athlete_id: 'ath-9' } }));
-    expect(runDailyCheckin).toHaveBeenCalledWith('ath-9');
+    expect(runDailyCheckin).toHaveBeenCalledWith('ath-9', 1); // attempt threaded through
   });
 
   it('routes a plain tg_message with its text', async () => {
     await dispatch(
       makeJob({ kind: 'tg_message', payload: { athlete_id: 'ath-9', text: 'how was my run?' } }),
     );
-    expect(runTgMessage).toHaveBeenCalledWith('ath-9', 'how was my run?');
+    expect(runTgMessage).toHaveBeenCalledWith('ath-9', 'how was my run?', 1);
     expect(runPostActivity).not.toHaveBeenCalled();
   });
 
@@ -114,7 +114,7 @@ describe('dispatch', () => {
         },
       }),
     );
-    expect(runPostActivity).toHaveBeenCalledWith('ath-9', 1360128428);
+    expect(runPostActivity).toHaveBeenCalledWith('ath-9', 1360128428, 1);
     expect(runTgMessage).not.toHaveBeenCalled();
   });
 
@@ -125,7 +125,7 @@ describe('dispatch', () => {
         payload: { athlete_id: 'ath-9', trigger: 'post_activity' },
       }),
     );
-    expect(runPostActivity).toHaveBeenCalledWith('ath-9', undefined);
+    expect(runPostActivity).toHaveBeenCalledWith('ath-9', undefined, 1);
   });
 
   it('routes calendar_sync to the calendar-sync handler', async () => {

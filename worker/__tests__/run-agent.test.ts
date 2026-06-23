@@ -15,6 +15,7 @@ vi.mock('../send', () => ({
   resolveStaleProposalMessage: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('../persist', () => ({ persistRun: vi.fn().mockResolvedValue('run-1') }));
+vi.mock('../billing', () => ({ chargeRun: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../plan-version', () => ({ persistPlanEdit: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../system-prompt', () => ({
   renderSystemPrompt: vi.fn().mockResolvedValue('SYSTEM PROMPT'),
@@ -28,6 +29,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import { hydrate, syncBack, cleanup } from '../folder';
 import { sendReply, sendDavidAlert, sendCalendarConfirm, resolveStaleProposalMessage } from '../send';
 import { persistRun } from '../persist';
+import { chargeRun } from '../billing';
 import { persistPlanEdit } from '../plan-version';
 import { buildPrompt } from '../system-prompt';
 import { supabaseAdmin } from '@/lib/db';
@@ -59,6 +61,17 @@ function successResult(text: string) {
     result: text,
     total_cost_usd: 0.04,
     usage: { input_tokens: 1200, output_tokens: 300 },
+  };
+}
+// A transient Anthropic overload — the SDK returns it as an error result whose
+// `errors` carry the API text, not a throw.
+function overloadedResult() {
+  return {
+    type: 'result',
+    subtype: 'error',
+    errors: ['Claude Code returned an error result: API Error: 529 Overloaded.'],
+    total_cost_usd: 0,
+    usage: { input_tokens: 100, output_tokens: 0 },
   };
 }
 // SDKResultError has no `result` field — the budget stop carries no clean text.
@@ -138,6 +151,11 @@ describe('runAgent — happy path', () => {
     ]);
   });
 
+  it('charges the run on a clean success', async () => {
+    await runAgent(ATHLETE, 'daily_checkin');
+    expect(chargeRun).toHaveBeenCalledWith(ATHLETE, 'run-1', 0.04);
+  });
+
   it('syncs back, sends the result text, and cleans up', async () => {
     await runAgent(ATHLETE, 'daily_checkin');
     expect(syncBack).toHaveBeenCalledOnce();
@@ -170,6 +188,48 @@ describe('runAgent — SDK failure', () => {
   });
 });
 
+describe('runAgent — transient overload rides the queue retry', () => {
+  beforeEach(() => {
+    (query as AnyMock).mockReturnValue(stream([overloadedResult()]));
+  });
+
+  it('first attempt: tells the athlete it is retrying, throws for the queue, persists nothing, still cleans up', async () => {
+    await expect(
+      runAgent(ATHLETE, 'tg_message', 'how did I do?', undefined, { attempt: 1 }),
+    ).rejects.toThrow(/Overloaded/);
+
+    expect((sendReply as AnyMock).mock.calls[0][1]).toMatch(/overloaded right now/i);
+    expect(persistRun).not.toHaveBeenCalled();
+    expect(syncBack).not.toHaveBeenCalled();
+    expect(cleanup).toHaveBeenCalledWith(DIR);
+  });
+
+  it('middle attempt: throws for the queue without re-sending the overload notice', async () => {
+    await expect(
+      runAgent(ATHLETE, 'tg_message', 'how did I do?', undefined, { attempt: 3 }),
+    ).rejects.toThrow(/Overloaded/);
+
+    expect(sendReply).not.toHaveBeenCalled();
+    expect(persistRun).not.toHaveBeenCalled();
+    expect(cleanup).toHaveBeenCalledWith(DIR);
+  });
+
+  it('final attempt: sends the try-again-in-15 notice, persists the error, does not throw', async () => {
+    await runAgent(ATHLETE, 'daily_checkin', undefined, undefined, { attempt: 5 });
+
+    const sent = (sendReply as AnyMock).mock.calls[0];
+    expect(sent[1]).toMatch(/still overloaded/i);
+    expect(sent[1]).toMatch(/15 minutes/);
+    expect((persistRun as AnyMock).mock.calls[0][0].error).toMatch(/529 Overloaded/);
+    expect(cleanup).toHaveBeenCalledWith(DIR);
+  });
+
+  it('final attempt: does not charge — the athlete got a fallback, not an answer', async () => {
+    await runAgent(ATHLETE, 'daily_checkin', undefined, undefined, { attempt: 5 });
+    expect(chargeRun).not.toHaveBeenCalled();
+  });
+});
+
 describe('runAgent — budget stop is non-destructive', () => {
   beforeEach(() => {
     (query as AnyMock).mockReturnValue(stream([assistantText('partial'), budgetResult()]));
@@ -191,6 +251,11 @@ describe('runAgent — budget stop is non-destructive', () => {
   it('records the budget-stop subtype as the run error', async () => {
     await runAgent(ATHLETE, 'daily_checkin');
     expect((persistRun as AnyMock).mock.calls[0][0].error).toMatch(/error_max_budget_usd/);
+  });
+
+  it('does not charge a budget-stopped run — it shipped a fallback, not an answer', async () => {
+    await runAgent(ATHLETE, 'daily_checkin');
+    expect(chargeRun).not.toHaveBeenCalled();
   });
 });
 
