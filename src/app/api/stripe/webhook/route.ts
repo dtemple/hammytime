@@ -22,6 +22,12 @@ import { storeStripeCustomerId } from '@/server/billing/checkout';
  * (the RPCs are idempotent, so a retry can't double-apply).
  */
 
+// Stripe "expandable" fields arrive as either the id string or the nested object
+// (we never expand, so it's the id). Collapse both to the id.
+function idOf(field: string | { id: string } | null | undefined): string | null {
+  return typeof field === 'string' ? field : (field?.id ?? null);
+}
+
 // Read the raw body for signature verification. App Router hands us the
 // unparsed request, so req.text() is the exact bytes Stripe signed.
 export async function POST(req: NextRequest) {
@@ -69,11 +75,12 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session): Promis
   // Only credit a session that actually paid.
   if (session.payment_status !== 'paid') return;
 
+  // client_reference_id ties the session to the athlete. NB: this is
+  // Checkout-Session-specific — step 6's off-session auto-reload PaymentIntents
+  // have no Checkout Session, so their completion will key on
+  // payment_intent_data.metadata.athlete_id instead (set in createTopupSession).
   const athleteId = session.client_reference_id;
-  const paymentIntent =
-    typeof session.payment_intent === 'string'
-      ? session.payment_intent
-      : (session.payment_intent?.id ?? null);
+  const paymentIntent = idOf(session.payment_intent);
   const grossCents = session.amount_total;
 
   if (!athleteId || !paymentIntent || grossCents == null) {
@@ -86,8 +93,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session): Promis
 
   // Backstop: persist the customer id if it isn't stored yet (we normally store
   // it when creating the session).
-  const customerId =
-    typeof session.customer === 'string' ? session.customer : (session.customer?.id ?? null);
+  const customerId = idOf(session.customer);
   if (customerId) await storeStripeCustomerId(athleteId, customerId);
 
   const credited = await recordStripeTopup(athleteId, paymentIntent, grossCents);
@@ -97,10 +103,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session): Promis
 }
 
 async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
-  const paymentIntent =
-    typeof charge.payment_intent === 'string'
-      ? charge.payment_intent
-      : (charge.payment_intent?.id ?? null);
+  const paymentIntent = idOf(charge.payment_intent);
   if (!paymentIntent) return;
 
   // amount_refunded is the cumulative cents refunded on this charge. v1 mirrors

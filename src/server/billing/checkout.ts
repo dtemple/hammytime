@@ -7,14 +7,9 @@
 // a plain https link; the webhook (route.ts) credits the balance on completion.
 
 import { supabaseAdmin } from '@/lib/db';
+import { appBaseUrl } from '@/lib/calendar-token';
 import { stripe } from './stripe';
 import { dollarsLabel, isPresetCents } from './pricing';
-
-/** Base URL for the success/cancel redirects. apex 307s → www, which the browser
- *  follows fine on a redirect. */
-function appUrl(): string {
-  return process.env.NEXT_PUBLIC_APP_URL ?? 'https://www.daybreak.run';
-}
 
 /**
  * Store the athlete's Stripe customer id on athlete_credits (idempotent upsert).
@@ -98,8 +93,8 @@ export async function createTopupSession(
     // card-saving is step 6 (auto-reload).
     metadata: { athlete_id: athleteId, kind: 'topup' },
     payment_intent_data: { metadata: { athlete_id: athleteId, kind: 'topup' } },
-    success_url: `${appUrl()}/?checkout=success`,
-    cancel_url: `${appUrl()}/?checkout=cancelled`,
+    success_url: `${appBaseUrl()}/?checkout=success`,
+    cancel_url: `${appBaseUrl()}/?checkout=cancelled`,
   });
 
   if (!session.url) throw new Error('Stripe returned a session with no url');
