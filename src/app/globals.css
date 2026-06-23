@@ -166,7 +166,16 @@ body {
   display: flex;
   gap: 12px;
   align-items: center;
-  margin-bottom: 64px;
+  margin-bottom: 16px;
+}
+
+.ht-hero-note {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  margin: 0 0 64px;
+  max-width: 52ch;
+  text-wrap: pretty;
 }
 
 .ht-btn {
@@ -358,14 +367,161 @@ body {
   text-wrap: pretty;
 }
 
-.ht-does-manifesto {
+/* founder line — opens the About modal */
+.ht-founder-section {
+  margin-bottom: 56px;
+  opacity: 0;
+  animation: ht-fadeUp 0.5s ease-out 0.6s forwards;
+}
+
+.ht-founder {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
   font-size: 14px;
-  color: var(--ink);
-  margin: 0;
-  padding-top: 24px;
-  border-top: 1px solid var(--hair);
+  line-height: 1.45;
+  color: var(--ink-2);
   max-width: 52ch;
-  text-wrap: pretty;
+}
+
+.ht-founder-avatar {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--accent-soft);
+}
+.ht-founder-avatar img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.ht-founder-link {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.ht-founder:hover .ht-founder-link {
+  text-decoration-thickness: 2px;
+}
+
+/* About modal */
+.ht-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: rgba(26, 24, 21, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 56px 24px;
+  overflow: auto;
+  animation: ht-fadeUp 0.2s ease-out;
+}
+
+.ht-modal {
+  position: relative;
+  width: 100%;
+  max-width: 600px;
+  background: var(--bg);
+  border-radius: 20px;
+  box-shadow: 0 30px 80px rgba(26, 24, 21, 0.35);
+  overflow: hidden;
+  animation: ht-fadeUp 0.3s ease-out;
+}
+
+.ht-modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 2;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--ink-2);
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ht-modal-close:hover {
+  background: #fff;
+  color: var(--ink);
+}
+
+.ht-modal-photo {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: var(--accent-soft);
+}
+
+.ht-modal-body {
+  padding: 52px 40px 36px;
+}
+
+.ht-modal-note {
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--ink);
+}
+.ht-modal-note p {
+  margin: 0;
+}
+.ht-modal-note p + p {
+  margin-top: 18px;
+}
+
+.ht-modal-sign {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: -0.01em;
+  margin-top: 26px;
+}
+
+.ht-modal-disclaimer {
+  margin-top: 26px;
+  background: var(--bubble);
+  border: 1px solid var(--hair);
+  border-radius: 14px;
+  padding: 18px 20px;
+}
+.ht-modal-disclaimer-label {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 8px;
+}
+.ht-modal-disclaimer p {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+
+@media (max-width: 520px) {
+  .ht-modal-overlay {
+    padding: 16px;
+  }
+  .ht-modal-body {
+    padding: 48px 22px 26px;
+  }
 }
 
 .ht-faq {

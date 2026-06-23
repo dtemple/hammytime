@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
 import CheckinBubble from '@/components/CheckinBubble';
+import AboutNote from '@/components/AboutNote';
 
 export const metadata: Metadata = {
   title: 'Daybreak',
@@ -32,10 +33,10 @@ export default function Home() {
         <section className="ht-hero">
           <div className="ht-eyebrow"></div>
           <h1 className="ht-h1">
-            <span className="ht-h1-accent">Your schedule. Your body. Your goals. </span>Daybreak makes it work.
+            <span className="ht-h1-accent">Your race goals. Your schedule. Your injuries. </span>Daybreak makes it work.
           </h1>
           <p className="ht-lede">
-            Daybreak is a daily running companion that helps you avoid injuries and achieve your goals. It uses your Strava data, your injury history and your training goals to create a personalized training calendar that updates to your needs. Simply tell it what you want.
+            Daybreak is a training companion for runners with busy schedules or nagging injuries. It reads your Strava and helps you make the right call for today — adapting to injuries, soreness or calendar conflicts.
           </p>
           <div className="ht-cta-row">
             <Link href="/signup" className="ht-btn ht-btn-primary">
@@ -45,6 +46,9 @@ export default function Home() {
               What it does
             </Link>
           </div>
+          <p className="ht-hero-note">
+            No monthly subscriptions or premium tier. Pay only for the AI tokens you use.
+          </p>
         </section>
 
         <CheckinBubble />
@@ -55,7 +59,7 @@ export default function Home() {
             <div className="ht-does-row">
               <dt>plan</dt>
               <dd>
-                Creates a plan that fits your schedule and goals.
+                Creates a training plan that fits your schedule and goals.
               </dd>
             </div>
             <div className="ht-does-row">
@@ -79,9 +83,10 @@ export default function Home() {
               </dd>
             </div>
           </dl>
-          <p className="ht-does-manifesto">
-            No leaderboards. No ads. No premium tier. Free to start, then pay for just the LLM tokens you use.
-          </p>
+        </section>
+
+        <section className="ht-founder-section">
+          <AboutNote />
         </section>
       </main>
 
