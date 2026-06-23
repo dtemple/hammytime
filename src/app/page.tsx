@@ -47,7 +47,7 @@ export default function Home() {
             </Link>
           </div>
           <p className="ht-hero-note">
-            No monthly subscriptions or premium tier. Pay only for the AI tokens you use.
+            No monthly subscriptions or premium tier. Free to start, then pay only for the AI tokens you use.
           </p>
         </section>
 
