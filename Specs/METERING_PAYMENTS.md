@@ -122,7 +122,7 @@ Edge — overshoot into negative is allowed: a single expensive run can push a t
    - `payment_intent_data.setup_future_usage = 'off_session'` **only if** the friend is enabling auto-reload in this flow — this is how we save the card without a separate SetupIntent.
    - `metadata: { athlete_id, kind: 'topup' }`.
 3. Bot sends the `session.url` as a plain link. Friend pays on Stripe's page.
-4. **Stripe webhook** (`checkout.session.completed`) → verify signature (raw body) → `client_reference_id` is the `athlete_id` → credit the **net or gross?** Decision: **credit the gross amount the friend paid** ($25 → $25 of balance, read from `session.amount_total`). The Stripe fee is absorbed by the buffer, not deducted from their balance — simpler and friendlier. Write `kind=topup` ledger row + bump balance (and clear `low_balance_warned_at`, §8), idempotent on the `payment_intent`.
+4. **Stripe webhook** (`checkout.session.completed`) → verify signature (raw body) → `client_reference_id` is the `athlete_id` → credit the **net or gross?** Decision: **credit the gross amount the friend paid** ($25 → $25 of balance, read from `session.amount_total`). The Stripe fee is absorbed by the buffer, not deducted from their balance — simpler and friendlier. Write `kind=topup` ledger row + bump balance (and clear `low_balance_warned_at`, §8), idempotent on `(payment_intent, kind)` (per-kind, not the PI alone — see the step-3 note below).
 5. Bot sends a confirmation to Telegram ("$25 added — you're at $X, about N weeks at your pace.").
 
 Use **dynamic Checkout Sessions, not pre-made Payment Links** — we need per-athlete attribution, variable amounts, and conditional card-saving, none of which static links handle cleanly.
@@ -144,7 +144,9 @@ Webhook idempotency: a replayed event must not double-credit. The DB guard is a 
 
 ## 8. Warnings & burn-rate
 
-**Burn rate** = trailing-14-day billed cost ÷ 14, read from `athlete_cost_rollup` (×1.5 to convert raw→billed). New athletes with <3 days of history use a default of $0.80/day (the measured friends-only average, §2 — keep this constant in one place and update it when the average moves). **Runway days** = `balance / billed_per_day`.
+**Burn rate** = recent billed cost per day, read from `athlete_cost_rollup` (×1.5 to convert raw→billed). New athletes with <3 days of history use a default of $0.80/day (the measured friends-only average, §2 — keep this constant in one place and update it when the average moves). **Runway days** = `balance / billed_per_day`.
+
+> **Built 2026-06-23 (step 4) — `src/server/billing/burn-rate.ts`.** The helper uses the rollup's **7d window** (`cost_usd_7d / 7`), not the 14-day window this section originally specified: `athlete_cost_rollup` only exposes 7d/28d, and adding a 14d column is a migration the step didn't warrant. The 7d window is more recent-weighted, which is fine for a runway estimate. The `$0.80/day` default lives as `DEFAULT_BILLED_PER_DAY_CENTS = 80` in that file (the one place, per §2). `runwayLabel()` renders "about N days / about a week / about N weeks." If a 14d basis is ever wanted, add `cost_usd_14d`/`runs_14d` to the rollup view and switch the helper.
 
 - **Heads-up (~1 week left):** when projected runway crosses ~7 days, send one message: "About a week of credit left (~$X). Top up when you like — /buy." Set `low_balance_warned_at` to dedupe; clear it on any top-up so the next cycle warns again.
 - **Final (at $0):** sent by the gate when a run is blocked. "You're out of credit, so I've paused. Add credit to pick back up — /buy." Includes the preset buttons.
