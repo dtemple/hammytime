@@ -42,8 +42,9 @@ export function menuCommands(): BotCommand[] {
 // The §9 disclosure: credits aren't 1:1 with tokens. Lives with the command list so
 // /help renders one block. David's voice — short, no sell.
 export const CREDITS_DISCLOSURE =
-  'Credits are real dollars, not token counts. A slice of what you load goes to Stripe ' +
-  'fees and hosting on top of the model usage — enough to cover costs, nothing more.';
+  'Credits are used to cover Daybreak costs, nothing more. The majority of your credits ' +
+  'go to AI token costs, and a small slice goes to Stripe fees and hosting. The cost ' +
+  'should come down over time as Daybreak becomes more token efficient.';
 
 /** The full /help body: the menu commands as a list, then the credits note. */
 export function helpText(): string {
