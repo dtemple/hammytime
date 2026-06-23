@@ -671,6 +671,30 @@ body {
   }
 }
 
+/* Large screens: let the hero fill more width and scale its type up,
+   while the chat + "what it does" stay at a focused reading width. */
+@media (min-width: 900px) {
+  .ht-main {
+    max-width: clamp(640px, 72vw, 1040px);
+  }
+  .ht-h1 {
+    font-size: clamp(38px, 4vw, 60px);
+  }
+  .ht-lede {
+    font-size: clamp(17px, 1.5vw, 21px);
+    max-width: 62ch;
+  }
+  .ht-hero-note {
+    font-size: clamp(13.5px, 1vw, 15px);
+    max-width: 62ch;
+  }
+  .ht-checkin,
+  .ht-does,
+  .ht-founder-section {
+    max-width: 640px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
