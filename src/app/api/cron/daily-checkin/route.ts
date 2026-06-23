@@ -12,6 +12,11 @@ import {
 } from '@/server/telegram/pause';
 import { sweepExpiredProposals } from '@/server/telegram/proposals';
 
+// The hour, in each athlete's own timezone, at which their daily run fires. The
+// cron ticks hourly; an athlete is due only on the tick where it's this hour
+// where they live, so everyone gets 6am local rather than 6am Pacific for all.
+const CHECKIN_HOUR = 6;
+
 function dryRunRequested(req: Request): boolean {
   const param = new URL(req.url).searchParams.get('dryRun')?.toLowerCase() ?? '';
   const env = (process.env.AUTO_PAUSE_DRY_RUN ?? '').toLowerCase();
@@ -76,6 +81,20 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: true, skipped: 'no_onboarded_athlete', expiredProposalsCleared });
     }
 
+    // Per-athlete-local scheduling: the cron fires hourly, but an athlete is due
+    // only on the tick where it's CHECKIN_HOUR in their own timezone. Gating both
+    // the enqueue and the inactivity scan on this means each athlete is evaluated
+    // exactly once per local day, at their 6am — and 23 of every 24 ticks bail
+    // out here before touching the messages table.
+    const due = onboarded.filter((a) => {
+      const { time } = nowInTimezone(a.timezone);
+      return Number(time.slice(0, 2)) === CHECKIN_HOUR;
+    });
+
+    if (due.length === 0) {
+      return NextResponse.json({ ok: true, skipped: 'no_athlete_due_this_hour', expiredProposalsCleared });
+    }
+
     // Inactivity scan (§10.5): one bounded query for the athletes with any
     // inbound message inside the window. An onboarded athlete who isn't in this
     // set and was created before the window opened has gone silent — auto-pause
@@ -97,7 +116,7 @@ export async function GET(req: Request) {
     // not-yet-enqueued athletes (their keys are still free).
     let enqueued = 0;
     const paused: string[] = [];
-    for (const athlete of onboarded) {
+    for (const athlete of due) {
       // TODO(§5 gate): once the $0 balance gate ships, skip the inactivity scan
       // for athletes already blocked at $0 — they've stopped running and got the
       // §8 final message; a second "paused" note would just be noise.

@@ -22,6 +22,7 @@ vi.mock('@/server/telegram/pause', async (importActual) => {
 import { GET } from './route';
 import { supabaseAdmin } from '@/lib/db';
 import { enqueueJob } from '@/server/jobs/enqueue';
+import { nowInTimezone } from '@/server/telegram/checkin/dispatcher';
 import { sendAutoPauseNotice } from '@/server/telegram/pause';
 
 const SECRET = 'test-secret-12345';
@@ -92,6 +93,10 @@ describe('GET /api/cron/daily-checkin', () => {
     vi.clearAllMocks();
     process.env.CRON_SECRET = SECRET;
     delete process.env.AUTO_PAUSE_DRY_RUN;
+    // clearAllMocks wipes call history but not implementations; reset the clock
+    // mock to the default 6am-local each test so a per-test override (the
+    // local-hour gate cases below) can't leak into the next test.
+    vi.mocked(nowInTimezone).mockReturnValue({ date: '2026-05-27', time: '06:00' });
   });
 
   it('rejects when Authorization header is missing', async () => {
@@ -235,5 +240,47 @@ describe('GET /api/cron/daily-checkin', () => {
     expect(await res.json()).toEqual({ ok: true, enqueued: 0, paused: ['silent'], dryRun: true, expiredProposalsCleared: 0 });
     expect(update).not.toHaveBeenCalled();
     expect(vi.mocked(sendAutoPauseNotice)).not.toHaveBeenCalled();
+  });
+
+  it('skips when it is not yet local 6am for any athlete', async () => {
+    vi.mocked(nowInTimezone).mockReturnValue({ date: '2026-05-27', time: '09:00' });
+    mockAthletes([makeAthlete()]);
+    const res = await GET(authedReq());
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      skipped: 'no_athlete_due_this_hour',
+      expiredProposalsCleared: 0,
+    });
+    expect(vi.mocked(enqueueJob)).not.toHaveBeenCalled();
+  });
+
+  it('enqueues only the athletes for whom it is local 6am this hour', async () => {
+    // Same UTC tick, two zones: 6am where the Eastern athlete lives, 3am where
+    // the Pacific one does. Only the Eastern athlete is due.
+    vi.mocked(nowInTimezone).mockImplementation((tz) =>
+      tz === 'America/New_York'
+        ? { date: '2026-05-27', time: '06:00' }
+        : { date: '2026-05-27', time: '03:00' },
+    );
+    mockAthletes([
+      makeAthlete({ id: 'eastern-due', timezone: 'America/New_York' }),
+      makeAthlete({ id: 'pacific-early', timezone: 'America/Los_Angeles' }),
+    ]);
+    const res = await GET(authedReq());
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      enqueued: 1,
+      paused: [],
+      dryRun: false,
+      expiredProposalsCleared: 0,
+    });
+    expect(vi.mocked(enqueueJob)).toHaveBeenCalledOnce();
+    expect(vi.mocked(enqueueJob)).toHaveBeenCalledWith(
+      'daily_checkin',
+      'daily-eastern-due-2026-05-27',
+      { athlete_id: 'eastern-due' },
+    );
   });
 });
