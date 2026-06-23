@@ -122,12 +122,14 @@ Edge — overshoot into negative is allowed: a single expensive run can push a t
    - `payment_intent_data.setup_future_usage = 'off_session'` **only if** the friend is enabling auto-reload in this flow — this is how we save the card without a separate SetupIntent.
    - `metadata: { athlete_id, kind: 'topup' }`.
 3. Bot sends the `session.url` as a plain link. Friend pays on Stripe's page.
-4. **Stripe webhook** (`checkout.session.completed`) → verify signature → look up `athlete_id` → credit the **net or gross?** Decision: **credit the gross amount the friend paid** ($25 → $25 of balance). The Stripe fee is absorbed by the buffer, not deducted from their balance — simpler and friendlier. Write `kind=topup` ledger row + bump balance, idempotent on `payment_intent` id.
+4. **Stripe webhook** (`checkout.session.completed`) → verify signature (raw body) → `client_reference_id` is the `athlete_id` → credit the **net or gross?** Decision: **credit the gross amount the friend paid** ($25 → $25 of balance, read from `session.amount_total`). The Stripe fee is absorbed by the buffer, not deducted from their balance — simpler and friendlier. Write `kind=topup` ledger row + bump balance (and clear `low_balance_warned_at`, §8), idempotent on the `payment_intent`.
 5. Bot sends a confirmation to Telegram ("$25 added — you're at $X, about N weeks at your pace.").
 
 Use **dynamic Checkout Sessions, not pre-made Payment Links** — we need per-athlete attribution, variable amounts, and conditional card-saving, none of which static links handle cleanly.
 
-Webhook idempotency: dedupe on `payment_intent`; a replayed event must not double-credit.
+**Built 2026-06-23 (step 3).** One parameterized RPC `apply_stripe_credit(athlete_id, payment_intent, amount_cents, kind)` writes both topup (+) and refund (−) — mirror images, so one function (not two), mirroring the grant/debit precedent's atomic ledger-row + balance-bump shape. The create-session route is `POST /api/billing/checkout`; the webhook is `POST /api/stripe/webhook` (raw-body signature verify against `STRIPE_WEBHOOK_SECRET`). `setup_future_usage` is **deferred to step 6** (auto-reload) — step 3 never saves a card.
+
+Webhook idempotency: a replayed event must not double-credit. The DB guard is a **partial unique index on `(stripe_payment_intent, kind)`** — keyed per-kind, *not* on `payment_intent` alone, because a topup and its later refund share the same `payment_intent`; a single-column unique would wrongly reject the refund. (Corollary: at most one refund row per charge — see the §11 partial-refund note.) This is the DB-level twin of the grant/debit guards.
 
 ---
 
@@ -239,7 +241,7 @@ Follows the CLAUDE.md copy rules — short, no "Great", no exclamation-stacking,
 ## 11. Comp & admin
 
 - **`comped` flag** per athlete, set from the David-only admin console. True ⇒ all billing logic is skipped.
-- Admin console additions: view balance + recent ledger per athlete; **paused state surfaced** so "on vacation" reads differently from "out of credit"; **manual adjust** (`kind=adjust`, signed, with a note) for comps/make-goods; toggle `comped`. Refunds are issued from the **Stripe dashboard** directly (low volume, friends) and mirrored back as a `kind=refund` ledger row by the existing `charge.refunded` webhook — no in-app refund UI in v1.
+- Admin console additions: view balance + recent ledger per athlete; **paused state surfaced** so "on vacation" reads differently from "out of credit"; **manual adjust** (`kind=adjust`, signed, with a note) for comps/make-goods; toggle `comped`. Refunds are issued from the **Stripe dashboard** directly (low volume, friends) and mirrored back as a `kind=refund` ledger row by the `charge.refunded` webhook (built 2026-06-23, step 3) — no in-app refund UI in v1. The handler resolves the athlete from the original `kind=topup` ledger row for that `payment_intent` (not from charge metadata), credits `−amount_refunded`, and is idempotent on `(payment_intent, refund)`. **v1 limitation:** because idempotency is keyed per-`(payment_intent, kind)`, only the **first** `charge.refunded` per charge is mirrored — a *second* partial refund on the same charge is deduped and dropped. Acceptable for friends + full refunds from the dashboard; revisit (key on the Stripe refund id) only if partial refunds become real.
 
 ---
 
