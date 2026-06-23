@@ -50,6 +50,52 @@ export async function debitRunCredit(
   return data === true;
 }
 
+/**
+ * Mirror a Stripe money event into the ledger + balance (Specs/METERING_PAYMENTS.md
+ * §6, §11). One parameterized RPC handles both directions; `amountCents` is SIGNED
+ * (+ for a topup, − for a refund) and the RPC bumps the balance by it and clears
+ * low_balance_warned_at on a topup. Prefer recordStripeTopup/recordStripeRefund
+ * below, which own the sign.
+ *
+ * Idempotent on (payment_intent, kind): a replayed webhook is a no-op (DB partial
+ * unique index). Returns true if this call wrote the row, false on a replay.
+ */
+export async function applyStripeCredit(
+  athleteId: string,
+  paymentIntent: string,
+  amountCents: number,
+  kind: 'topup' | 'refund',
+): Promise<boolean> {
+  const { data, error } = await supabaseAdmin().rpc('apply_stripe_credit', {
+    p_athlete_id: athleteId,
+    p_payment_intent: paymentIntent,
+    p_amount_cents: amountCents,
+    p_kind: kind,
+  });
+  if (error) throw error;
+  return data === true;
+}
+
+/** Credit the GROSS amount a friend paid (§1, §6). `grossCents` is the positive
+ *  amount_total from the Checkout session; the fee is absorbed by the buffer. */
+export function recordStripeTopup(
+  athleteId: string,
+  paymentIntent: string,
+  grossCents: number,
+): Promise<boolean> {
+  return applyStripeCredit(athleteId, paymentIntent, Math.abs(grossCents), 'topup');
+}
+
+/** Mirror a dashboard-issued refund back to the balance (§11). `refundedCents` is
+ *  the positive amount_refunded; stored signed-negative and decremented. */
+export function recordStripeRefund(
+  athleteId: string,
+  paymentIntent: string,
+  refundedCents: number,
+): Promise<boolean> {
+  return applyStripeCredit(athleteId, paymentIntent, -Math.abs(refundedCents), 'refund');
+}
+
 export type CreditState = { balanceCents: number; comped: boolean };
 
 /**

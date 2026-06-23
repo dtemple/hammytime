@@ -19,6 +19,9 @@ import {
   grantSignupCredit,
   debitRunCredit,
   getCreditState,
+  recordStripeTopup,
+  recordStripeRefund,
+  applyStripeCredit,
   SIGNUP_GRANT_CENTS,
 } from './credits';
 
@@ -96,5 +99,70 @@ describe('getCreditState', () => {
   it('throws when the read errors', async () => {
     maybeSingle.mockResolvedValue({ data: null, error: { message: 'boom' } });
     await expect(getCreditState('athlete-1')).rejects.toEqual({ message: 'boom' });
+  });
+});
+
+describe('recordStripeTopup', () => {
+  beforeEach(() => rpc.mockReset().mockResolvedValue({ data: true, error: null }));
+
+  it('calls apply_stripe_credit with a POSITIVE amount + kind=topup', async () => {
+    await recordStripeTopup('athlete-1', 'pi_1', 2500);
+    expect(rpc).toHaveBeenCalledWith('apply_stripe_credit', {
+      p_athlete_id: 'athlete-1',
+      p_payment_intent: 'pi_1',
+      p_amount_cents: 2500,
+      p_kind: 'topup',
+    });
+  });
+
+  it('owns the sign — a negative gross is coerced positive', async () => {
+    await recordStripeTopup('athlete-1', 'pi_1', -2500);
+    expect(rpc).toHaveBeenCalledWith(
+      'apply_stripe_credit',
+      expect.objectContaining({ p_amount_cents: 2500, p_kind: 'topup' }),
+    );
+  });
+});
+
+describe('recordStripeRefund', () => {
+  beforeEach(() => rpc.mockReset().mockResolvedValue({ data: true, error: null }));
+
+  it('calls apply_stripe_credit with a NEGATIVE amount + kind=refund', async () => {
+    await recordStripeRefund('athlete-1', 'pi_1', 2500);
+    expect(rpc).toHaveBeenCalledWith('apply_stripe_credit', {
+      p_athlete_id: 'athlete-1',
+      p_payment_intent: 'pi_1',
+      p_amount_cents: -2500,
+      p_kind: 'refund',
+    });
+  });
+
+  it('always stores the refund signed-negative regardless of caller sign', async () => {
+    await recordStripeRefund('athlete-1', 'pi_1', -2500);
+    expect(rpc).toHaveBeenCalledWith(
+      'apply_stripe_credit',
+      expect.objectContaining({ p_amount_cents: -2500, p_kind: 'refund' }),
+    );
+  });
+});
+
+describe('applyStripeCredit result mapping', () => {
+  beforeEach(() => rpc.mockReset());
+
+  it('returns true when the RPC wrote the row', async () => {
+    rpc.mockResolvedValue({ data: true, error: null });
+    expect(await applyStripeCredit('athlete-1', 'pi_1', 2500, 'topup')).toBe(true);
+  });
+
+  it('returns false on the replay no-op (RPC returns false)', async () => {
+    rpc.mockResolvedValue({ data: false, error: null });
+    expect(await applyStripeCredit('athlete-1', 'pi_1', 2500, 'topup')).toBe(false);
+  });
+
+  it('throws when the RPC errors', async () => {
+    rpc.mockResolvedValue({ data: null, error: { message: 'boom' } });
+    await expect(applyStripeCredit('athlete-1', 'pi_1', 2500, 'topup')).rejects.toEqual({
+      message: 'boom',
+    });
   });
 });

@@ -29,3 +29,21 @@ export function billedCents(costUsd: number): number {
   if (!Number.isFinite(costUsd) || costUsd <= 0) return 0;
   return Math.round(costUsd * BILLING_MARKUP * 100);
 }
+
+// ===========================================================================
+// TOP-UP PRESETS (§1, §6). The single source of truth for the buyable amounts,
+// shared by the create-session route and (later step) the /buy bot buttons.
+// Ordered low→high; $25 is the default. Change here only.
+// ===========================================================================
+export const TOPUP_PRESETS_CENTS = [1000, 2500, 5000] as const;
+export const DEFAULT_TOPUP_CENTS = 2500;
+
+/** True if `cents` is one of the buyable presets. The route rejects anything else. */
+export function isPresetCents(cents: number): boolean {
+  return (TOPUP_PRESETS_CENTS as readonly number[]).includes(cents);
+}
+
+/** "$25" / "$7.50" — dollar label for a cent amount (line items, confirmations). */
+export function dollarsLabel(cents: number): string {
+  return `$${(cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)}`;
+}

@@ -1014,6 +1014,15 @@ export type Database = {
         }
         Returns: undefined
       }
+      apply_stripe_credit: {
+        Args: {
+          p_amount_cents: number
+          p_athlete_id: string
+          p_kind: string
+          p_payment_intent: string
+        }
+        Returns: boolean
+      }
       claim_next_job: {
         Args: { p_stale_minutes?: number }
         Returns: {
