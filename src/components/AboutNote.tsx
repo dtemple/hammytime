@@ -47,7 +47,7 @@ export default function AboutNote() {
           />
         </span>
         <span className="ht-founder-text">
-          <span className="ht-founder-link">Made by a guy</span> who was stressing too
+          <span className="ht-founder-link">Made by somebody</span> who was stressing too
           much about running injuries.
         </span>
       </button>
