@@ -93,7 +93,7 @@ export async function createTopupSession(
     // card-saving is step 6 (auto-reload).
     metadata: { athlete_id: athleteId, kind: 'topup' },
     payment_intent_data: { metadata: { athlete_id: athleteId, kind: 'topup' } },
-    success_url: `${appBaseUrl()}/?checkout=success`,
+    success_url: `${appBaseUrl()}/checkout/success`,
     cancel_url: `${appBaseUrl()}/?checkout=cancelled`,
   });
 
