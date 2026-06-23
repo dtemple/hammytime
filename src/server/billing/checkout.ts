@@ -94,7 +94,7 @@ export async function createTopupSession(
     metadata: { athlete_id: athleteId, kind: 'topup' },
     payment_intent_data: { metadata: { athlete_id: athleteId, kind: 'topup' } },
     success_url: `${appBaseUrl()}/checkout/success`,
-    cancel_url: `${appBaseUrl()}/?checkout=cancelled`,
+    cancel_url: `${appBaseUrl()}/checkout/cancelled`,
   });
 
   if (!session.url) throw new Error('Stripe returned a session with no url');
