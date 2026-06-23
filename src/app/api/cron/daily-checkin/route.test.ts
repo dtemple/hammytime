@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
 vi.mock('@/server/jobs/enqueue', () => ({ enqueueJob: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('@/server/telegram/checkin/dispatcher', () => ({
-  nowInTimezone: vi.fn().mockReturnValue({ date: '2026-05-27', time: '06:30' }),
+  nowInTimezone: vi.fn().mockReturnValue({ date: '2026-05-27', time: '06:30', hour: 6 }),
 }));
 vi.mock('@sentry/nextjs', () => ({ captureException: vi.fn() }));
 // The expired-proposal sweep has its own test; stub it here so this suite stays
@@ -94,9 +94,9 @@ describe('GET /api/cron/daily-checkin', () => {
     process.env.CRON_SECRET = SECRET;
     delete process.env.AUTO_PAUSE_DRY_RUN;
     // clearAllMocks wipes call history but not implementations; reset the clock
-    // mock to the default 6am-local each test so a per-test override (the
+    // mock to the default local-morning hour each test so a per-test override (the
     // local-hour gate cases below) can't leak into the next test.
-    vi.mocked(nowInTimezone).mockReturnValue({ date: '2026-05-27', time: '06:00' });
+    vi.mocked(nowInTimezone).mockReturnValue({ date: '2026-05-27', time: '05:00', hour: 5 });
   });
 
   it('rejects when Authorization header is missing', async () => {
@@ -242,8 +242,8 @@ describe('GET /api/cron/daily-checkin', () => {
     expect(vi.mocked(sendAutoPauseNotice)).not.toHaveBeenCalled();
   });
 
-  it('skips when it is not yet local 6am for any athlete', async () => {
-    vi.mocked(nowInTimezone).mockReturnValue({ date: '2026-05-27', time: '09:00' });
+  it('skips when it is not yet the local check-in hour for any athlete', async () => {
+    vi.mocked(nowInTimezone).mockReturnValue({ date: '2026-05-27', time: '09:00', hour: 9 });
     mockAthletes([makeAthlete()]);
     const res = await GET(authedReq());
     expect(res.status).toBe(200);
@@ -255,13 +255,13 @@ describe('GET /api/cron/daily-checkin', () => {
     expect(vi.mocked(enqueueJob)).not.toHaveBeenCalled();
   });
 
-  it('enqueues only the athletes for whom it is local 6am this hour', async () => {
-    // Same UTC tick, two zones: 6am where the Eastern athlete lives, 3am where
+  it('enqueues only the athletes for whom it is the local check-in hour this tick', async () => {
+    // Same UTC tick, two zones: 5am where the Eastern athlete lives, 2am where
     // the Pacific one does. Only the Eastern athlete is due.
     vi.mocked(nowInTimezone).mockImplementation((tz) =>
       tz === 'America/New_York'
-        ? { date: '2026-05-27', time: '06:00' }
-        : { date: '2026-05-27', time: '03:00' },
+        ? { date: '2026-05-27', time: '05:00', hour: 5 }
+        : { date: '2026-05-27', time: '02:00', hour: 2 },
     );
     mockAthletes([
       makeAthlete({ id: 'eastern-due', timezone: 'America/New_York' }),

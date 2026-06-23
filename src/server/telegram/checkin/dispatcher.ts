@@ -40,10 +40,11 @@ export async function writeCheckinState(
 }
 
 /**
- * Returns the current date and time in the athlete's timezone.
+ * Returns the current date, time, and hour-of-day in the athlete's timezone.
  * Falls back to America/Los_Angeles if the timezone is null or invalid.
+ * `hour` is 0–23 — use it instead of parsing the `time` string.
  */
-export function nowInTimezone(tz: string | null): { date: string; time: string } {
+export function nowInTimezone(tz: string | null): { date: string; time: string; hour: number } {
   const timezone = tz ?? 'America/Los_Angeles';
   const now = new Date();
 
@@ -70,8 +71,9 @@ export function nowInTimezone(tz: string | null): { date: string; time: string }
     .filter((p) => p.type !== 'literal')
     .map((p) => p.value)
     .join(':');
+  const hour = Number(timeParts.find((p) => p.type === 'hour')?.value ?? '0');
 
-  return { date, time };
+  return { date, time, hour };
 }
 
 async function onWellnessComplete(

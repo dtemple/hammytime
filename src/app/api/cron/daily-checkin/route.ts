@@ -14,8 +14,10 @@ import { sweepExpiredProposals } from '@/server/telegram/proposals';
 
 // The hour, in each athlete's own timezone, at which their daily run fires. The
 // cron ticks hourly; an athlete is due only on the tick where it's this hour
-// where they live, so everyone gets 6am local rather than 6am Pacific for all.
-const CHECKIN_HOUR = 6;
+// where they live, so everyone gets it early local rather than 6:30 Pacific for
+// all. Set to 5 (not 6): Vercel only guarantees a cron fires within its hour, so
+// "5am local" lands somewhere in the 5 o'clock hour — comfortably before 6.
+const CHECKIN_HOUR = 5;
 
 function dryRunRequested(req: Request): boolean {
   const param = new URL(req.url).searchParams.get('dryRun')?.toLowerCase() ?? '';
@@ -84,12 +86,13 @@ export async function GET(req: Request) {
     // Per-athlete-local scheduling: the cron fires hourly, but an athlete is due
     // only on the tick where it's CHECKIN_HOUR in their own timezone. Gating both
     // the enqueue and the inactivity scan on this means each athlete is evaluated
-    // exactly once per local day, at their 6am — and 23 of every 24 ticks bail
-    // out here before touching the messages table.
-    const due = onboarded.filter((a) => {
-      const { time } = nowInTimezone(a.timezone);
-      return Number(time.slice(0, 2)) === CHECKIN_HOUR;
-    });
+    // exactly once per local day, at their local morning — and 23 of every 24
+    // ticks bail out here before touching the messages table.
+    // Stamp each athlete's local clock once and carry it: the gate reads `hour`,
+    // the enqueue key below reads `date` — both from the same instant.
+    const due = onboarded
+      .map((athlete) => ({ athlete, ...nowInTimezone(athlete.timezone) }))
+      .filter(({ hour }) => hour === CHECKIN_HOUR);
 
     if (due.length === 0) {
       return NextResponse.json({ ok: true, skipped: 'no_athlete_due_this_hour', expiredProposalsCleared });
@@ -116,7 +119,7 @@ export async function GET(req: Request) {
     // not-yet-enqueued athletes (their keys are still free).
     let enqueued = 0;
     const paused: string[] = [];
-    for (const athlete of due) {
+    for (const { athlete, date } of due) {
       // TODO(§5 gate): once the $0 balance gate ships, skip the inactivity scan
       // for athletes already blocked at $0 — they've stopped running and got the
       // §8 final message; a second "paused" note would just be noise.
@@ -140,7 +143,6 @@ export async function GET(req: Request) {
         continue;
       }
 
-      const { date } = nowInTimezone(athlete.timezone);
       await enqueueJob('daily_checkin', `daily-${athlete.id}-${date}`, { athlete_id: athlete.id });
       enqueued++;
     }
