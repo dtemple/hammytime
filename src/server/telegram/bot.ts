@@ -297,7 +297,7 @@ export async function handleInboundText(ctx: Context): Promise<void> {
       await sendAndLog(
         athlete.id,
         ctx.chat!.id,
-        "I'll still get back to you on this. Your daily check-ins stay paused until you run /resume.",
+        "Your account is paused. I'll still get back to you on this, but note that you will not receive any proactive messages until you run /resume.",
       );
     }
   } else {
