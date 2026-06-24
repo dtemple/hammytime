@@ -19,6 +19,7 @@ import { PlanSchema, type Plan } from '@/lib/plan-schema';
 import { ATHLETE_ROOT, STRAVA_LOOKBACK_DAYS } from './config';
 import { localDate } from './dates';
 import { compactJson } from './json-compact';
+import { rotateLogByDate } from './log-rotation';
 import { buildCurrentBlock } from './plan-current-block';
 import { buildStravaContext } from './strava';
 
@@ -42,6 +43,40 @@ export const INPUT_ONLY_FILES = new Set([
   'plan_view_readonly.json',
   ...KNOWLEDGE_FILES,
 ]);
+
+// Check-in log rotation: keep the most recent `KEEP_DATES` distinct dates in the
+// working log, roll older entries into the archive. The trigger only fires on the
+// heavy logs — small ones stay untouched. KEEP_DATES comfortably exceeds the
+// coach's "last ~7 checkin_log.md entries" look-backs (coach.md, system-prompt.ts).
+const CHECKIN_LOG = 'checkin_log.md';
+const CHECKIN_ARCHIVE = 'checkin_log_archive.md';
+const CHECKIN_KEEP_DATES = 14;
+const CHECKIN_TRIGGER_CHARS = 20_000;
+
+type MemoryRow = { file_name: string; content_md: string | null };
+
+/**
+ * Splits an over-cap checkin_log.md on disk into a recent working slice plus an
+ * archive of older entries. A no-op when the log is small, header-less, or has
+ * nothing old enough to move (see rotateLogByDate). The memoryHashes recorded by
+ * the hydrate loop are intentionally left as-is so syncBack persists both files.
+ */
+async function rotateCheckinLog(dir: string, rows: MemoryRow[]): Promise<void> {
+  const log = rows.find((r) => r.file_name === CHECKIN_LOG)?.content_md;
+  if (!log) return;
+
+  const rot = rotateLogByDate(log, {
+    keepDates: CHECKIN_KEEP_DATES,
+    triggerChars: CHECKIN_TRIGGER_CHARS,
+  });
+  if (!rot) return;
+
+  await writeFile(path.join(dir, CHECKIN_LOG), rot.working, 'utf8');
+
+  const existingArchive = rows.find((r) => r.file_name === CHECKIN_ARCHIVE)?.content_md ?? '';
+  const newArchive = existingArchive ? `${existingArchive}\n${rot.archived}` : rot.archived;
+  await writeFile(path.join(dir, CHECKIN_ARCHIVE), newArchive, 'utf8');
+}
 
 export type HydratedFolder = {
   dir: string;
@@ -96,6 +131,15 @@ export async function hydrate(
     await writeFile(path.join(dir, row.file_name), content, 'utf8');
     memoryHashes[row.file_name] = hash(content);
   }
+
+  // Rotate an over-cap check-in log: keep the recent slice in checkin_log.md (what
+  // the agent reads + appends to) and move older entries to checkin_log_archive.md.
+  // Both are normal memory files, so no history is lost — the archive accumulates
+  // the tail on sync-back. We deliberately leave memoryHashes for both files at the
+  // pre-rotation hash recorded by the loop above (or absent, for a brand-new
+  // archive), so syncBack sees disk ≠ recorded hash and persists the rotation —
+  // even on a run where the agent never touches checkin_log.md.
+  await rotateCheckinLog(dir, files ?? []);
 
   // The working training plan the coach edits, written as JSON if one exists.
   // We record its hash so persistPlanEdit can tell whether the agent changed it.

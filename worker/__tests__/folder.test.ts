@@ -219,6 +219,101 @@ describe('syncBack', () => {
   });
 });
 
+// A newest-at-top check-in log over the 20k trigger, spanning `days` distinct
+// dates so rotation keeps the recent 14 and archives the rest.
+function makeBigCheckinLog(days: number): string {
+  const header = '# Check-in Log\n\n<!-- newest at top -->\n';
+  const blocks: string[] = [];
+  for (let d = days; d >= 1; d--) {
+    const date = `2026-06-${String(d).padStart(2, '0')}`;
+    blocks.push(`## ${date} — entry\n**Status:** ${'detail '.repeat(120)}\n\n---`);
+  }
+  return header + blocks.join('\n');
+}
+
+describe('checkin_log rotation', () => {
+  it('splits an over-cap log into a recent working slice and an archive', async () => {
+    const big = makeBigCheckinLog(30);
+    expect(big.length).toBeGreaterThan(20_000);
+    memoryRows = [{ file_name: 'checkin_log.md', content_md: big }];
+
+    const folder = await hydrate(ATHLETE);
+    const working = readFileSync(path.join(folder.dir, 'checkin_log.md'), 'utf8');
+    const archive = readFileSync(path.join(folder.dir, 'checkin_log_archive.md'), 'utf8');
+
+    expect(working).toContain('# Check-in Log'); // preamble retained
+    expect(working).toContain('2026-06-30'); // recent kept
+    expect(working).not.toContain('2026-06-01'); // old moved out
+    expect(archive).toContain('2026-06-01');
+    expect(archive).not.toContain('2026-06-30');
+    expect(working.length).toBeLessThan(big.length);
+  });
+
+  it('persists both the shrunk log and the archive on syncBack, with no agent edit', async () => {
+    memoryRows = [{ file_name: 'checkin_log.md', content_md: makeBigCheckinLog(30) }];
+    const folder = await hydrate(ATHLETE);
+    await syncBack(ATHLETE, folder);
+
+    const synced = upsertCalls.flatMap((c) =>
+      (c.rows as { file_name: string }[]).map((r) => r.file_name),
+    );
+    expect(synced).toContain('checkin_log.md');
+    expect(synced).toContain('checkin_log_archive.md');
+  });
+
+  it('accumulates the archive across runs when one already exists', async () => {
+    const priorArchive = '## 2026-05-20 — prior\n**Status:** older history\n\n---';
+    memoryRows = [
+      { file_name: 'checkin_log.md', content_md: makeBigCheckinLog(30) },
+      { file_name: 'checkin_log_archive.md', content_md: priorArchive },
+    ];
+    const folder = await hydrate(ATHLETE);
+    const archive = readFileSync(path.join(folder.dir, 'checkin_log_archive.md'), 'utf8');
+    expect(archive).toContain('2026-05-20'); // prior archive preserved
+    expect(archive).toContain('2026-06-01'); // newly moved entries appended
+  });
+
+  it("preserves the agent's appended entry on the shrunk log", async () => {
+    memoryRows = [{ file_name: 'checkin_log.md', content_md: makeBigCheckinLog(30) }];
+    const folder = await hydrate(ATHLETE);
+
+    const working = readFileSync(path.join(folder.dir, 'checkin_log.md'), 'utf8');
+    writeFileSync(
+      path.join(folder.dir, 'checkin_log.md'),
+      working + '\n## 2026-06-30 — new entry\n**Status:** appended this run\n\n---',
+    );
+    await syncBack(ATHLETE, folder);
+
+    const row = upsertCalls
+      .flatMap((c) => c.rows as { file_name: string; content_md: string }[])
+      .find((r) => r.file_name === 'checkin_log.md')!;
+    expect(row.content_md).toContain('appended this run');
+    expect(row.content_md).not.toContain('2026-06-01'); // still the shrunk base
+  });
+
+  it('reconstructs full history from the synced log plus archive', async () => {
+    const big = makeBigCheckinLog(30);
+    memoryRows = [{ file_name: 'checkin_log.md', content_md: big }];
+    const folder = await hydrate(ATHLETE);
+    await syncBack(ATHLETE, folder);
+
+    const rows = upsertCalls.flatMap((c) => c.rows as { file_name: string; content_md: string }[]);
+    const working = rows.find((r) => r.file_name === 'checkin_log.md')!.content_md;
+    const archive = rows.find((r) => r.file_name === 'checkin_log_archive.md')!.content_md;
+    for (let d = 1; d <= 30; d++) {
+      expect(working + archive).toContain(`2026-06-${String(d).padStart(2, '0')}`);
+    }
+  });
+
+  it('is a no-op for an under-cap log — no archive, no upsert', async () => {
+    memoryRows = [{ file_name: 'checkin_log.md', content_md: '## 2026-06-24 — small\nok' }];
+    const folder = await hydrate(ATHLETE);
+    expect(existsSync(path.join(folder.dir, 'checkin_log_archive.md'))).toBe(false);
+    await syncBack(ATHLETE, folder);
+    expect(upsertCalls).toHaveLength(0);
+  });
+});
+
 describe('cleanup', () => {
   it('removes the folder', async () => {
     const folder = await hydrate(ATHLETE);
