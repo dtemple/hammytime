@@ -309,17 +309,17 @@ The two **proactive** runs (daily + post-activity ≈ **57%**) are automated pus
 | Tier | Proactive (daily + post-activity) | Interactive (replies) | Est. billed/day | $25 runway | vs today |
 |---|---|---|---|---|---|
 | **Saver** | Haiku | Haiku | ~$0.26 | ~13 weeks | ~−67% |
-| **Standard (default)** | Haiku† | Sonnet | ~$0.49 | ~7 weeks | ~−39% |
+| **Standard (default)** | Sonnet† | Sonnet | ~$0.78 | ~4.5 weeks | ~0% |
 | **Premium** | Sonnet | Opus | ~$1.02 | ~3.5 weeks | ~+27% |
 
-Estimates scale the measured §2 Sonnet-both baseline ($0.80 billed/day) by each bucket's model ratio and the 38/19/41 split above — planning numbers only; the ledger records the truth. **† Standard's proactive slot is Haiku *pending the A/B below.* Until the A/B passes, Standard = Sonnet-both (today's behavior) and Haiku-proactive lives only in Saver (opt-in, the friend chose it).** Flipping Standard's proactive to Haiku is a one-line tier-map change that then applies to everyone on the default.
+Estimates scale the measured §2 Sonnet-both baseline ($0.80 billed/day) by each bucket's model ratio and the 38/19/41 split above — planning numbers only; the ledger records the truth. **† The A/B below was run 2026-06-24 and Haiku did not clear it — Standard ships as Sonnet-both (today's behavior), and Haiku-proactive lives only in Saver (opt-in, the friend chose it). See the result under "The A/B that gates the default."** If a later re-test clears it, flipping Standard's proactive to Haiku is a one-line tier-map change.
 
 ### Decisions (proposed — confirm before building)
 
 | Dimension | Proposed |
 |---|---|
 | Surface | Tiers, not raw models — `/model` shows **Saver / Standard / Premium** (current marked), each a (proactive, interactive) pair. Hides the model matrix behind a cost↔quality dial a friend can reason about. |
-| Default | **Standard = the smart split** (Haiku proactive / Sonnet interactive), once the A/B clears; Sonnet-both until then. A friend can switch tiers but doesn't have to. |
+| Default | **Standard = Sonnet-both** — the A/B (2026-06-24) did not clear Haiku-proactive, so the smart split is not the default. A friend can switch tiers but doesn't have to; Haiku-proactive is Saver-only. |
 | Proactive vs interactive | Keyed on the run **`source`** (`daily_checkin` + `post_activity` = proactive; `tg_message` = interactive), which the worker already passes to `runAgent` — **not** `agent_runs.kind`, which collapses post-activity into `adhoc`. |
 | Scope | The coaching `query()` in `worker/run-agent.ts` only. **Not** onboarding (fixed Sonnet engine) and **not** plan-repair (`worker/plan-repair.ts` — stays Sonnet so a Haiku daily's plan edit still gets a smart repair pass). |
 | Storage | `athletes.model_tier text null` (null = Standard). Coaching-loop state, like `paused_at` — on `athletes`, not `athlete_credits`. Storing the tier (not raw model ids) means redefining a tier is a code change, not a data migration. |
@@ -328,7 +328,7 @@ Estimates scale the measured §2 Sonnet-both baseline ($0.80 billed/day) by each
 ### Implementation
 
 - **Migration:** `athletes.model_tier text null` with a CHECK on `('saver','standard','premium')` (null = `standard`).
-- **Shared tier map:** one module — model-id constants, `PROACTIVE_SOURCES = {'daily_checkin','post_activity'}`, and `TIERS = { saver:{proactive:HAIKU,interactive:HAIKU}, standard:{proactive:HAIKU†,interactive:SONNET}, premium:{proactive:SONNET,interactive:OPUS} }` — imported by both the worker (resolve) and the bot (`/model` buttons), the single-source-of-truth shape of `pricing.ts`/`commands.ts`. (`standard.proactive` is the A/B-gated value: SONNET until the A/B passes, then HAIKU.)
+- **Shared tier map:** one module — model-id constants, `PROACTIVE_SOURCES = {'daily_checkin','post_activity'}`, and `TIERS = { saver:{proactive:HAIKU,interactive:HAIKU}, standard:{proactive:SONNET†,interactive:SONNET}, premium:{proactive:SONNET,interactive:OPUS} }` — imported by both the worker (resolve) and the bot (`/model` buttons), the single-source-of-truth shape of `pricing.ts`/`commands.ts`. (`standard.proactive` = SONNET — the A/B (2026-06-24) did not clear Haiku-proactive; see the result below. A passing re-test flips it to HAIKU.)
 - **Worker resolve:** `resolveCoachModel(athlete, source)` → `tier = athlete.model_tier ?? 'standard'`; `bucket = PROACTIVE_SOURCES.has(source) ? 'proactive' : 'interactive'`; `return TIERS[tier][bucket]`. Pass into `query({ options: { model } })` and `persistRun` (already records `model`). The `source` is already an argument to `runAgent`.
 - **Bot:** `/model` command + `model:<tier>` callback in `src/server/telegram/bot.ts`, mirroring `/buy` (onboarded-guard, three tier buttons with the current pick marked, tap writes `model_tier` + collapses the keyboard + confirms). Register `/model` in `commands.ts` (menu + `/help`).
 - **Deploy:** worker change → `fly deploy`; bot/menu change → web push. Both surfaces.
@@ -343,6 +343,15 @@ The tier mechanism and the **Saver** tier ship regardless. The A/B decides one t
 - **Judge.** (1) **Factual accuracy** — did Haiku read the Strava/plan correctly, no invented data? Objective and checkable against the folder; a miss is an auto-fail, since a proactive run's whole job is to be grounded. (2) **Voice/quality** — a blind Opus judge scores each pair (model identity hidden) and David reads a handful (his voice bar is the real gate).
 - **Decision rule.** Haiku becomes Standard's proactive model only if it holds factual accuracy across the sample **and** David accepts the voice — weighting the daily heaviest. Otherwise Standard stays Sonnet-both and Haiku-proactive lives in Saver.
 - **Cost.** ~2× a handful of runs, well under $1. Effectively Phase 0 of `Specs/EVAL_HARNESS.md`.
+
+#### Result — run 2026-06-24 (Haiku did not clear; Standard stays Sonnet-both)
+
+Ran Haiku 4.5 vs Sonnet 4.6 as a read-only dry-run across four athletes (David, Brenden, Ian, Chase), `daily_checkin` + `post_activity`, both models against byte-identical hydrated folders per pair. Built broader than the §14 sketch (`scripts/ab-daily-model.ts`): `scripts/ab-model-eval.ts` + `worker/dry-run-agent.ts` + the `buildAgentOptions()` extraction (`worker/agent-options.ts`) — the `Specs/EVAL_HARNESS.md` prerequisite, now done and reusable. Reports: `ab-model-eval-2026-06-24T19-18.md` (the 4-athlete proactive gate) and `ab-model-eval-2026-06-24T18-47.md` (David smoke, one interactive case). 16 proactive runs, $3.17; read-only verified (no `agent_runs` rows, no balance moves, no Telegram sends).
+
+- **Daily — ruled out.** Haiku had a grounding miss on the flagship message (reported a tempo as "12.45 vs 6 planned" — the run's *kilometers* against a 6-*mile* target; it read the same run correctly in its post-activity run, so it's intermittent, not systematic). It also read weaker on tone, detail, and next-step guidance: Sonnet's daily zoomed to the week and gave explicit go/no-go criteria for the peak long run where Haiku stayed list-heavy. Per the decision rule, a factual miss on the flagship is disqualifying.
+- **Post-activity — viable but not worth it.** Haiku was clean and cheap on the three routine activities but sprawled on the one consequential case (a post-long-run injury escalation: 13 turns / 7.2k output tokens vs Sonnet's 7 turns), trying to manage the whole situation inline rather than acknowledge-and-defer. With the daily staying Sonnet, post-activity is the only Standard-tier cut left on the table — and at ~19% of spend (~$2–3/athlete/month) the bucket is too small to justify either the quality drop or any routing machinery (a model-classifier router pays a Sonnet tax on the hard cases anyway and adds latency). **David's call (2026-06-24): keep post-activity on Sonnet for now.**
+- **Cost ratios, for the record.** Daily Haiku 0.21× Sonnet, post-activity 0.34×. The −39% Standard estimate above assumed *both* proactive runs went Haiku; with the daily on Sonnet, the realized Standard cut would have been only the post-activity bucket. So Sonnet-both stands, and **Saver (Haiku, opt-in) is the cost tier**.
+- **Revisit triggers.** A bounded "acknowledge-and-defer" post-activity prompt (keep Haiku in its lane, push replanning to the Sonnet daily) and/or the `<message>`-contract + `sanitizeCoachReply` preamble fix shipped session 68 (the reports predate that fix — the preamble leaks they show are already addressed). Re-run the harness after either before reconsidering.
 
 ### Open risks / notes
 

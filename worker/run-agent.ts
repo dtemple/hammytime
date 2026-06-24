@@ -6,17 +6,16 @@
 
 import { query, type SDKMessage, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { supabaseAdmin } from '@/lib/db';
-import { COACH_MODEL, MAX_ATTEMPTS, MAX_BUDGET_USD, MAX_TURNS } from './config';
+import { COACH_MODEL, MAX_ATTEMPTS } from './config';
 import { isRetryableAgentError } from './retryable';
 import { access } from 'fs/promises';
 import path from 'path';
 import { cleanup, hydrate, syncBack } from './folder';
 import { persistPlanEdit } from './plan-version';
 import { CANCEL_SENTINEL, discardPendingProposal } from './proposal';
-import { makePlanEditHook } from './plan-edit-hook';
 import { attemptPlanRepair } from './plan-repair';
 import { chargeRun, maybeWarnLowBalance } from './billing';
-import { ALLOWED_TOOLS, makeIsolationGuard, scrubbedEnv } from './isolation';
+import { buildAgentOptions } from './agent-options';
 import { persistRun, type CapturedStep, type RunKind } from './persist';
 import { sanitizeCoachReply } from './reply-sanitize';
 import {
@@ -126,20 +125,7 @@ export async function runAgent(
 
     const q = query({
       prompt,
-      options: {
-        model: COACH_MODEL,
-        systemPrompt,
-        settingSources: [], // hermetic — ignore ~/.claude and any repo .claude
-        cwd: folder.dir, // isolation: the agent sees only this athlete's folder
-        allowedTools: [...ALLOWED_TOOLS],
-        canUseTool: makeIsolationGuard(folder.dir),
-        maxTurns: MAX_TURNS,
-        maxBudgetUsd: MAX_BUDGET_USD,
-        env: scrubbedEnv(),
-        // Re-validate marathon_training_plan.json after every Write/Edit so a
-        // broken candidate is fixed in-loop, not staged and dropped.
-        hooks: makePlanEditHook(folder.dir),
-      },
+      options: buildAgentOptions({ folderDir: folder.dir, systemPrompt }),
     });
 
     for await (const m of q) {
