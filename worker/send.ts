@@ -153,12 +153,13 @@ export async function sendCalendarConfirm(athleteId: string, token: string): Pro
 
 /**
  * Send a billing message with the $10 / $25 / $50 top-up presets under it
- * (Specs/METERING_PAYMENTS.md §8). Shared by the low-balance heads-up and the
- * $0 final notice — caller owns the text, this attaches the buttons. The
- * callback_data `buy:<cents>` is handled by the inbound bot's dispatcher
- * (src/server/telegram/bot.ts) — both processes share the bot token, so a button
- * the worker sends opens the same Stripe-checkout flow. Plain text, no parse
- * mode (mirrors sendCalendarConfirm); logs the out-row.
+ * (Specs/METERING_PAYMENTS.md §8). Used by the $0 final notice — caller owns the
+ * text, this attaches the buttons. (The low-balance heads-up is plain text via
+ * sendReply; the buttons are reserved for the $0 case where the friction
+ * matters.) The callback_data `buy:<cents>` is handled by the inbound bot's
+ * dispatcher (src/server/telegram/bot.ts) — both processes share the bot token,
+ * so a button the worker sends opens the same Stripe-checkout flow. Plain text,
+ * no parse mode (mirrors sendCalendarConfirm); logs the out-row.
  */
 export async function sendTopupButtons(athleteId: string, text: string): Promise<void> {
   const db = supabaseAdmin();

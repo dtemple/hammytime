@@ -21,7 +21,7 @@ import {
   markLowBalanceWarned,
 } from '@/server/billing/credits';
 import { estimateRunwayDays, runwayLabel } from '@/server/billing/burn-rate';
-import { sendDavidAlert, sendTopupButtons } from './send';
+import { sendDavidAlert, sendReply, sendTopupButtons } from './send';
 
 // job_queue kinds that cost model money and so are gated at $0. calendar_sync is
 // bookkeeping (no agent run) and is never gated. A post_activity run rides inside
@@ -199,7 +199,9 @@ export async function maybeWarnLowBalance(athleteId: string): Promise<void> {
     ? shortHeadsUp(state.balanceCents, days)
     : explainerHeadsUp(state.balanceCents, days);
 
-  await sendTopupButtons(athleteId, text).catch((e) =>
+  // Plain text — the heads-up nudges toward /buy without buttons; the preset
+  // buttons are reserved for the $0 final notice, where the friction matters.
+  await sendReply(athleteId, text).catch((e) =>
     console.error(`[billing] low-balance heads-up send failed for ${athleteId}:`, e),
   );
   await markLowBalanceWarned(athleteId).catch((e) =>

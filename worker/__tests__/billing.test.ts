@@ -13,6 +13,7 @@ const {
   hasToppedUp,
   estimateRunwayDays,
   sendDavidAlert,
+  sendReply,
   sendTopupButtons,
 } = vi.hoisted(() => ({
   debitRunCredit: vi.fn(),
@@ -22,6 +23,7 @@ const {
   hasToppedUp: vi.fn(),
   estimateRunwayDays: vi.fn(),
   sendDavidAlert: vi.fn(),
+  sendReply: vi.fn(),
   sendTopupButtons: vi.fn(),
 }));
 vi.mock('@/server/billing/credits', () => ({
@@ -37,7 +39,7 @@ vi.mock('@/server/billing/burn-rate', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/server/billing/burn-rate')>()),
   estimateRunwayDays,
 }));
-vi.mock('../send', () => ({ sendDavidAlert, sendTopupButtons }));
+vi.mock('../send', () => ({ sendDavidAlert, sendReply, sendTopupButtons }));
 
 import { chargeRun, enforceCreditGate, maybeWarnLowBalance } from '../billing';
 
@@ -55,6 +57,7 @@ beforeEach(() => {
   hasToppedUp.mockReset().mockResolvedValue(false);
   estimateRunwayDays.mockReset().mockResolvedValue(99);
   sendDavidAlert.mockReset().mockResolvedValue(undefined);
+  sendReply.mockReset().mockResolvedValue(undefined);
   sendTopupButtons.mockReset().mockResolvedValue(undefined);
   delete process.env.BILLING_GATE_ENABLED;
 });
@@ -157,7 +160,7 @@ describe('maybeWarnLowBalance — §8 low-balance heads-up', () => {
     estimateRunwayDays.mockResolvedValue(1.5);
     await maybeWarnLowBalance(ATHLETE);
     expect(getLowBalanceWarnState).not.toHaveBeenCalled();
-    expect(sendTopupButtons).not.toHaveBeenCalled();
+    expect(sendReply).not.toHaveBeenCalled();
     expect(markLowBalanceWarned).not.toHaveBeenCalled();
   });
 
@@ -166,15 +169,16 @@ describe('maybeWarnLowBalance — §8 low-balance heads-up', () => {
       process.env.BILLING_GATE_ENABLED = 'true';
     });
 
-    it('fires the first-time explainer (never topped up), then marks', async () => {
+    it('fires the first-time explainer (never topped up) as plain text, then marks', async () => {
       getLowBalanceWarnState.mockResolvedValue(low());
       estimateRunwayDays.mockResolvedValue(1.5);
       hasToppedUp.mockResolvedValue(false);
       await maybeWarnLowBalance(ATHLETE);
-      expect(sendTopupButtons).toHaveBeenCalledWith(
+      expect(sendReply).toHaveBeenCalledWith(
         ATHLETE,
         expect.stringContaining('runs on a credits system'),
       );
+      expect(sendTopupButtons).not.toHaveBeenCalled(); // no buttons on the heads-up
       expect(markLowBalanceWarned).toHaveBeenCalledWith(ATHLETE);
     });
 
@@ -183,10 +187,7 @@ describe('maybeWarnLowBalance — §8 low-balance heads-up', () => {
       estimateRunwayDays.mockResolvedValue(1.5);
       hasToppedUp.mockResolvedValue(true);
       await maybeWarnLowBalance(ATHLETE);
-      expect(sendTopupButtons).toHaveBeenCalledWith(
-        ATHLETE,
-        expect.stringContaining('Quick heads-up'),
-      );
+      expect(sendReply).toHaveBeenCalledWith(ATHLETE, expect.stringContaining('Quick heads-up'));
       expect(markLowBalanceWarned).toHaveBeenCalledWith(ATHLETE);
     });
 
@@ -195,7 +196,7 @@ describe('maybeWarnLowBalance — §8 low-balance heads-up', () => {
       estimateRunwayDays.mockResolvedValue(1.5);
       hasToppedUp.mockResolvedValue(true);
       await maybeWarnLowBalance(ATHLETE);
-      const text = sendTopupButtons.mock.calls[0]?.[1] as string;
+      const text = sendReply.mock.calls[0]?.[1] as string;
       expect(text).toContain('$1.20');
       expect(text).toContain('about 2 days');
     });
@@ -203,7 +204,7 @@ describe('maybeWarnLowBalance — §8 low-balance heads-up', () => {
     it('marks after the send even if the send fails (still dedupes)', async () => {
       getLowBalanceWarnState.mockResolvedValue(low());
       estimateRunwayDays.mockResolvedValue(1.5);
-      sendTopupButtons.mockRejectedValue(new Error('telegram down'));
+      sendReply.mockRejectedValue(new Error('telegram down'));
       await maybeWarnLowBalance(ATHLETE);
       expect(markLowBalanceWarned).toHaveBeenCalledWith(ATHLETE);
     });
@@ -213,7 +214,7 @@ describe('maybeWarnLowBalance — §8 low-balance heads-up', () => {
       estimateRunwayDays.mockResolvedValue(1.5);
       hasToppedUp.mockRejectedValue(new Error('db down'));
       await maybeWarnLowBalance(ATHLETE);
-      expect(sendTopupButtons).toHaveBeenCalledWith(
+      expect(sendReply).toHaveBeenCalledWith(
         ATHLETE,
         expect.stringContaining('runs on a credits system'),
       );
@@ -223,7 +224,7 @@ describe('maybeWarnLowBalance — §8 low-balance heads-up', () => {
       getLowBalanceWarnState.mockResolvedValue({ balanceCents: 400, comped: false, warnedAt: null });
       estimateRunwayDays.mockResolvedValue(5);
       await maybeWarnLowBalance(ATHLETE);
-      expect(sendTopupButtons).not.toHaveBeenCalled();
+      expect(sendReply).not.toHaveBeenCalled();
       expect(markLowBalanceWarned).not.toHaveBeenCalled();
     });
 
@@ -231,33 +232,33 @@ describe('maybeWarnLowBalance — §8 low-balance heads-up', () => {
       getLowBalanceWarnState.mockResolvedValue(low({ comped: true }));
       await maybeWarnLowBalance(ATHLETE);
       expect(estimateRunwayDays).not.toHaveBeenCalled();
-      expect(sendTopupButtons).not.toHaveBeenCalled();
+      expect(sendReply).not.toHaveBeenCalled();
     });
 
     it('skips at $0 — the gate owns that case', async () => {
       getLowBalanceWarnState.mockResolvedValue({ balanceCents: 0, comped: false, warnedAt: null });
       await maybeWarnLowBalance(ATHLETE);
-      expect(sendTopupButtons).not.toHaveBeenCalled();
+      expect(sendReply).not.toHaveBeenCalled();
     });
 
     it('skips (dedupe) when already warned this cycle', async () => {
       getLowBalanceWarnState.mockResolvedValue(low({ warnedAt: '2026-06-24T00:00:00Z' }));
       await maybeWarnLowBalance(ATHLETE);
       expect(estimateRunwayDays).not.toHaveBeenCalled();
-      expect(sendTopupButtons).not.toHaveBeenCalled();
+      expect(sendReply).not.toHaveBeenCalled();
       expect(markLowBalanceWarned).not.toHaveBeenCalled();
     });
 
     it('skips when there is no billing row', async () => {
       getLowBalanceWarnState.mockResolvedValue(null);
       await maybeWarnLowBalance(ATHLETE);
-      expect(sendTopupButtons).not.toHaveBeenCalled();
+      expect(sendReply).not.toHaveBeenCalled();
     });
 
     it('bails quietly when the balance read throws', async () => {
       getLowBalanceWarnState.mockRejectedValue(new Error('db down'));
       await expect(maybeWarnLowBalance(ATHLETE)).resolves.toBeUndefined();
-      expect(sendTopupButtons).not.toHaveBeenCalled();
+      expect(sendReply).not.toHaveBeenCalled();
     });
   });
 });
