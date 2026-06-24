@@ -259,9 +259,9 @@ Roughly a week, gated behind the worker + agent loop already running:
 
 1. ✅ **Migration (done 2026-06-22):** `athlete_credits` + `credit_ledger`; the `$5 grant` fires on onboarding completion via the idempotent `grant_signup_credit` RPC. Existing friends backfilled. David comped; friends metered. See §4.
 2. ✅ **Draw-down + gate (done 2026-06-22):** `debit_run_credit` RPC (post-run, idempotent on the run via a partial unique index, comped no-op) + the pre-run gate at dequeue, the **whole gate behind `BILLING_GATE_ENABLED` (default off)** — David's call: meter live now, start enforcing when `/buy` exists. Markup centralized in `src/server/billing/pricing.ts` (`billedCents`). Verified against prod (`scripts/verify-drawdown.ts`, self-cleaning throwaway athlete). See §5.
-3. **Stripe Checkout + webhook:** API route to create Sessions; `checkout.session.completed` + `charge.refunded` webhook handlers (signature-verified, idempotent on payment_intent). Test mode first.
-4. **Telegram commands:** `/balance`, `/buy` with preset buttons, confirmation messages; register in command menu + `/help`.
-5. **Warnings:** heads-up + final, burn-rate helper over `athlete_cost_rollup`.
+3. ✅ **Stripe Checkout + webhook (done 2026-06-23):** API route to create Sessions; `checkout.session.completed` + `charge.refunded` webhook handlers (signature-verified, idempotent on `(payment_intent, kind)` — per-kind, not the PI alone, so a topup and its later refund coexist; see §6). Test mode first.
+4. ✅ **Telegram commands (done 2026-06-23):** `/balance`, `/buy` with preset buttons, confirmation messages; registered in the command menu + `/help`.
+5. ✅ **Warnings (done 2026-06-24):** heads-up + final, burn-rate helper over `athlete_cost_rollup`. Heads-up at ~2-day runway (plain text, first-time credits explainer vs recurring short version by top-up history); final at $0 carries the preset buttons. See §8's step-5 note for the deviations from the original spec.
 6. **Auto-reload:** card capture via `setup_future_usage`; off-session PaymentIntent at the gate; toggle UI.
 7. **Admin:** balance/ledger view, manual adjust, `comped` toggle, paused-state display.
 8. **Pause:** `athletes.paused_at` / `pause_resumes_at` columns; `/pause` (incl. timed) + `/resume`; the enqueue-cron skip filter; the auto-resume cron pass.
