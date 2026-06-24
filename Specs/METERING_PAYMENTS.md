@@ -183,6 +183,7 @@ Lets a friend stop proactive daily check-ins while away — vacation, travel, an
 - **`/resume`** — clears the pause; daily check-ins resume on the next scheduled day. Bot confirms.
 - **While paused:**
   - The daily enqueue (SPEC §3.5/§3.7 — the Vercel cron that inserts `daily-{athlete_id}-{date}` jobs) **skips paused athletes**, so daily spend goes to zero. This filter is the load-bearing change; the command is a thin wrapper over it.
+  - **All proactive pushes stop, not just the daily.** The post-activity trigger (SPEC §3.5.1 — the Strava-webhook `post_activity` run, `src/server/strava/activity-trigger.ts`) also skips paused athletes: it's proactive spend in the same family, and a Strava upload is **not** engagement (§10.5), so logging a run while paused neither resumes the athlete nor earns a message. (Shipped 2026-06-24 — the trigger originally checked only onboarded/non-test + the cooldown, so a quiet-but-still-running friend kept getting pinged.)
   - Low-balance warnings and the auto-reload check are suspended too — nothing is burning, so there's nothing to warn about or reload for.
   - **Ad-hoc messages still work.** If the friend messages the bot it answers and debits normally (user-initiated = getting value). It does *not* silently flip daily back on; it appends a light "daily check-ins are still paused — /resume to switch them back on." Keeps state predictable.
 - **Auto-resume:** a daily cron pass resumes any athlete whose `pause_resumes_at` has passed and sends a short welcome-back message.
