@@ -1,16 +1,10 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 // pause.ts imports telegramBot from ./bot and supabaseAdmin from @/lib/db at the
 // top level; isInactive uses neither, so stub both to keep this a pure unit test.
-// The manual pause/resume helpers also reach enqueueJob + nowInTimezone — stub
-// those too so this stays a pure unit test (no DB, no job queue, no clock).
 import { vi } from 'vitest';
 vi.mock('../bot', () => ({ telegramBot: vi.fn() }));
 vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
-vi.mock('@/server/jobs/enqueue', () => ({ enqueueJob: vi.fn().mockResolvedValue(undefined) }));
-vi.mock('../checkin/dispatcher', () => ({
-  nowInTimezone: vi.fn().mockReturnValue({ date: '2026-06-14', time: '05:00', hour: 5 }),
-}));
 
 import {
   isInactive,
@@ -24,7 +18,6 @@ import {
 } from '../pause';
 import { supabaseAdmin } from '@/lib/db';
 import { telegramBot } from '../bot';
-import { enqueueJob } from '@/server/jobs/enqueue';
 import type { Database } from '@/lib/db-types';
 
 type AthleteRow = Database['public']['Tables']['athletes']['Row'];
@@ -227,35 +220,18 @@ describe('pauseAthleteManual', () => {
 });
 
 describe('resumeAthlete', () => {
-  beforeEach(() => {
-    vi.mocked(enqueueJob).mockClear();
-  });
-
-  it('clears the pause and enqueues today’s check-in exactly once', async () => {
+  it('clears the pause and returns resumed (delivery is the caller’s job)', async () => {
     const updates = stubSupabaseForUpdate();
-    const result = await resumeAthlete({
-      id: 'r1',
-      paused_at: '2026-06-10T00:00:00Z',
-      timezone: 'America/Los_Angeles',
-    });
+    const result = await resumeAthlete({ id: 'r1', paused_at: '2026-06-10T00:00:00Z' });
     expect(result).toBe('resumed');
     expect(updates).toEqual([{ id: 'r1', patch: { paused_at: null, pause_reason: null } }]);
-    expect(vi.mocked(enqueueJob)).toHaveBeenCalledOnce();
-    expect(vi.mocked(enqueueJob)).toHaveBeenCalledWith('daily_checkin', 'daily-r1-2026-06-14', {
-      athlete_id: 'r1',
-    });
   });
 
-  it('is idempotent — a not-paused athlete neither clears nor enqueues', async () => {
+  it('is idempotent — a not-paused athlete writes nothing', async () => {
     const updates = stubSupabaseForUpdate();
-    const result = await resumeAthlete({
-      id: 'r2',
-      paused_at: null,
-      timezone: 'America/Los_Angeles',
-    });
+    const result = await resumeAthlete({ id: 'r2', paused_at: null });
     expect(result).toBe('not_paused');
     expect(updates).toHaveLength(0);
-    expect(vi.mocked(enqueueJob)).not.toHaveBeenCalled();
   });
 });
 

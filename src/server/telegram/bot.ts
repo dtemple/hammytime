@@ -1049,11 +1049,29 @@ async function handleResumeCommand(ctx: CommandContext<Context>): Promise<void> 
     .insert({ athlete_id: athlete.id, channel: 'tg', direction: 'in', body: '/resume' });
 
   const result = await resumeAthlete(athlete);
-  const body =
-    result === 'resumed'
-      ? "Back on. I'll pull your latest and have an update for you shortly."
-      : 'Your daily check-ins are already on — nothing to resume.';
-  await sendAndLog(athlete.id, ctx.chat.id, body);
+  if (result === 'not_paused') {
+    await sendAndLog(
+      athlete.id,
+      ctx.chat.id,
+      'Your daily check-ins are already on — nothing to resume.',
+    );
+    return;
+  }
+
+  // Coming back should feel live: kick off a fresh check-in now. Key it per /resume
+  // (message_id), NOT the cron's daily-{id}-{date} key — that key already exists on
+  // any day the morning run fired, so reusing it silently dedups (ignoreDuplicates)
+  // and nothing arrives. resumeAthlete's paused→active gate means only the resuming
+  // /resume reaches here (a repeat returns 'not_paused'), so this is one run per
+  // resume — the cost David accepted.
+  await enqueueJob('daily_checkin', `daily-resume-${athlete.id}-${ctx.message?.message_id}`, {
+    athlete_id: athlete.id,
+  });
+  await sendAndLog(
+    athlete.id,
+    ctx.chat.id,
+    "Back on. I'll pull your latest and have an update for you shortly.",
+  );
 }
 
 // /help — what the bot can do + the §9 credits disclosure. Reads the same catalog the

@@ -9,9 +9,7 @@
 import { InlineKeyboard } from 'grammy';
 import { supabaseAdmin } from '@/lib/db';
 import type { Database } from '@/lib/db-types';
-import { enqueueJob } from '@/server/jobs/enqueue';
 import { telegramBot } from './bot';
-import { nowInTimezone } from './checkin/dispatcher';
 
 type AthleteRow = Database['public']['Tables']['athletes']['Row'];
 
@@ -267,15 +265,19 @@ export async function pauseAthleteManual(
 }
 
 /**
- * Clear a pause via /resume AND enqueue today's check-in so coming back is live
- * rather than "starts tomorrow" (David's call — one agent run per resume, accepted).
- * The per-day key dedups against enqueueJob's ignore-duplicates upsert, so a resume
- * on a day the check-in already ran is a no-op enqueue (no double-charge). Clears
- * any pause reason — a friend running /resume means "back on" regardless of how they
- * were paused. Returns 'not_paused' for the idempotent reply.
+ * Clear a pause via /resume. Clears any pause reason — a friend running /resume
+ * means "back on" regardless of how they were paused. Returns 'resumed' on the
+ * paused→active transition, or 'not_paused' for the idempotent reply.
+ *
+ * Delivery of the immediate "coming back feels live" check-in is the caller's job
+ * (the /resume command handler), NOT this function: it must be keyed per-/resume
+ * rather than on the cron's `daily-{id}-{date}` key, because that key already
+ * exists on any day the morning run fired — reusing it would silently dedup and
+ * nothing would arrive. The transition gate here (only the resuming /resume returns
+ * 'resumed') is what makes that one agent run per resume.
  */
 export async function resumeAthlete(
-  athlete: Pick<AthleteRow, 'id' | 'paused_at' | 'timezone'>,
+  athlete: Pick<AthleteRow, 'id' | 'paused_at'>,
 ): Promise<'resumed' | 'not_paused'> {
   if (athlete.paused_at == null) return 'not_paused';
   const { error } = await supabaseAdmin()
@@ -283,7 +285,5 @@ export async function resumeAthlete(
     .update({ paused_at: null, pause_reason: null })
     .eq('id', athlete.id);
   if (error) throw new Error(`resumeAthlete failed: ${error.message}`);
-  const { date } = nowInTimezone(athlete.timezone);
-  await enqueueJob('daily_checkin', `daily-${athlete.id}-${date}`, { athlete_id: athlete.id });
   return 'resumed';
 }
