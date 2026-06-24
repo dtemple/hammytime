@@ -259,7 +259,7 @@ Roughly a week, gated behind the worker + agent loop already running:
 6. **Auto-reload:** card capture via `setup_future_usage`; off-session PaymentIntent at the gate; toggle UI.
 7. **Admin:** balance/ledger view, manual adjust, `comped` toggle, paused-state display.
 8. **Pause:** `athletes.paused_at` / `pause_resumes_at` columns; `/pause` (incl. timed) + `/resume`; the enqueue-cron skip filter; the auto-resume cron pass.
-9. **Model selection (`/model`):** `athletes.model_preference` column; per-run model resolve in the worker; `/model` command + buttons; menu/`/help`. Independent of the gate and warnings — can land any time. See §14.
+9. **Model tiers (`/model`):** `athletes.model_tier` column; per-source model resolve in the worker (proactive = daily + post-activity → cheaper, interactive = replies → smart); `/model` tier buttons; menu/`/help`. The Haiku-proactive **default** is gated on the §14 A/B; the tier mechanism + Saver ship regardless. Independent of the gate and warnings — can land any time. See §14.
 
 Ship 1–4 together (the minimum that lets a friend run out and pay). 5–9 follow; pause (8) and model selection (9) can each land early and independently.
 
@@ -280,46 +280,70 @@ Ship 1–4 together (the minimum that lets a friend run out and pay). 5–9 foll
 
 ## 14. Model selection (`/model`)
 
-**Status: proposed 2026-06-24 — pending David's review.** A `/model` command that lets a friend switch the coaching model between Haiku, Sonnet, and Opus to trade cost for quality. It lives in this doc because **model choice is the single biggest lever on burn rate** — §2/§13 already name "Sonnet-for-daily routing" as the remaining cost lever; this generalizes that from a global config knob to a per-athlete choice.
+**Status: proposed 2026-06-24 — pending David's review.** A `/model` command that lets a friend pick a coaching **tier** (Saver / Standard / Premium), trading cost for quality. Each tier is a *(proactive model, interactive model)* pair, not a single model — because the two kinds of run have opposite cost/value profiles, and the highest-leverage move is to put the cheap model on the high-volume automated runs while keeping the good model where a friend is actually in a conversation. The smart split is also the **default**, so the whole friend group gets the cut without anyone choosing. Model choice is the biggest remaining burn-rate lever (§2/§13).
 
 ### Why it fits the metering model with no billing change
 
-The draw-down meters **actual** model cost: each run records `agent_runs.cost_usd` from the SDK's real token usage, and `billedCents` applies the flat 1.5× markup on top (§2, §5). So the model the run used is already baked into the number — switch to Haiku and the debit (and the §8 runway) shrink automatically; switch to Opus and they grow. **No markup change, no per-model pricing table in our code** — the ledger captures the truth per run. The markup is model-agnostic on purpose.
+The draw-down meters **actual** model cost: each run records `agent_runs.cost_usd` from the SDK's real token usage, and `billedCents` applies the flat 1.5× markup on top (§2, §5). So the model a run used is already baked into the number — a Haiku run debits less (and the §8 runway stretches) automatically; an Opus run debits more. **No markup change, no per-model pricing table in our code** — the ledger captures the truth per run. The markup is model-agnostic on purpose.
 
-### The lever (list prices, per MTok, measured 2026-06-24 via the Claude API skill)
+### Where the spend actually goes (measured 2026-06-24, friends only, trailing 30 days)
 
-| Model | Model ID | Input | Output | vs Sonnet | Est. billed/day | $25 runway |
-|---|---|---|---|---|---|---|
-| Haiku 4.5 | `claude-haiku-4-5` | $1 | $5 | ~⅓ | ~$0.27 | ~13 weeks |
-| **Sonnet 4.6 (default)** | `claude-sonnet-4-6` | $3 | $15 | 1× | ~$0.80 | ~4.5 weeks |
-| Opus 4.8 | `claude-opus-4-8` | $5 | $25 | ~1.67× | ~$1.33 | ~2.7 weeks |
+| Bucket | Run source | Share of spend |
+|---|---|---|
+| **Proactive** — morning daily | `daily_checkin` | 38% |
+| **Proactive** — post-activity update | `post_activity` | ~19% |
+| **Interactive** — replies, `/fresh_update`, `/adjust_plan` | `tg_message` | ~41% |
+| (fixed) onboarding + race lookup | — | ~1% |
 
-The current `COACH_MODEL` default is **Sonnet 4.6** (`worker/config.ts`), so the measured §2 baseline (~$0.53/day raw → ~$0.80 billed) is the Sonnet row. The Haiku/Opus billed-per-day and runway columns scale that baseline by the input/output price ratio — a planning estimate only; real cost depends on the token mix and the 83% cache-read share (§2), and the ledger records the true number per run.
+The two **proactive** runs (daily + post-activity ≈ **57%**) are automated pushes — formulaic, data-driven, and either unread-risk (daily) or short-and-reactive (post-activity). They're the Haiku target. The **interactive** ~41% is where coaching judgment lives and where a friend is paying attention; it stays on the smart model. (List prices per MTok, measured via the Claude API skill: Haiku 4.5 `claude-haiku-4-5` $1/$5 ≈ ⅓ of Sonnet; Sonnet 4.6 `claude-sonnet-4-6` $3/$15 = today's default; Opus 4.8 `claude-opus-4-8` $5/$25 ≈ 1.67×.)
+
+### Tiers (the user-facing surface)
+
+| Tier | Proactive (daily + post-activity) | Interactive (replies) | Est. billed/day | $25 runway | vs today |
+|---|---|---|---|---|---|
+| **Saver** | Haiku | Haiku | ~$0.26 | ~13 weeks | ~−67% |
+| **Standard (default)** | Haiku† | Sonnet | ~$0.49 | ~7 weeks | ~−39% |
+| **Premium** | Sonnet | Opus | ~$1.02 | ~3.5 weeks | ~+27% |
+
+Estimates scale the measured §2 Sonnet-both baseline ($0.80 billed/day) by each bucket's model ratio and the 38/19/41 split above — planning numbers only; the ledger records the truth. **† Standard's proactive slot is Haiku *pending the A/B below.* Until the A/B passes, Standard = Sonnet-both (today's behavior) and Haiku-proactive lives only in Saver (opt-in, the friend chose it).** Flipping Standard's proactive to Haiku is a one-line tier-map change that then applies to everyone on the default.
 
 ### Decisions (proposed — confirm before building)
 
 | Dimension | Proposed |
 |---|---|
-| Models offered | Haiku 4.5, Sonnet 4.6, Opus 4.8 (the three above). |
-| Default | **Sonnet 4.6 — unchanged.** A friend opts into a different model; the default stays what every athlete runs today. |
-| Scope | The **coaching runs only** — the `query()` call in `worker/run-agent.ts` (`daily_checkin` + `tg_message`). **Not** onboarding (the Sonnet slot engine is fixed) and **not** the plan-repair pass (`worker/plan-repair.ts` — keep it cheap and deterministic). |
-| Storage | `athletes.model_preference text null` (null = default). Coaching-loop state, like `paused_at` — lives on `athletes`, not `athlete_credits`. |
-| Surface | `/model` → three buttons (current one marked); tap writes the preference, collapses the keyboard, confirms. Registered in the BotFather menu + `/help`. |
-| Cost framing | The `/model` copy names the trade-off plainly (Haiku ~3× cheaper, Opus ~1.7× pricier than the default; lower vs higher quality). The metered draw-down already reflects it — nothing else to disclose. |
+| Surface | Tiers, not raw models — `/model` shows **Saver / Standard / Premium** (current marked), each a (proactive, interactive) pair. Hides the model matrix behind a cost↔quality dial a friend can reason about. |
+| Default | **Standard = the smart split** (Haiku proactive / Sonnet interactive), once the A/B clears; Sonnet-both until then. A friend can switch tiers but doesn't have to. |
+| Proactive vs interactive | Keyed on the run **`source`** (`daily_checkin` + `post_activity` = proactive; `tg_message` = interactive), which the worker already passes to `runAgent` — **not** `agent_runs.kind`, which collapses post-activity into `adhoc`. |
+| Scope | The coaching `query()` in `worker/run-agent.ts` only. **Not** onboarding (fixed Sonnet engine) and **not** plan-repair (`worker/plan-repair.ts` — stays Sonnet so a Haiku daily's plan edit still gets a smart repair pass). |
+| Storage | `athletes.model_tier text null` (null = Standard). Coaching-loop state, like `paused_at` — on `athletes`, not `athlete_credits`. Storing the tier (not raw model ids) means redefining a tier is a code change, not a data migration. |
+| Cost framing | The `/model` copy names the trade-off plainly (Saver stretches credit / Premium sharpens replies). The metered draw-down already reflects it — nothing else to disclose. |
 
 ### Implementation
 
-- **Migration:** `athletes.model_preference text null` with a CHECK constraint on the three allowed ids (or validate in TS against the shared allowlist — pick one place).
-- **Shared allowlist:** one map `{ Haiku → 'claude-haiku-4-5', Sonnet → 'claude-sonnet-4-6', Opus → 'claude-opus-4-8' }` plus the default, in a single module imported by both the worker (resolve) and the bot (`/model` buttons) — the same single-source-of-truth shape as `pricing.ts` and `commands.ts`.
-- **Worker resolve:** in `worker/run-agent.ts`, read the athlete's `model_preference` and fall back to `COACH_MODEL`; pass the resolved id into `query({ options: { model } })` and `persistRun` (which already records `model`). A small `resolveCoachModel(athlete)` helper.
-- **Bot:** `/model` command + `model:<id>` callback in `src/server/telegram/bot.ts`, mirroring `/buy` (onboarded-guard, three-button keyboard with the current pick marked, tap writes the column + collapses the keyboard + confirms). Register `/model` in `commands.ts` (menu + `/help`).
+- **Migration:** `athletes.model_tier text null` with a CHECK on `('saver','standard','premium')` (null = `standard`).
+- **Shared tier map:** one module — model-id constants, `PROACTIVE_SOURCES = {'daily_checkin','post_activity'}`, and `TIERS = { saver:{proactive:HAIKU,interactive:HAIKU}, standard:{proactive:HAIKU†,interactive:SONNET}, premium:{proactive:SONNET,interactive:OPUS} }` — imported by both the worker (resolve) and the bot (`/model` buttons), the single-source-of-truth shape of `pricing.ts`/`commands.ts`. (`standard.proactive` is the A/B-gated value: SONNET until the A/B passes, then HAIKU.)
+- **Worker resolve:** `resolveCoachModel(athlete, source)` → `tier = athlete.model_tier ?? 'standard'`; `bucket = PROACTIVE_SOURCES.has(source) ? 'proactive' : 'interactive'`; `return TIERS[tier][bucket]`. Pass into `query({ options: { model } })` and `persistRun` (already records `model`). The `source` is already an argument to `runAgent`.
+- **Bot:** `/model` command + `model:<tier>` callback in `src/server/telegram/bot.ts`, mirroring `/buy` (onboarded-guard, three tier buttons with the current pick marked, tap writes `model_tier` + collapses the keyboard + confirms). Register `/model` in `commands.ts` (menu + `/help`).
 - **Deploy:** worker change → `fly deploy`; bot/menu change → web push. Both surfaces.
+
+### The A/B that gates the default
+
+The tier mechanism and the **Saver** tier ship regardless. The A/B decides one thing: whether **Standard's proactive slot is Haiku** (a ~39% cut for everyone on the default) or stays **Sonnet** (today's behavior, Haiku-proactive available only via opt-in Saver). The question is *is Haiku good enough for the proactive runs* — decisive for the morning daily (the flagship, most-read message) and lower-stakes for post-activity.
+
+- **Method — controlled side-by-side dry-run.** Hydrate a real athlete's folder once, run the proactive agent against that exact snapshot twice (Haiku and Sonnet) with **send and file-sync disabled**, capture both outputs + cost/tokens/turns. Same inputs, only the model differs.
+- **Harness.** `scripts/ab-daily-model.ts` reusing the worker's `hydrate()` + the proactive prompt + `buildAgentOptions()` (extract it from `run-agent.ts` — the `Specs/EVAL_HARNESS.md` prerequisite, so not throwaway), model overridable, side effects off. Run both `daily_checkin` and `post_activity` sources.
+- **Sample.** ~6–10 snapshots spanning varied recent Strava — normal day, hard workout, missed run, long run, rest day, an athlete mid-plan-change — across the real friends (read-only; nothing sends).
+- **Judge.** (1) **Factual accuracy** — did Haiku read the Strava/plan correctly, no invented data? Objective and checkable against the folder; a miss is an auto-fail, since a proactive run's whole job is to be grounded. (2) **Voice/quality** — a blind Opus judge scores each pair (model identity hidden) and David reads a handful (his voice bar is the real gate).
+- **Decision rule.** Haiku becomes Standard's proactive model only if it holds factual accuracy across the sample **and** David accepts the voice — weighting the daily heaviest. Otherwise Standard stays Sonnet-both and Haiku-proactive lives in Saver.
+- **Cost.** ~2× a handful of runs, well under $1. Effectively Phase 0 of `Specs/EVAL_HARNESS.md`.
 
 ### Open risks / notes
 
-- **Haiku context + effort.** Haiku 4.5 is a 200K context (vs 1M for Sonnet/Opus) and does **not** support the `effort` parameter. The per-athlete folder + 14-day Strava + memory fits 200K comfortably, and the worker doesn't set `effort` today — so neither bites now, but confirm before wiring if the agent options change. The real Haiku trade-off is coaching quality on nuanced conversational turns, which is the athlete's call to make — that's the point of the command.
-- **No guardrail on Opus.** Opus burns ~1.7× faster; for a friends-only group we just disclose it in the copy rather than gating it. Revisit if it becomes a real product.
-- **Interaction with the gate (§5).** None special — a pricier model draws the balance down faster and the `$0` gate (once on) catches it the same way. Runway in `/balance` and the §8 warnings already read from `cost_usd`, so they track the chosen model for free.
+- **Post-activity is the safest Haiku candidate; the daily carries the quality risk.** Post-activity is short, reactive, and lower-stakes; the morning daily is the flagship message everyone reads — so the A/B weights the daily heaviest, and a clean option if Haiku splits the difference is Haiku-only-on-post-activity for Standard's proactive slot.
+- **Replies stay smart in every tier but Saver.** The interactive ~41% bucket — where coaching judgment and engagement live — is Sonnet (Standard) or Opus (Premium) and only drops to Haiku if a friend explicitly picks Saver. So the default cut never touches conversational quality.
+- **Haiku context + effort.** Haiku 4.5 is 200K context (vs 1M) and doesn't support `effort`. The folder + 14-day Strava + memory fits 200K comfortably and the worker sets no `effort` today — neither bites now; re-check if agent options change.
+- **No guardrail on Opus (Premium).** ~1.7× faster burn; for a friends-only group we disclose it in the copy rather than gate it.
+- **Interaction with the gate (§5).** None special — a pricier tier draws the balance down faster and the `$0` gate (once on) catches it the same way. `/balance` runway and the §8 warnings read from `cost_usd`, so they track the chosen tier for free.
 
 ---
 
