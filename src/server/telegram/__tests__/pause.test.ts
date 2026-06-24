@@ -1,10 +1,16 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 
 // pause.ts imports telegramBot from ./bot and supabaseAdmin from @/lib/db at the
 // top level; isInactive uses neither, so stub both to keep this a pure unit test.
+// The manual pause/resume helpers also reach enqueueJob + nowInTimezone — stub
+// those too so this stays a pure unit test (no DB, no job queue, no clock).
 import { vi } from 'vitest';
 vi.mock('../bot', () => ({ telegramBot: vi.fn() }));
 vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
+vi.mock('@/server/jobs/enqueue', () => ({ enqueueJob: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('../checkin/dispatcher', () => ({
+  nowInTimezone: vi.fn().mockReturnValue({ date: '2026-06-14', time: '05:00', hour: 5 }),
+}));
 
 import {
   isInactive,
@@ -12,9 +18,16 @@ import {
   INACTIVITY_WINDOW_DAYS,
   sweepCheckBacks,
   CHECK_BACK_NUDGE,
+  pauseAthleteManual,
+  resumeAthlete,
+  clearAutoInactivityPause,
 } from '../pause';
 import { supabaseAdmin } from '@/lib/db';
 import { telegramBot } from '../bot';
+import { enqueueJob } from '@/server/jobs/enqueue';
+import type { Database } from '@/lib/db-types';
+
+type AthleteRow = Database['public']['Tables']['athletes']['Row'];
 
 const NOW = Date.parse('2026-06-14T12:00:00.000Z');
 const cutoffMs = NOW - INACTIVITY_WINDOW_DAYS * 86_400_000;
@@ -172,5 +185,100 @@ describe('sweepCheckBacks', () => {
 
     expect(sent).toBe(0);
     expect(updates).toHaveLength(0); // never nulled → retried next tick
+  });
+});
+
+// --- §10: manual /pause + /resume ---
+
+/** supabaseAdmin stub that records every `.from(...).update(patch).eq('id', id)`
+ *  the helper makes, with no real DB. */
+function stubSupabaseForUpdate() {
+  const updates: Array<{ id: string; patch: Record<string, unknown> }> = [];
+  vi.mocked(supabaseAdmin).mockReturnValue({
+    from: () => ({
+      update: (patch: Record<string, unknown>) => ({
+        eq: (_col: string, id: string) => {
+          updates.push({ id, patch });
+          return Promise.resolve({ error: null });
+        },
+      }),
+    }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any);
+  return updates;
+}
+
+describe('pauseAthleteManual', () => {
+  it('sets paused_at + pause_reason=manual for an active athlete', async () => {
+    const updates = stubSupabaseForUpdate();
+    const result = await pauseAthleteManual({ id: 'm1', paused_at: null });
+    expect(result).toBe('paused');
+    expect(updates).toEqual([
+      { id: 'm1', patch: { paused_at: expect.any(String), pause_reason: 'manual' } },
+    ]);
+  });
+
+  it('is idempotent — an already-paused athlete writes nothing', async () => {
+    const updates = stubSupabaseForUpdate();
+    const result = await pauseAthleteManual({ id: 'm2', paused_at: '2026-06-10T00:00:00Z' });
+    expect(result).toBe('already_paused');
+    expect(updates).toHaveLength(0);
+  });
+});
+
+describe('resumeAthlete', () => {
+  beforeEach(() => {
+    vi.mocked(enqueueJob).mockClear();
+  });
+
+  it('clears the pause and enqueues today’s check-in exactly once', async () => {
+    const updates = stubSupabaseForUpdate();
+    const result = await resumeAthlete({
+      id: 'r1',
+      paused_at: '2026-06-10T00:00:00Z',
+      timezone: 'America/Los_Angeles',
+    });
+    expect(result).toBe('resumed');
+    expect(updates).toEqual([{ id: 'r1', patch: { paused_at: null, pause_reason: null } }]);
+    expect(vi.mocked(enqueueJob)).toHaveBeenCalledOnce();
+    expect(vi.mocked(enqueueJob)).toHaveBeenCalledWith('daily_checkin', 'daily-r1-2026-06-14', {
+      athlete_id: 'r1',
+    });
+  });
+
+  it('is idempotent — a not-paused athlete neither clears nor enqueues', async () => {
+    const updates = stubSupabaseForUpdate();
+    const result = await resumeAthlete({
+      id: 'r2',
+      paused_at: null,
+      timezone: 'America/Los_Angeles',
+    });
+    expect(result).toBe('not_paused');
+    expect(updates).toHaveLength(0);
+    expect(vi.mocked(enqueueJob)).not.toHaveBeenCalled();
+  });
+});
+
+describe('clearAutoInactivityPause leaves a manual pause intact', () => {
+  it('returns false and writes nothing for a manual pause', async () => {
+    const updates = stubSupabaseForUpdate();
+    const cleared = await clearAutoInactivityPause({
+      id: 'p1',
+      paused_at: '2026-06-10T00:00:00Z',
+      pause_reason: 'manual',
+    } as AthleteRow);
+    expect(cleared).toBe(false);
+    expect(updates).toHaveLength(0); // a manual pause survives an inbound (§10.5)
+  });
+
+  it('clears an auto_inactivity pause', async () => {
+    const updates = stubSupabaseForUpdate();
+    const cleared = await clearAutoInactivityPause({
+      id: 'p2',
+      paused_at: '2026-06-10T00:00:00Z',
+      pause_reason: 'auto_inactivity',
+    } as AthleteRow);
+    expect(cleared).toBe(true);
+    expect(updates).toEqual([{ id: 'p2', patch: { paused_at: null, pause_reason: null } }]);
   });
 });

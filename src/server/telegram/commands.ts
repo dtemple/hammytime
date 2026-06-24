@@ -17,6 +17,8 @@ export const BOT_COMMANDS: BotCommand[] = [
   { command: 'balance', description: 'check your credit balance', inMenu: true },
   { command: 'buy', description: 'add coaching credit', inMenu: true },
   { command: 'fresh_update', description: 'get a fresh update right now', inMenu: true },
+  { command: 'pause', description: 'pause your daily check-ins', inMenu: true },
+  { command: 'resume', description: 'turn your daily check-ins back on', inMenu: true },
   { command: 'adjust_plan', description: 'change your training plan', inMenu: true },
   { command: 'edit_profile', description: 'update your profile', inMenu: true },
   { command: 'calendar', description: 'sync your training to a calendar', inMenu: true },

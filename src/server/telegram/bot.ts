@@ -13,7 +13,12 @@ import {
 } from './onboarding/index';
 import { handleCheckinCommand, handleWellnessMessage, nowInTimezone } from './checkin/dispatcher';
 import { selectionKeyboardFromTap } from './onboarding/dispatcher';
-import { clearAutoInactivityPause, RESUME_AUTO_CALLBACK } from './pause';
+import {
+  clearAutoInactivityPause,
+  pauseAthleteManual,
+  resumeAthlete,
+  RESUME_AUTO_CALLBACK,
+} from './pause';
 import { handleV3Message, handleV3Callback } from './onboarding/engine/router';
 import { fetchRecentActivities, hasStravaConnection } from '@/server/strava/activities';
 import { disconnectStrava } from '@/server/strava/disconnect';
@@ -281,6 +286,19 @@ export async function handleInboundText(ctx: Context): Promise<void> {
     } catch (err) {
       // Reaction is cosmetic — never let it break the enqueue/200.
       console.warn('[bot] react failed', err);
+    }
+    // Ad-hoc message while manually paused (§10): the message is answered + debited
+    // normally and does NOT flip the daily back on (clearAutoInactivityPause above
+    // left a manual pause intact). Append a light reminder so the paused state stays
+    // visible. The worker sends the real reply async, so this is a separate inline
+    // message — it lands with the 👀, ahead of the coach reply. Auto/dormant pauses
+    // don't reach here (auto was cleared above; dormant athletes have no active plan).
+    if (athlete.paused_at != null && athlete.pause_reason === 'manual') {
+      await sendAndLog(
+        athlete.id,
+        ctx.chat!.id,
+        'Your daily check-ins are still paused — /resume to switch them back on.',
+      );
     }
   } else {
     await ctx.reply('Your onboarding is complete — your daily updates start soon.');
@@ -1000,6 +1018,44 @@ export async function handleBuy(ctx: Context, athlete: AthleteRow, data: string)
   }
 }
 
+// /pause — stop the proactive daily check-in indefinitely (§10). Thin wrapper over
+// pauseAthleteManual; the cron's `paused_at != null` filter does the actual work.
+// No agent run, so no in-flight guard. Already-paused replies idempotently.
+async function handlePauseCommand(ctx: CommandContext<Context>): Promise<void> {
+  const athlete = await loadOnboardedAthlete(ctx);
+  if (!athlete) return;
+  const db = supabaseAdmin();
+  await db
+    .from('messages')
+    .insert({ athlete_id: athlete.id, channel: 'tg', direction: 'in', body: '/pause' });
+
+  const result = await pauseAthleteManual(athlete);
+  const body =
+    result === 'paused'
+      ? "Done — your daily check-ins are off until you run /resume. Message me anytime in the meantime and I'll still answer."
+      : 'Your daily check-ins are already off. Run /resume when you want them back.';
+  await sendAndLog(athlete.id, ctx.chat.id, body);
+}
+
+// /resume — clear the pause and pull today's check-in forward so coming back is
+// live (§10). resumeAthlete enqueues the daily job idempotently on the per-day key.
+// Not-paused replies idempotently.
+async function handleResumeCommand(ctx: CommandContext<Context>): Promise<void> {
+  const athlete = await loadOnboardedAthlete(ctx);
+  if (!athlete) return;
+  const db = supabaseAdmin();
+  await db
+    .from('messages')
+    .insert({ athlete_id: athlete.id, channel: 'tg', direction: 'in', body: '/resume' });
+
+  const result = await resumeAthlete(athlete);
+  const body =
+    result === 'resumed'
+      ? "Back on. I'll pull your latest and have an update for you shortly."
+      : 'Your daily check-ins are already on — nothing to resume.';
+  await sendAndLog(athlete.id, ctx.chat.id, body);
+}
+
 // /help — what the bot can do + the §9 credits disclosure. Reads the same catalog the
 // BotFather menu does (commands.ts), so the two never drift. Works for anyone, even
 // pre-link (no athlete row → reply without logging).
@@ -1188,6 +1244,8 @@ function getBot(): Bot {
     _bot.command('edit_profile', handleEditProfileCommand);
     _bot.command('balance', handleBalanceCommand);
     _bot.command('buy', handleBuyCommand);
+    _bot.command('pause', handlePauseCommand);
+    _bot.command('resume', handleResumeCommand);
     _bot.command('help', handleHelpCommand);
     _bot.command('cancel', async (ctx) => {
       const db = supabaseAdmin();

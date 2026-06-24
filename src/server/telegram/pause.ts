@@ -9,7 +9,9 @@
 import { InlineKeyboard } from 'grammy';
 import { supabaseAdmin } from '@/lib/db';
 import type { Database } from '@/lib/db-types';
+import { enqueueJob } from '@/server/jobs/enqueue';
 import { telegramBot } from './bot';
+import { nowInTimezone } from './checkin/dispatcher';
 
 type AthleteRow = Database['public']['Tables']['athletes']['Row'];
 
@@ -233,4 +235,55 @@ export async function sweepCheckBacks(): Promise<number> {
     }
   }
   return sent;
+}
+
+// ---------------------------------------------------------------------------
+// Manual pause / resume (METERING_PAYMENTS.md §10 — /pause, /resume)
+// ---------------------------------------------------------------------------
+//
+// The friend-facing half of the pause primitive: /pause sets a manual, indefinite
+// pause; /resume clears it and pulls today's check-in forward so coming back feels
+// live. Both reuse the columns and enqueue path the auto-pause (§10.5) already
+// proved out. pause_reason='manual' is the switch that keeps an inbound from
+// auto-resuming (clearAutoInactivityPause), so a friend can ask an ad-hoc question
+// while still on vacation. No timed form, no auto-resume — indefinite until /resume.
+
+/**
+ * Apply a manual /pause. Indefinite (no pause_resumes_at — timed pause is cut).
+ * Returns 'already_paused' when any pause (manual, auto_inactivity, or dormant) is
+ * already in effect, so the command can reply idempotently and leave the existing
+ * reason untouched.
+ */
+export async function pauseAthleteManual(
+  athlete: Pick<AthleteRow, 'id' | 'paused_at'>,
+): Promise<'paused' | 'already_paused'> {
+  if (athlete.paused_at != null) return 'already_paused';
+  const { error } = await supabaseAdmin()
+    .from('athletes')
+    .update({ paused_at: new Date().toISOString(), pause_reason: 'manual' })
+    .eq('id', athlete.id);
+  if (error) throw new Error(`pauseAthleteManual failed: ${error.message}`);
+  return 'paused';
+}
+
+/**
+ * Clear a pause via /resume AND enqueue today's check-in so coming back is live
+ * rather than "starts tomorrow" (David's call — one agent run per resume, accepted).
+ * The per-day key dedups against enqueueJob's ignore-duplicates upsert, so a resume
+ * on a day the check-in already ran is a no-op enqueue (no double-charge). Clears
+ * any pause reason — a friend running /resume means "back on" regardless of how they
+ * were paused. Returns 'not_paused' for the idempotent reply.
+ */
+export async function resumeAthlete(
+  athlete: Pick<AthleteRow, 'id' | 'paused_at' | 'timezone'>,
+): Promise<'resumed' | 'not_paused'> {
+  if (athlete.paused_at == null) return 'not_paused';
+  const { error } = await supabaseAdmin()
+    .from('athletes')
+    .update({ paused_at: null, pause_reason: null })
+    .eq('id', athlete.id);
+  if (error) throw new Error(`resumeAthlete failed: ${error.message}`);
+  const { date } = nowInTimezone(athlete.timezone);
+  await enqueueJob('daily_checkin', `daily-${athlete.id}-${date}`, { athlete_id: athlete.id });
+  return 'resumed';
 }
