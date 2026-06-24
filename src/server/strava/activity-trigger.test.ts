@@ -82,9 +82,7 @@ function makeDb(
                   return {
                     gte: vi.fn().mockReturnValue({
                       limit: vi.fn().mockReturnValue({
-                        maybeSingle: vi
-                          .fn()
-                          .mockResolvedValue({ data: recentRow, error: null }),
+                        maybeSingle: vi.fn().mockResolvedValue({ data: recentRow, error: null }),
                       }),
                     }),
                   };
@@ -171,6 +169,14 @@ describe('handleActivityCreate', () => {
   it('skips a v3 athlete still mid-onboarding (phase !== complete)', async () => {
     (supabaseAdmin as AnyMock).mockReturnValue(
       makeDb({ athleteRow: makeAthlete({ onboarding_state: { flow: 'v3', phase: 'intake' } }) }),
+    );
+    await handleActivityCreate(PROVIDER_ID, OBJECT_ID);
+    expect(enqueueJob).not.toHaveBeenCalled();
+  });
+
+  it('skips a paused athlete (no proactive push while paused)', async () => {
+    (supabaseAdmin as AnyMock).mockReturnValue(
+      makeDb({ athleteRow: makeAthlete({ paused_at: new Date().toISOString() }) }),
     );
     await handleActivityCreate(PROVIDER_ID, OBJECT_ID);
     expect(enqueueJob).not.toHaveBeenCalled();

@@ -70,7 +70,7 @@ export async function handleActivityCreate(
 
   const { data: athlete } = await db
     .from('athletes')
-    .select('id, telegram_chat_id, onboarding_state')
+    .select('id, telegram_chat_id, onboarding_state, paused_at')
     .eq('id', athleteId)
     .maybeSingle();
   if (!athlete) return;
@@ -90,6 +90,13 @@ export async function handleActivityCreate(
   ) {
     return;
   }
+
+  // Paused (auto-inactivity or manual /pause) → no proactive post-activity push:
+  // it's proactive spend, the same family the daily cron suppresses while paused
+  // (§10/§10.5), and a Strava upload is explicitly NOT engagement, so it neither
+  // resumes the athlete nor earns a message. Mirrors the daily cron's paused_at
+  // filter. An auto_inactivity athlete still comes back the moment they message.
+  if (athlete.paused_at != null) return;
 
   // Cooldown: stand down only if another post-activity push fired recently. The
   // key prefix `tg_strava:<athlete>:` scopes this to our own pushes — the daily,
