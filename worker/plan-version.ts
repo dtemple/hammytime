@@ -22,6 +22,7 @@ import path from 'path';
 import { supabaseAdmin } from '@/lib/db';
 import type { Json } from '@/lib/db-types';
 import { PlanSchema, type Plan } from '@/lib/plan-schema';
+import { isValidTimeZone, localDate } from './dates';
 import { hash, type HydratedFolder } from './folder';
 
 // The result of trying to stage a coach plan edit. A `dropped_*` outcome
@@ -193,16 +194,6 @@ function weekEndFor(date: string, plan: Plan | null): string | undefined {
   return undefined;
 }
 
-// YYYY-MM-DD for `at` in the given zone (same en-CA pattern as system-prompt.ts).
-function localDate(at: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(at);
-}
-
 // The UTC instant of 23:59:59 local on `dateISO` in `timeZone`. Start from the
 // naive UTC reading, then correct by the zone's offset at that instant; the
 // second pass settles a DST boundary.
@@ -237,13 +228,4 @@ function tzOffsetMs(at: Date, timeZone: string): number {
     get('second'),
   );
   return asUtc - at.getTime();
-}
-
-function isValidTimeZone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
 }

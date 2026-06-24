@@ -17,6 +17,7 @@ import { supabaseAdmin } from '@/lib/db';
 import { computeDrift, renderDriftSummary, type PlanDrift } from '@/lib/plan-drift';
 import { PlanSchema, type Plan } from '@/lib/plan-schema';
 import { ATHLETE_ROOT, STRAVA_LOOKBACK_DAYS } from './config';
+import { localDate } from './dates';
 import { compactJson } from './json-compact';
 import { buildCurrentBlock } from './plan-current-block';
 import { buildStravaContext } from './strava';
@@ -59,27 +60,6 @@ export type HydratedFolder = {
 
 export function hash(content: string): string {
   return createHash('sha256').update(content, 'utf8').digest('hex');
-}
-
-// YYYY-MM-DD for now in `timeZone` (same en-CA pattern as system-prompt.ts);
-// the current-block view needs today in the athlete's zone to place the window.
-function localDate(timeZone: string): string {
-  const tz = isValidTimeZone(timeZone) ? timeZone : 'America/Los_Angeles';
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-}
-
-function isValidTimeZone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function athleteDir(athleteId: string): string {
@@ -146,7 +126,7 @@ export async function hydrate(
   // ~14k-token file every run (v0.7.41). Excluded from syncBack. A malformed
   // plan degrades to no view (the coach falls back to the full file).
   if (workingPlan) {
-    const view = buildCurrentBlock(workingPlan, localDate(timezone));
+    const view = buildCurrentBlock(workingPlan, localDate(new Date(), timezone));
     await writeFile(path.join(dir, 'plan_view_readonly.json'), compactJson(view), 'utf8');
   }
 

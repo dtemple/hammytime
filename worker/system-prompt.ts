@@ -11,6 +11,7 @@ import { DRAFT_SAFETY_CAPS } from '@/lib/plan-templates/caps';
 import type { SafetyCaps } from '@/lib/plan-templates/types';
 import type { Plan } from '@/lib/plan-schema';
 import { PLAN_SHAPE_REFERENCE } from '@/lib/plan-shape-reference';
+import { isValidTimeZone, localDate } from './dates';
 import { CANCEL_SENTINEL, loadPendingProposal, type PendingProposal } from './proposal';
 import type { RunSource } from './run-agent';
 
@@ -394,26 +395,11 @@ export function buildPrompt(
 }
 
 function localDateParts(timezone: string): { date: string; weekday: string } {
-  const tz = isValidTimeZone(timezone) ? timezone : 'America/Los_Angeles';
   const now = new Date();
-  const date = new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(now);
+  const date = localDate(now, timezone);
   const weekday = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
+    timeZone: isValidTimeZone(timezone) ? timezone : 'America/Los_Angeles',
     weekday: 'long',
   }).format(now);
   return { date, weekday };
-}
-
-function isValidTimeZone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
 }
