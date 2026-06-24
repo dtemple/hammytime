@@ -25,6 +25,7 @@
 // the run.
 
 import { isPlaceholderRace, type Plan, type Week } from '@/lib/plan-schema';
+import { addDays } from '@/lib/plan-templates/dates';
 
 // Current week + next 2 = 3 weeks of full day-level detail.
 const ACTING_WINDOW_WEEKS = 3;
@@ -101,11 +102,6 @@ function weekEnd(w: Week): string | undefined {
   return w.end_date ?? datedDays(w).at(-1);
 }
 
-// YYYY-MM-DD `n` days after `iso` (UTC math — dates are zone-free here).
-function addDays(iso: string, n: number): string {
-  return new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
-}
-
 function weekIndexContaining(sorted: Week[], date: string): number | undefined {
   for (let i = 0; i < sorted.length; i++) {
     const start = weekStart(sorted[i]!);
@@ -116,12 +112,14 @@ function weekIndexContaining(sorted: Week[], date: string): number | undefined {
 }
 
 function skeletonWeek(w: Week): SkeletonWeek {
+  const start = weekStart(w);
+  const end = weekEnd(w);
   return {
     week_number: w.week_number,
     phase: w.phase,
     planned_total_run_miles: weekPlannedMiles(w),
-    ...(weekStart(w) !== undefined ? { start_date: weekStart(w) } : {}),
-    ...(weekEnd(w) !== undefined ? { end_date: weekEnd(w) } : {}),
+    ...(start !== undefined ? { start_date: start } : {}),
+    ...(end !== undefined ? { end_date: end } : {}),
     ...(w.coaching_note ? { coaching_note: w.coaching_note } : {}),
     skeleton: true,
   };
@@ -242,6 +240,8 @@ export function buildCurrentBlock(plan: Plan, today: string): CurrentBlockView {
     }
   }
 
+  const pastSummary = buildPastSummary(sorted, pastIndices);
+
   return {
     _readonly: READONLY_NOTE,
     today,
@@ -250,9 +250,7 @@ export function buildCurrentBlock(plan: Plan, today: string): CurrentBlockView {
     ...(plan.agent_guidance !== undefined ? { agent_guidance: plan.agent_guidance } : {}),
     ...(plan.strength_workouts !== undefined ? { strength_workouts: plan.strength_workouts } : {}),
     races,
-    ...(buildPastSummary(sorted, pastIndices) !== undefined
-      ? { past_summary: buildPastSummary(sorted, pastIndices) }
-      : {}),
+    ...(pastSummary !== undefined ? { past_summary: pastSummary } : {}),
     weeks,
   };
 }

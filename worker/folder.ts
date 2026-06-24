@@ -131,20 +131,23 @@ export async function hydrate(
   // than throwing here.
   const plan = (refs?.currentJson ?? null) as Plan | null;
 
+  // Validate the working plan once and share it across the two derived files
+  // below (drift + current-block view); PlanSchema is a deep schema over a ~14k
+  // plan, so parsing it twice per run is the most expensive step here.
+  const workingPlan =
+    refs?.currentJson != null ? (PlanSchema.safeParse(refs.currentJson).data ?? null) : null;
+
   // Drift summary (read-only input) — how far the working plan has moved from
   // the original baseline. The coach reads this and raises material drift.
-  await writeFile(path.join(dir, 'plan_drift.md'), buildDriftMarkdown(refs), 'utf8');
+  await writeFile(path.join(dir, 'plan_drift.md'), buildDriftMarkdown(refs, workingPlan), 'utf8');
 
   // Current-block plan view (read-only input) — a future-weighted slice of the
   // full plan the coach reads for routine work instead of loading the whole
   // ~14k-token file every run (v0.7.41). Excluded from syncBack. A malformed
   // plan degrades to no view (the coach falls back to the full file).
-  if (refs?.currentJson != null) {
-    const parsed = PlanSchema.safeParse(refs.currentJson);
-    if (parsed.success) {
-      const view = buildCurrentBlock(parsed.data, localDate(timezone));
-      await writeFile(path.join(dir, 'plan_view_readonly.json'), compactJson(view), 'utf8');
-    }
+  if (workingPlan) {
+    const view = buildCurrentBlock(workingPlan, localDate(timezone));
+    await writeFile(path.join(dir, 'plan_view_readonly.json'), compactJson(view), 'utf8');
   }
 
   // Pre-fetched Strava context (input). The coach reads this instead of
@@ -256,10 +259,11 @@ const NO_DRIFT: PlanDrift = {
   changedDayCount: 0,
 };
 
-function buildDriftMarkdown(refs: PlanRefs | null): string {
-  if (!refs?.currentJson || !refs.baselineJson) return renderDriftSummary(NO_DRIFT);
-  const working = PlanSchema.safeParse(refs.currentJson);
+// `working` is the already-validated working plan (parsed once in hydrate); only
+// the baseline is parsed here. A missing/invalid plan on either side → no drift.
+function buildDriftMarkdown(refs: PlanRefs | null, working: Plan | null): string {
+  if (!working || !refs?.baselineJson) return renderDriftSummary(NO_DRIFT);
   const baseline = PlanSchema.safeParse(refs.baselineJson);
-  if (!working.success || !baseline.success) return renderDriftSummary(NO_DRIFT);
-  return renderDriftSummary(computeDrift(baseline.data, working.data));
+  if (!baseline.success) return renderDriftSummary(NO_DRIFT);
+  return renderDriftSummary(computeDrift(baseline.data, working));
 }
