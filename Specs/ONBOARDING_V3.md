@@ -265,7 +265,7 @@ All seven resolved by David; the body above reflects them. Kept here as the deci
 > Confirmed
 7. **Ready gate stays soft** — an over-answerer's first message is parsed, not discarded. (§4)
 > Confirmed
-8. **No-race / general-fitness handling (Option 1).** Route a freeform "just want to get fit, no race" into `keep_fit` rather than blocking; retire v2's "day-to-day — coming soon" wall. Keep the honest boundary for broad non-running fitness. (§3, §4 Opener 1)
+8. **No-race / general-fitness handling (Option 1). — ⚠️ REVERSED FOR ENTRY by Onboarding v4 (signed off 2026-06-24, `Specs/ONBOARDING_V4.md`; CHANGELOG v0.7.40).** v4 no longer routes a no-event signup into `keep_fit` — it **off-ramps them into a dormant state** with a scheduled check-back (the `keep_fit` plan path is retired, code left in place). The honest broad-non-running boundary this decision preserved still stands, now as one instance of the general off-ramp. The rest of v3 (the slot engine v4 reuses) is unchanged. _Original decision:_ Route a freeform "just want to get fit, no race" into `keep_fit` rather than blocking; retire v2's "day-to-day — coming soon" wall. Keep the honest boundary for broad non-running fitness. (§3, §4 Opener 1)
 > Confirmed. The non-race `coach.md` branch is **in v3 scope** (V3-W7); the soft expectation-setting message is **deferred / out of scope** (§8 dependencies).
 
 Resolved 2026-06-05 (after the second live day, §1.2):

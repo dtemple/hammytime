@@ -94,15 +94,22 @@ export async function sendAutoPauseNotice(
 ): Promise<void> {
   if (!athlete.telegram_chat_id) return;
   const keyboard = new InlineKeyboard().text('Turn daily check-ins back on', RESUME_AUTO_CALLBACK);
-  await telegramBot().api.sendMessage(athlete.telegram_chat_id, AUTO_PAUSE_NOTICE, {
-    reply_markup: keyboard,
-  });
-  await supabaseAdmin().from('messages').insert({
-    athlete_id: athlete.id,
-    channel: 'tg',
-    direction: 'out',
-    body: AUTO_PAUSE_NOTICE,
-  });
+  await sendAndLogOutbound(athlete.telegram_chat_id, athlete.id, AUTO_PAUSE_NOTICE, keyboard);
+}
+
+/** Send one outbound bot message and log it to `messages`. Shared by the static,
+ *  hand-written notices (auto-pause, dormant check-back nudge — and W3's pause).
+ *  Throws on send failure; the caller decides whether that aborts a batch. */
+async function sendAndLogOutbound(
+  chatId: string,
+  athleteId: string,
+  body: string,
+  keyboard?: InlineKeyboard,
+): Promise<void> {
+  await telegramBot().api.sendMessage(chatId, body, keyboard ? { reply_markup: keyboard } : {});
+  await supabaseAdmin()
+    .from('messages')
+    .insert({ athlete_id: athleteId, channel: 'tg', direction: 'out', body });
 }
 
 /**
@@ -126,4 +133,104 @@ export async function autoPauseAthlete(
     .update({ paused_at: new Date().toISOString(), pause_reason: 'auto_inactivity' })
     .eq('id', athlete.id);
   await sendAutoPauseNotice(athlete);
+}
+
+// ---------------------------------------------------------------------------
+// Dormant state (Onboarding v4 / V4-W2)
+// ---------------------------------------------------------------------------
+//
+// A dormant athlete has a row + Strava connected but NO plan: reached either by
+// the entry off-ramp (a no-event signup, §4.3) or — later (W3) — the post-event
+// pause. Dormancy reuses the pause primitive (paused_at) so the daily cron's
+// `paused_at != null` skip applies for free, but with pause_reason 'dormant' so
+// clearAutoInactivityPause leaves it intact (only naming an event wakes them).
+
+/** The one static check-back nudge (off-ramp, §4.3) — hand-written, never agent-
+ *  generated: a dormant athlete has no plan and no folder to run the agent over. */
+export const CHECK_BACK_NUDGE =
+  'Checking in like you asked — anything on the calendar yet? A race, or a personal ' +
+  "goal with a date, and I'll build you a plan for it. If not, no rush — just message " +
+  'me whenever something lands.';
+
+/**
+ * Move an athlete into the dormant state: pause their daily run, mark the reason
+ * 'dormant', and set (or clear) the one-shot check-back date. Used by the entry
+ * off-ramp; W3's post-event pause will reuse it. No plan is committed.
+ */
+export async function enterDormant(athleteId: string, checkBackAt: string | null): Promise<void> {
+  const { error } = await supabaseAdmin()
+    .from('athletes')
+    .update({
+      paused_at: new Date().toISOString(),
+      pause_reason: 'dormant',
+      check_back_at: checkBackAt,
+    })
+    .eq('id', athleteId);
+  if (error) throw new Error(`enterDormant failed: ${error.message}`);
+}
+
+/**
+ * Wake a dormant athlete — the single re-activation trigger (committing an event).
+ * Scoped to pause_reason 'dormant' so it never clobbers an auto_inactivity or
+ * manual pause (the conditional update is a no-op for those). Clears the check-back
+ * date too, so a now-active athlete never gets a stale nudge. Returns whether a
+ * dormant pause was cleared.
+ */
+export async function exitDormant(athleteId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin()
+    .from('athletes')
+    .update({ paused_at: null, pause_reason: null, check_back_at: null })
+    .eq('id', athleteId)
+    .eq('pause_reason', 'dormant')
+    .select('id');
+  if (error) throw new Error(`exitDormant failed: ${error.message}`);
+  return (data?.length ?? 0) > 0;
+}
+
+/** Set (or clear) a dormant athlete's one-shot check-back date without touching
+ *  the pause. Used when the off-ramp check-back chip lands after the athlete is
+ *  already dormant. */
+export async function setCheckBack(athleteId: string, checkBackAt: string | null): Promise<void> {
+  const { error } = await supabaseAdmin()
+    .from('athletes')
+    .update({ check_back_at: checkBackAt })
+    .eq('id', athleteId);
+  if (error) throw new Error(`setCheckBack failed: ${error.message}`);
+}
+
+/**
+ * Fire the one-shot off-ramp check-back nudge for every athlete whose check_back_at
+ * has come due, then null it so it never repeats (§4.3). Called by the daily cron
+ * on every hourly tick (not timezone-gated — a day's resolution is fine for a
+ * months-out nudge). Nulls only on a successful send, so a transient Telegram
+ * error retries next tick rather than silently dropping the nudge; at hourly
+ * cadence there's no double-send window. Returns the count sent.
+ */
+export async function sweepCheckBacks(): Promise<number> {
+  const nowISO = new Date().toISOString();
+  const { data, error } = await supabaseAdmin()
+    .from('athletes')
+    .select('id, telegram_chat_id, check_back_at')
+    .not('check_back_at', 'is', null)
+    .lte('check_back_at', nowISO);
+  if (error) throw new Error(`check-back sweep query failed: ${error.message}`);
+
+  let sent = 0;
+  for (const a of data ?? []) {
+    if (!a.telegram_chat_id) {
+      // No chat to nudge — clear the date so it doesn't re-query every tick.
+      await supabaseAdmin().from('athletes').update({ check_back_at: null }).eq('id', a.id);
+      continue;
+    }
+    try {
+      await sendAndLogOutbound(a.telegram_chat_id, a.id, CHECK_BACK_NUDGE);
+      await supabaseAdmin().from('athletes').update({ check_back_at: null }).eq('id', a.id);
+      sent++;
+    } catch (err) {
+      // Leave check_back_at set — next tick retries. One bad send never aborts the
+      // sweep (the cron guards this call too).
+      console.error('[check-back sweep] nudge send failed', a.id, err);
+    }
+  }
+  return sent;
 }

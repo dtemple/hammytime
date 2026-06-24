@@ -247,7 +247,7 @@ const ENUM_RULES = [
 
 const FLOW_RULES = [
   'Fill slots from natural conversation — any message can fill any slot. Never re-ask something already answered.',
-  'Work through three topics in order: 1) the goal + race, 2) current training shape (days/week, long-run day, experience), 3) injuries. One topic per message; once a topic is covered, move to the next.',
+  "Work through three topics in order: 1) the event they're training for — a race, or a personal goal with a date, 2) current training shape (days/week, long-run day, experience), 3) injuries. One topic per message; once a topic is covered, move to the next.",
   'Some shape slots arrive already filled as "inferred, unconfirmed" from Strava. Do NOT ask those cold — state them back together in one line for a yes/no ("Looks like ~4 days/week, long runs Sunday, and you know your way around training — that right?") and let the athlete correct. A confirm flips them to confirmed.',
   'Confirm safety and plan-driving slots inline (a quick yes/no). Let nice-to-haves ride.',
   "When the goal race changes, restate goal_date in the same turn (a fill) or mark it open — never let the old race's date ride on the new goal. When a former goal race becomes a tune-up, carry its name AND its date into tune_up_races.",
@@ -274,7 +274,7 @@ const REFLECTION_RULES = [
 
 export function buildSystemPrompt(): string {
   return [
-    'You are running the onboarding conversation for a marathon coaching app over Telegram.',
+    'You are running the onboarding conversation for a running coaching app over Telegram.',
     VOICE_RULES,
     FLOW_RULES,
     REFLECTION_RULES,

@@ -17,6 +17,7 @@ import { sendDavidAlert } from '@/server/admin/alerts';
 import { botApiForChat } from '../../bot';
 import { selectionKeyboardFromTap, labelForTap } from '../dispatcher';
 import { lookupRace } from '@/server/agent/race-lookup';
+import { enterDormant, exitDormant, setCheckBack } from '../../pause';
 import { KNOWN_GAPS, type KnownGapKey } from '@/lib/known-gaps';
 import {
   hasReflected,
@@ -67,6 +68,70 @@ import { withTyping } from './typing';
 type AthleteRow = Database['public']['Tables']['athletes']['Row'];
 
 const CHIP_PREFIX = 'v3:';
+
+// ---------------------------------------------------------------------------
+// Entry off-ramp (Onboarding v4 / V4-W2) — copy + helpers
+// ---------------------------------------------------------------------------
+//
+// A no-event signup is NOT given a keep_fit plan (v4 retires that). Instead, when
+// onboarding would generate for a general_fitness athlete, the off-ramp fires in
+// two beats inside finishOnboarding: first the honest "here's what I'm for, anything
+// on your radar?" (a named goal here re-opens the normal flow), then — if they come
+// back still event-less — an acknowledgement + a check-back capture. The athlete is
+// dormant throughout (no plan, daily cron skips them). All copy here is DRAFT for
+// David's voice pass (§8, Decision 7); the load-bearing phrase to preserve is
+// "a race, or a personal goal with a date."
+
+const OFF_RAMP_OFFER = [
+  "I'll be straight with you: Daybreak is built around training for something — a race, " +
+    'or a personal goal with a date and a distance. A friend’s 30-mile birthday run counts. ' +
+    '"Get faster this year" doesn’t quite, because there’s no day for me to build toward.',
+  'What I do is ramp your training and taper it so you show up ready on the day. No day, ' +
+    "and I’m just sending easy runs you don’t need an app for.",
+  'Anything on your radar, even loosely? A distance you’ve been eyeing, a trip with some ' +
+    "long days in it? Tell me and we’ll start there. If not, all good.",
+].join('\n\n');
+
+const ACK_NO_GOAL =
+  "No worries — I’ll leave it there. Daybreak only really works once there’s a plan to " +
+  'keep you on track, and a plan needs a day to build toward. Want me to check back when ' +
+  'something might be on the calendar?';
+
+const CHECK_BACK_DECLINED =
+  "All good — I’ll leave it here. Whenever something lands on the calendar, message me and " +
+  "I’ll build you a plan for it.";
+
+const CHECK_BACK_CHIPS: Chip[] = [
+  { label: 'In a month', value: 'checkback:1m' },
+  { label: 'In 3 months', value: 'checkback:3m' },
+  { label: 'In 6 months', value: 'checkback:6m' },
+  { label: "Don't bother", value: 'checkback:none' },
+];
+
+/** Months out for each check-back chip value; absent (e.g. 'checkback:none') = clear. */
+const CHECK_BACK_MONTHS: Record<string, number> = {
+  'checkback:1m': 1,
+  'checkback:3m': 3,
+  'checkback:6m': 6,
+};
+
+/** A no-event goal: general_fitness, the one shape v4 off-ramps (a rate / "stay
+ *  fit" with no single dated effort). Race + intended both stay first-class. */
+function isNoEventGoal(state: V3OnboardingState): boolean {
+  return state.slots.goal_type?.value === 'general_fitness';
+}
+
+/** ISO timestamp `months` out from now — the one-shot check-back nudge date. */
+function checkBackDateISO(months: number): string {
+  const d = new Date();
+  d.setMonth(d.getMonth() + months);
+  return d.toISOString();
+}
+
+function checkBackConfirm(months: number): string {
+  const when = months === 1 ? 'in a month' : `in ${months} months`;
+  return `Done — I’ll check back ${when}. If anything lands on the calendar before then, just tell me and we’re off.`;
+}
 
 // ---------------------------------------------------------------------------
 // Telegram I/O
@@ -169,6 +234,26 @@ async function runTurn({
   }
 
   if (dedupKey && state.last_processed_key === dedupKey) return; // Telegram retry
+
+  // Off-ramp check-back chip (v4 / V4-W2): a dormant no-event athlete picked a
+  // check-back interval (or "Don't bother"). Resolved in code — set the one-shot
+  // nudge date and confirm; no model call. Only ever sent at phase 'off_ramp'.
+  if (fromChip && text.startsWith('checkback:')) {
+    await logInbound(athleteId, logBody ?? text);
+    const n = CHECK_BACK_MONTHS[text];
+    if (n != null) {
+      await setCheckBack(athleteId, checkBackDateISO(n));
+      await sendV3(athleteId, chatId, checkBackConfirm(n));
+    } else {
+      await setCheckBack(athleteId, null);
+      await sendV3(athleteId, chatId, CHECK_BACK_DECLINED);
+    }
+    await saveV3State(athleteId, {
+      ...state,
+      last_processed_key: dedupKey ?? state.last_processed_key,
+    });
+    return;
+  }
 
   // Pending-confirm fast path (the 2026-06-05 confirm-loop fix): a `yes` chip tap
   // against an outstanding guardrail confirm resolves it in code — the value is
@@ -568,6 +653,29 @@ async function finishOnboarding(
 ): Promise<void> {
   const athleteId = athlete.id;
 
+  // v4 entry off-ramp (§4.3): a no-event signup is NOT given a keep_fit plan. Two
+  // beats. First reach of the generate gate → the honest offer (no chips — naming a
+  // goal here flows back through the normal engine, since phase stays 'intake'). If
+  // they come back still event-less, the gate is reached again with off_ramp_offered
+  // set → acknowledge + capture a check-back. The athlete is dormant either way.
+  if (isNoEventGoal(state)) {
+    if (!state.off_ramp_offered) {
+      await enterDormant(athleteId, null);
+      await saveV3State(athleteId, { ...state, phase: 'intake', off_ramp_offered: true });
+      await sendV3(athleteId, chatId, OFF_RAMP_OFFER);
+      await alertOffRamp(athleteId);
+      return;
+    }
+    await saveV3State(athleteId, { ...state, phase: 'off_ramp' });
+    await sendV3(athleteId, chatId, ACK_NO_GOAL, chipsKeyboard(CHECK_BACK_CHIPS));
+    return;
+  }
+
+  // A real event after a prior off-ramp: wake the dormant athlete before the plan
+  // commits so dailies resume (no-op for a never-dormant athlete — scoped to
+  // pause_reason 'dormant').
+  await exitDormant(athleteId);
+
   // Commit once — races/injuries inserts aren't idempotent, so guard a retry.
   let committed = state;
   if (!state.committed) {
@@ -655,14 +763,26 @@ async function commitSlotsSafe(athleteId: string, state: V3OnboardingState): Pro
   await commitSlots(athleteId, state);
 }
 
-async function alertComplete(athleteId: string): Promise<void> {
+/** The athlete's name for a David alert, falling back to the id. */
+async function athleteLabel(athleteId: string): Promise<string> {
   const { data } = await supabaseAdmin()
     .from('athletes')
     .select('name')
     .eq('id', athleteId)
     .maybeSingle();
+  return data?.name ?? athleteId;
+}
+
+async function alertComplete(athleteId: string): Promise<void> {
   await sendDavidAlert(
-    `${data?.name ?? athleteId} finished onboarding (v3) — template plan active.`,
+    `${await athleteLabel(athleteId)} finished onboarding (v3) — template plan active.`,
+  ).catch(() => {});
+}
+
+/** v4 off-ramp alert: a no-event signup went dormant with no plan (§4.3). */
+async function alertOffRamp(athleteId: string): Promise<void> {
+  await sendDavidAlert(
+    `${await athleteLabel(athleteId)} hit the no-event off-ramp (v4) — dormant, no plan.`,
   ).catch(() => {});
 }
 

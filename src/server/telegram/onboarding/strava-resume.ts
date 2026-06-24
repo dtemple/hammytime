@@ -27,7 +27,7 @@ function orientationMessage(firstname: string | null): string {
     ? `Okay ${firstname}, let's get you set up.`
     : "Okay, let's get you set up.";
   return [
-    `${opener} I'll ask about three things: your running goals, where your training's at right now, and any injuries to keep an eye on.`,
+    `${opener} First up, what you're training for — a race, or a personal goal with a date, like a big trail day with friends. Then where your training's at right now, and any injuries to keep an eye on.`,
     'Talk to me normally — hit the mic and ramble if it helps, the more context the better. It takes a few minutes, and I might pause sometimes to think. You can change your answers later by tapping the menu button below.',
     'Ready?',
   ].join('\n\n');

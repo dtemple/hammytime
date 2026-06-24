@@ -6,7 +6,15 @@ import { vi } from 'vitest';
 vi.mock('../bot', () => ({ telegramBot: vi.fn() }));
 vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
 
-import { isInactive, daysUntilAutoPause, INACTIVITY_WINDOW_DAYS } from '../pause';
+import {
+  isInactive,
+  daysUntilAutoPause,
+  INACTIVITY_WINDOW_DAYS,
+  sweepCheckBacks,
+  CHECK_BACK_NUDGE,
+} from '../pause';
+import { supabaseAdmin } from '@/lib/db';
+import { telegramBot } from '../bot';
 
 const NOW = Date.parse('2026-06-14T12:00:00.000Z');
 const cutoffMs = NOW - INACTIVITY_WINDOW_DAYS * 86_400_000;
@@ -82,5 +90,87 @@ describe('daysUntilAutoPause', () => {
     expect(
       daysUntilAutoPause({ created_at: new Date(created).toISOString() }, justNow, NOW),
     ).toBeGreaterThan(INACTIVITY_WINDOW_DAYS - 1);
+  });
+});
+
+// --- v4 / V4-W2: the one-shot off-ramp check-back nudge ---
+
+interface SweepRow {
+  id: string;
+  telegram_chat_id: string | null;
+  check_back_at: string;
+}
+
+/** Build a supabaseAdmin stub serving `rows` from the due query and recording the
+ *  writes the sweep makes. */
+function stubSupabaseForSweep(rows: SweepRow[]) {
+  const updates: Array<{ id: string; patch: Record<string, unknown> }> = [];
+  const inserts: Array<Record<string, unknown>> = [];
+  vi.mocked(supabaseAdmin).mockReturnValue({
+    from: () => ({
+      select: () => ({
+        not: () => ({ lte: () => Promise.resolve({ data: rows, error: null }) }),
+      }),
+      update: (patch: Record<string, unknown>) => ({
+        eq: (_col: string, id: string) => {
+          updates.push({ id, patch });
+          return Promise.resolve({ error: null });
+        },
+      }),
+      insert: (row: Record<string, unknown>) => {
+        inserts.push(row);
+        return Promise.resolve({ error: null });
+      },
+    }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any);
+  return { updates, inserts };
+}
+
+describe('sweepCheckBacks', () => {
+  it('nudges a due athlete, logs the message, and nulls the date on success', async () => {
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(telegramBot).mockReturnValue({ api: { sendMessage } } as any);
+    const { updates, inserts } = stubSupabaseForSweep([
+      { id: 'd1', telegram_chat_id: '111', check_back_at: '2020-01-01T00:00:00Z' },
+    ]);
+
+    const sent = await sweepCheckBacks();
+
+    expect(sent).toBe(1);
+    expect(sendMessage).toHaveBeenCalledWith('111', CHECK_BACK_NUDGE, {});
+    expect(inserts).toHaveLength(1); // the outbound message is logged
+    expect(updates).toEqual([{ id: 'd1', patch: { check_back_at: null } }]); // nulled
+  });
+
+  it('clears the date but sends nothing for an athlete with no chat id', async () => {
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(telegramBot).mockReturnValue({ api: { sendMessage } } as any);
+    const { updates, inserts } = stubSupabaseForSweep([
+      { id: 'd2', telegram_chat_id: null, check_back_at: '2020-01-01T00:00:00Z' },
+    ]);
+
+    const sent = await sweepCheckBacks();
+
+    expect(sent).toBe(0);
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(inserts).toHaveLength(0);
+    expect(updates).toEqual([{ id: 'd2', patch: { check_back_at: null } }]);
+  });
+
+  it('leaves the date set when the send fails, so the next tick retries', async () => {
+    const sendMessage = vi.fn().mockRejectedValue(new Error('telegram down'));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(telegramBot).mockReturnValue({ api: { sendMessage } } as any);
+    const { updates } = stubSupabaseForSweep([
+      { id: 'd3', telegram_chat_id: '222', check_back_at: '2020-01-01T00:00:00Z' },
+    ]);
+
+    const sent = await sweepCheckBacks();
+
+    expect(sent).toBe(0);
+    expect(updates).toHaveLength(0); // never nulled → retried next tick
   });
 });

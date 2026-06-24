@@ -2,6 +2,8 @@
 
 _Status: proposal, unscheduled. First pass 2026-06-05 after the Western States transcript; second pass later the same day, after a second live transcript (Chase, 44-mile non-race mountain run) and a triage conversation. The second pass moves the intake-side failure handling into `ONBOARDING_V3.md` (V3-W8: the uncatalogued-goal pocket + deterministic bucket derivation) and the two engine bug fixes into `Specs/V3_HARDENING_PROMPT.md` — this doc now owns **catalog and plan-gen expansion**: buckets, templates, caps, the renderer, non-race events, and the volume-goals analysis. `SPEC.md`/`CLAUDE.md` stay untouched until David signs off and a workstream is scheduled (the `ONBOARDING_V3.md` convention)._
 
+_**v4 reconciliation (2026-06-24).** `Specs/ONBOARDING_V4.md` (signed off) adopts this doc's catalog scope as **v4-W4**: **U1 is locked as v1 catalog scope** (the four buckets, `ultra-50k`, distance-derived plausibility, widened bands, non-race adventures / `event_kind`) and **U2 (50mi+ renderer work: back-to-back long runs, time-on-feet) is deferred** with the §6 pointer. v4 owns the event *framing* + the no-event off-ramp; this doc keeps owning catalog + plan-gen. The `event_kind` column and the §3.5 athlete-stated adventure fill land with W4 (the v4-W1 framing slice shipped without them, v0.7.40)._
+
 ---
 
 ## 1. What the live tests showed

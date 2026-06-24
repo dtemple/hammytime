@@ -33,7 +33,11 @@ export const V3_SCHEMA_VERSION = 2;
 /** Pinned at 8 for headroom (ONBOARDING_V3 decision #4). */
 export const DEFAULT_OPTIONAL_BUDGET = 8;
 
-export type OnboardingPhase = 'orientation' | 'intake' | 'recap' | 'complete';
+// 'off_ramp' (v4 / V4-W2): a no-event athlete who's been off-ramped — dormant,
+// no plan, waiting on a check-back chip. Not 'complete', so isOnboarded() returns
+// false (the daily cron skips them) and bot.ts keeps routing their inbound to the
+// engine (naming an event re-opens the flow). See router finishOnboarding.
+export type OnboardingPhase = 'orientation' | 'intake' | 'recap' | 'complete' | 'off_ramp';
 
 /**
  * The /edit_profile re-entry marker (W3). Onboarding ends at phase 'complete';
@@ -141,6 +145,13 @@ export interface V3OnboardingState {
   /** The one allowed reflection redo has been spent. After this, a declined
    *  pocket takes the standard re-offer path; the recap is the net. */
   reflection_redone?: boolean;
+  /** The entry off-ramp's first beat (the honest "here's what I'm for, anything on
+   *  your radar?") has been sent (v4 / V4-W2). Set when a no-event athlete first
+   *  reaches the generate gate; on the SECOND time they reach it still event-less,
+   *  the off-ramp moves to the check-back capture instead of re-offering. A named
+   *  event in between flips goal_type off general_fitness and this never fires
+   *  again. See router finishOnboarding §4.3. */
+  off_ramp_offered?: boolean;
 }
 
 /**

@@ -9,6 +9,7 @@ import {
   INACTIVITY_WINDOW_DAYS,
   isInactive,
   sendAutoPauseNotice,
+  sweepCheckBacks,
 } from '@/server/telegram/pause';
 import { sweepExpiredProposals } from '@/server/telegram/proposals';
 
@@ -53,6 +54,18 @@ export async function GET(req: Request) {
       return 0;
     });
 
+    // One-shot off-ramp check-back nudges (v4 / V4-W2): fire any that have come due
+    // and null them. Independent of the inactivity scan and timezone-gating below —
+    // a months-out nudge fires on the first hourly tick past its date.
+    const checkBacksNudged = await sweepCheckBacks().catch((e) => {
+      Sentry.captureException(e);
+      console.error('[daily-checkin cron] check-back sweep failed', e);
+      return 0;
+    });
+
+    // Fields every response carries; each return spreads this and adds its own.
+    const base = { ok: true as const, expiredProposalsCleared, checkBacksNudged };
+
     const { data: athletes, error } = await supabaseAdmin()
       .from('athletes')
       .select('*')
@@ -80,7 +93,7 @@ export async function GET(req: Request) {
     });
 
     if (onboarded.length === 0) {
-      return NextResponse.json({ ok: true, skipped: 'no_onboarded_athlete', expiredProposalsCleared });
+      return NextResponse.json({ ...base, skipped: 'no_onboarded_athlete' });
     }
 
     // Per-athlete-local scheduling: the cron fires hourly, but an athlete is due
@@ -95,7 +108,7 @@ export async function GET(req: Request) {
       .filter(({ hour }) => hour === CHECKIN_HOUR);
 
     if (due.length === 0) {
-      return NextResponse.json({ ok: true, skipped: 'no_athlete_due_this_hour', expiredProposalsCleared });
+      return NextResponse.json({ ...base, skipped: 'no_athlete_due_this_hour' });
     }
 
     // Inactivity scan (§10.5): one bounded query for the athletes with any
@@ -147,7 +160,7 @@ export async function GET(req: Request) {
       enqueued++;
     }
 
-    return NextResponse.json({ ok: true, enqueued, paused, dryRun, expiredProposalsCleared });
+    return NextResponse.json({ ...base, enqueued, paused, dryRun });
   } catch (err) {
     Sentry.captureException(err);
     console.error('[daily-checkin cron] error', err);

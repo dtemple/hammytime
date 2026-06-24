@@ -71,6 +71,15 @@ vi.mock('../../known-gaps-memory', async (orig) => ({
   seedKnownGapsFromFilled,
 }));
 
+// Dormant-state helpers (v4 off-ramp): stubbed so the router's off-ramp branch can
+// be driven without Supabase or the grammy bot that pause.ts pulls in.
+const { enterDormant, exitDormant, setCheckBack } = vi.hoisted(() => ({
+  enterDormant: vi.fn().mockResolvedValue(undefined),
+  exitDormant: vi.fn().mockResolvedValue(false),
+  setCheckBack: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('../../../pause', () => ({ enterDormant, exitDormant, setCheckBack }));
+
 import { handleV3Message, handleV3Callback } from '../router';
 import { lookupRace } from '@/server/agent/race-lookup';
 import { sendDavidAlert } from '@/server/admin/alerts';
@@ -1398,5 +1407,125 @@ describe('router — target/distance cross-fire (the mile enum-bypass net)', () 
     await handleV3Message(ctx(98, 'just keep me fit'), athlete);
 
     expect(sendMessage.mock.calls.at(-1)![1]).toBe('keeping you fit then');
+  });
+});
+
+// --- v4 / V4-W2: the entry off-ramp + dormant state ---
+
+function completeFitnessSlots(): SlotState {
+  return {
+    goal_type: sv('general_fitness'),
+    goal_distance: sv('keep_fit'),
+    experience_tier: sv('some_training'),
+    days_per_week: sv(4),
+    long_run_day: sv(0),
+    injury_status: sv('none'),
+  };
+}
+
+describe('router — v4 entry off-ramp', () => {
+  it('first generate for a no-event athlete sends the offer, not a plan, and goes dormant', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'recap',
+      slots: completeFitnessSlots(),
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({ next_action: 'generate', message: 'building it' }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(200, "nah, just to stay fit"), athlete);
+
+    // No keep_fit plan: not committed, not generated.
+    expect(commitSlots).not.toHaveBeenCalled();
+    // Dormant, no check-back date yet.
+    expect(enterDormant).toHaveBeenCalledWith('ath-1', null);
+    // The honest offer went out (no chips — a named goal here re-opens the flow).
+    expect(sendMessage).toHaveBeenCalledWith(99, expect.stringMatching(/built around training for/i), {});
+    // State marks the offer made and stays in intake so the reply flows normally.
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.off_ramp_offered).toBe(true);
+    expect(saved.phase).toBe('intake');
+    expect(sendDavidAlert).toHaveBeenCalled();
+  });
+
+  it('second generate (offer already made) acknowledges and offers the check-back chips', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: completeFitnessSlots(),
+      off_ramp_offered: true,
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({ next_action: 'generate', message: 'building it' }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(201, "nope, nothing on the calendar"), athlete);
+
+    expect(commitSlots).not.toHaveBeenCalled();
+    // Acknowledgement + the four check-back chips.
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toMatch(/check back/i);
+    expect(call[2]).toHaveProperty('reply_markup');
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.phase).toBe('off_ramp');
+  });
+
+  it('a check-back chip sets the nudge date and confirms, no model call', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'off_ramp',
+      slots: completeFitnessSlots(),
+      off_ramp_offered: true,
+    } as V3OnboardingState);
+
+    await handleV3Callback(cbCtx('cb3m'), athlete, 'v3:checkback:3m');
+
+    expect(callExtractAndAdvance).not.toHaveBeenCalled();
+    expect(setCheckBack).toHaveBeenCalledOnce();
+    const [id, iso] = setCheckBack.mock.calls[0]!;
+    expect(id).toBe('ath-1');
+    // ~3 months out from the pinned clock (2026-06-10) → September 2026.
+    expect(iso).toMatch(/^2026-09-/);
+    expect(sendMessage).toHaveBeenCalledWith(99, expect.stringMatching(/in 3 months/i), {});
+  });
+
+  it('the "Don\'t bother" chip clears the check-back and ends cleanly', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'off_ramp',
+      slots: completeFitnessSlots(),
+      off_ramp_offered: true,
+    } as V3OnboardingState);
+
+    await handleV3Callback(cbCtx('cbnone'), athlete, 'v3:checkback:none');
+
+    expect(setCheckBack).toHaveBeenCalledWith('ath-1', null);
+    expect(sendMessage).toHaveBeenCalledWith(99, expect.stringMatching(/leave it here/i), {});
+  });
+
+  it('a real event after an off-ramp wakes the dormant athlete and builds the plan', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'recap',
+      slots: completeSlots(), // a dated race
+      off_ramp_offered: true, // lingering from an earlier off-ramp beat
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({ next_action: 'generate', message: 'building it' }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(202, "actually I signed up for CIM"), athlete);
+
+    expect(exitDormant).toHaveBeenCalledWith('ath-1');
+    expect(commitSlots).toHaveBeenCalledOnce();
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.phase).toBe('complete');
   });
 });

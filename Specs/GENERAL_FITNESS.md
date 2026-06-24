@@ -1,5 +1,14 @@
 # General Fitness (keep_fit) — deepening the no-race experience
 
+> **🗄️ SHELVED FOR v1 (2026-06-24) — superseded by `Specs/ONBOARDING_V4.md`; do not
+> build on this without un-shelving with David.** v4 declines this doc's core bet
+> (keep_fit as the between-races retention engine): a no-event signup is off-ramped
+> into a dormant state, not given a `keep_fit` plan, so **nothing in v4 produces a
+> `day_to_day` athlete**. GF-W1 (open-ended plan extension, v0.7.32) and GF-W2
+> (no-race daily narrative, v0.7.33) are shipped but now dead-code-dormant; GF-W3–W7
+> are not built. The shipped code can sit idle (ripping it out is optional cleanup,
+> not a v4 gate).
+
 **Status: draft, 2026-06-10. Not yet approved — no CHANGELOG entry, no SPEC.md §
 rewrite. Workstreams here are designed to be picked up one prompt at a time;
 each "Prompt" block below is sized to be a single scoped unit of work per the
