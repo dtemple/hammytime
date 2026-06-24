@@ -49,6 +49,24 @@ export function isInactive(
 }
 
 /**
+ * Days until this athlete would be auto-paused for inactivity, evaluated at
+ * `nowMs`. Mirrors isInactive's baseline — max(last inbound, athlete creation) —
+ * so the admin console's countdown can't drift from the cron's actual decision:
+ * a value <= 0 means the next eligible cron tick will pause them. `lastInboundMs`
+ * is the most recent inbound message time, or null when there's none inside the
+ * window (in which case the created_at floor carries the new-athlete grace).
+ */
+export function daysUntilAutoPause(
+  athlete: { created_at: string },
+  lastInboundMs: number | null,
+  nowMs: number,
+): number {
+  const baselineMs = Math.max(lastInboundMs ?? 0, new Date(athlete.created_at).getTime());
+  const elapsedDays = (nowMs - baselineMs) / 86_400_000;
+  return INACTIVITY_WINDOW_DAYS - elapsedDays;
+}
+
+/**
  * Clear an auto_inactivity pause when the athlete re-engages by sending anything.
  *
  * Deliberately scoped to pause_reason === 'auto_inactivity': a manual (§10
@@ -75,10 +93,7 @@ export async function sendAutoPauseNotice(
   athlete: Pick<AthleteRow, 'id' | 'telegram_chat_id'>,
 ): Promise<void> {
   if (!athlete.telegram_chat_id) return;
-  const keyboard = new InlineKeyboard().text(
-    'Turn daily check-ins back on',
-    RESUME_AUTO_CALLBACK,
-  );
+  const keyboard = new InlineKeyboard().text('Turn daily check-ins back on', RESUME_AUTO_CALLBACK);
   await telegramBot().api.sendMessage(athlete.telegram_chat_id, AUTO_PAUSE_NOTICE, {
     reply_markup: keyboard,
   });
@@ -88,4 +103,27 @@ export async function sendAutoPauseNotice(
     direction: 'out',
     body: AUTO_PAUSE_NOTICE,
   });
+}
+
+/**
+ * Apply an inactivity pause and send the one static notice — the shared action
+ * behind the admin console's MANUAL pause control. Uses pause_reason =
+ * 'auto_inactivity' on purpose even when a human triggers it: the notice copy
+ * ("just send me anything") promises an inbound brings them back, and only an
+ * auto_inactivity pause honors that (clearAutoInactivityPause). Writes the pause
+ * first, then sends; throws if the send fails (the pause is already applied), so
+ * the caller can report a partial outcome.
+ *
+ * The inactivity cron sets the same two columns inline rather than calling this,
+ * so its existing test can mock the notice send in isolation — the duplication
+ * is two fields; the notice itself is shared via sendAutoPauseNotice.
+ */
+export async function autoPauseAthlete(
+  athlete: Pick<AthleteRow, 'id' | 'telegram_chat_id'>,
+): Promise<void> {
+  await supabaseAdmin()
+    .from('athletes')
+    .update({ paused_at: new Date().toISOString(), pause_reason: 'auto_inactivity' })
+    .eq('id', athlete.id);
+  await sendAutoPauseNotice(athlete);
 }

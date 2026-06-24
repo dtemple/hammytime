@@ -47,6 +47,15 @@ export function statusChips(s: {
   return chips;
 }
 
+/** "~3 days" until inactivity auto-pause, "due" when overdue, "—" when N/A. */
+export function autoPauseCell(days: number | null): string {
+  if (days == null) return '—';
+  if (days <= 0) return 'due';
+  if (days < 1) return '<1 day';
+  const n = Math.round(days);
+  return `~${n} ${n === 1 ? 'day' : 'days'}`;
+}
+
 /** "about 5 weeks" runway, or an em-dash when there's nothing to show. */
 export function runwayCell(
   comped: boolean,

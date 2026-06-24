@@ -1,8 +1,14 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getAthleteDetail } from '@/server/billing/admin';
-import { adjustAction, compedAction } from '../../../actions';
-import { balanceLabel, runwayCell, signedDollars, statusChips } from '../../../format';
+import { adjustAction, compedAction, pauseAction } from '../../../actions';
+import {
+  autoPauseCell,
+  balanceLabel,
+  runwayCell,
+  signedDollars,
+  statusChips,
+} from '../../../format';
 
 export const metadata = { title: 'Athlete · Daybreak admin' };
 export const dynamic = 'force-dynamic';
@@ -10,10 +16,13 @@ export const dynamic = 'force-dynamic';
 const ERR: Record<string, string> = {
   note: 'A note is required for every adjustment.',
   amount: 'Enter a non-zero dollar amount (e.g. 5 or -2.50).',
+  notice_failed: 'Paused, but the Telegram notice failed to send — check the chat.',
 };
 const MSG: Record<string, string> = {
   adjusted: 'Adjustment applied.',
   comped: 'Comp status updated.',
+  paused: 'Check-ins paused and the notice sent.',
+  already_paused: 'Already paused — no change.',
 };
 
 function fmtTime(iso: string): string {
@@ -132,6 +141,48 @@ export default async function AthleteDetailPage({
             </button>
           </form>
         </div>
+      </section>
+
+      {/* ---- Daily check-ins / pause ---------------------------------------- */}
+      <section className="rounded border border-gray-200 p-4">
+        <h2 className="mb-3 text-sm font-semibold">Daily check-ins</h2>
+        {a.pausedAt ? (
+          <p className="text-sm text-gray-600">
+            Paused
+            {a.pauseReason === 'auto_inactivity'
+              ? ' (inactivity)'
+              : a.pauseReason === 'manual'
+                ? ' (vacation)'
+                : ''}{' '}
+            since {fmtTime(a.pausedAt)}. Resumes when they tap the resume button or message you.
+          </p>
+        ) : a.pausable ? (
+          <>
+            <p className="mb-3 text-sm text-gray-600">
+              Active. Auto-pauses for inactivity in{' '}
+              <span className="font-medium">{autoPauseCell(a.autoPauseInDays)}</span>.
+            </p>
+            <form action={pauseAction}>
+              <input type="hidden" name="athlete_id" value={a.athleteId} />
+              <button
+                type="submit"
+                className="rounded border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
+              >
+                Pause check-ins now
+              </button>
+            </form>
+            <p className="mt-2 text-xs text-gray-400">
+              Sends them the standard paused notice with a resume button. Any message they send
+              turns check-ins back on.
+            </p>
+          </>
+        ) : (
+          <p className="text-sm text-gray-600">
+            {a.isTest
+              ? 'Test athlete — not on the daily cron.'
+              : 'Not onboarded — no daily check-ins yet.'}
+          </p>
+        )}
       </section>
 
       {/* ---- Ledger ---------------------------------------------------------- */}

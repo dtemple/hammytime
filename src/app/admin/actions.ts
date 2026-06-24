@@ -17,6 +17,8 @@ import {
   signAdminSession,
 } from '@/server/admin/session';
 import { adjustCredit, setComped } from '@/server/billing/credits';
+import { supabaseAdmin } from '@/lib/db';
+import { autoPauseAthlete } from '@/server/telegram/pause';
 
 function cookieOpts() {
   return {
@@ -62,6 +64,35 @@ export async function adjustAction(formData: FormData): Promise<void> {
 
   await adjustCredit(athleteId, cents, note);
   redirect(`${back}?msg=adjusted`);
+}
+
+export async function pauseAction(formData: FormData): Promise<void> {
+  if (!(await isAdminAuthed())) redirect('/admin/login');
+
+  const athleteId = String(formData.get('athlete_id') ?? '');
+  const back = `/admin/athletes/${athleteId}`;
+  if (!athleteId) redirect('/admin');
+
+  const { data, error } = await supabaseAdmin()
+    .from('athletes')
+    .select('id, telegram_chat_id, paused_at')
+    .eq('id', athleteId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) redirect('/admin');
+  if (data.paused_at != null) redirect(`${back}?msg=already_paused`);
+
+  // Same action the inactivity cron takes: pause + send the static notice with
+  // the resume button. autoPauseAthlete writes the pause before sending, so a
+  // send failure leaves them paused-but-un-notified — report that distinctly
+  // (the redirect must live OUTSIDE the try, since redirect() throws to work).
+  let noticeSent = true;
+  try {
+    await autoPauseAthlete({ id: data.id, telegram_chat_id: data.telegram_chat_id });
+  } catch {
+    noticeSent = false;
+  }
+  redirect(noticeSent ? `${back}?msg=paused` : `${back}?err=notice_failed`);
 }
 
 export async function compedAction(formData: FormData): Promise<void> {

@@ -6,7 +6,7 @@ import { vi } from 'vitest';
 vi.mock('../bot', () => ({ telegramBot: vi.fn() }));
 vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
 
-import { isInactive, INACTIVITY_WINDOW_DAYS } from '../pause';
+import { isInactive, daysUntilAutoPause, INACTIVITY_WINDOW_DAYS } from '../pause';
 
 const NOW = Date.parse('2026-06-14T12:00:00.000Z');
 const cutoffMs = NOW - INACTIVITY_WINDOW_DAYS * 86_400_000;
@@ -44,5 +44,43 @@ describe('isInactive', () => {
   it('keeps an athlete created exactly at the cutoff active', () => {
     const a = athlete('a6', cutoffMs);
     expect(isInactive(a, new Set(), cutoffMs)).toBe(false);
+  });
+});
+
+describe('daysUntilAutoPause', () => {
+  const created = NOW - 90 * 86_400_000; // long ago, so last-inbound is the driver
+
+  it('returns the full window for an athlete who just messaged', () => {
+    expect(
+      daysUntilAutoPause({ created_at: new Date(created).toISOString() }, NOW, NOW),
+    ).toBeCloseTo(INACTIVITY_WINDOW_DAYS);
+  });
+
+  it('counts down from the last inbound', () => {
+    const twoDaysAgo = NOW - 2 * 86_400_000;
+    expect(
+      daysUntilAutoPause({ created_at: new Date(created).toISOString() }, twoDaysAgo, NOW),
+    ).toBeCloseTo(INACTIVITY_WINDOW_DAYS - 2);
+  });
+
+  it('falls back to the created_at floor when there is no inbound in the window', () => {
+    const createdTwoDaysAgo = NOW - 2 * 86_400_000;
+    expect(
+      daysUntilAutoPause({ created_at: new Date(createdTwoDaysAgo).toISOString() }, null, NOW),
+    ).toBeCloseTo(INACTIVITY_WINDOW_DAYS - 2);
+  });
+
+  it('goes non-positive once an athlete is past due', () => {
+    const createdSixDaysAgo = NOW - 6 * 86_400_000;
+    expect(
+      daysUntilAutoPause({ created_at: new Date(createdSixDaysAgo).toISOString() }, null, NOW),
+    ).toBeLessThanOrEqual(0);
+  });
+
+  it('lets a recent inbound win over an old creation date', () => {
+    const justNow = NOW - 60 * 60 * 1000; // an hour ago
+    expect(
+      daysUntilAutoPause({ created_at: new Date(created).toISOString() }, justNow, NOW),
+    ).toBeGreaterThan(INACTIVITY_WINDOW_DAYS - 1);
   });
 });
