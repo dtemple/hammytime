@@ -259,8 +259,9 @@ Roughly a week, gated behind the worker + agent loop already running:
 6. **Auto-reload:** card capture via `setup_future_usage`; off-session PaymentIntent at the gate; toggle UI.
 7. **Admin:** balance/ledger view, manual adjust, `comped` toggle, paused-state display.
 8. **Pause:** `athletes.paused_at` / `pause_resumes_at` columns; `/pause` (incl. timed) + `/resume`; the enqueue-cron skip filter; the auto-resume cron pass.
+9. **Model selection (`/model`):** `athletes.model_preference` column; per-run model resolve in the worker; `/model` command + buttons; menu/`/help`. Independent of the gate and warnings — can land any time. See §14.
 
-Ship 1–4 together (the minimum that lets a friend run out and pay). 5–8 follow; pause (8) can land early and independently if a friend takes a trip before the rest is built.
+Ship 1–4 together (the minimum that lets a friend run out and pay). 5–9 follow; pause (8) and model selection (9) can each land early and independently.
 
 **§10.5 (auto-pause on inactivity) is a build-first candidate that sits outside this sequence.** It ships the pause primitive — `paused_at` + `pause_reason` columns, the enqueue skip filter, and the resume paths — with no dependency on credits, Stripe, or the gate, so it can go in ahead of everything above. Once it's in, step 8 reduces to adding manual `/pause`/`/resume` (+ timed `pause_resumes_at`) on top of the primitive.
 
@@ -271,9 +272,54 @@ Ship 1–4 together (the minimum that lets a friend run out and pay). 5–8 foll
 - **Stripe Tax / sales tax on digital goods.** Ignored in v1 (5–25 friends, cost-recovery). Revisit if this ever becomes a real product.
 - **Mini App webview** for in-window payment — deferred (§3). Plain link first.
 - **Telegram Stars** as an alternative rail — rejected on economics, not revisited unless Telegram changes the cut.
-- **Measured run cost still exceeds the SPEC §2.1 estimate** (§2): ~$0.53/athlete/day raw (friends only) vs §2.1's $0.08 hybrid / $0.24 Opus-heavy (~2.2–6.6×). Thread (a) — is the worker actually getting prompt-cache hits — is **resolved**: 83% of input tokens are cache reads (measured 2026-06-22); the remaining lever is Sonnet-for-daily routing, not caching. (b) the free/comped friend subsidy is ~$16/friend/mo at this burn, so "free for the first ~20" is a ~$320/mo decision — smaller than the old ~$500 estimate but still not a rounding error. The $5 grant (~6 days) and $25 default (~4.5 weeks) may want revisiting — pending David.
+- **Measured run cost still exceeds the SPEC §2.1 estimate** (§2): ~$0.53/athlete/day raw (friends only) vs §2.1's $0.08 hybrid / $0.24 Opus-heavy (~2.2–6.6×). Thread (a) — is the worker actually getting prompt-cache hits — is **resolved**: 83% of input tokens are cache reads (measured 2026-06-22); the remaining lever is model routing, not caching — now surfaced to friends as the `/model` command (§14). (b) the free/comped friend subsidy is ~$16/friend/mo at this burn, so "free for the first ~20" is a ~$320/mo decision — smaller than the old ~$500 estimate but still not a rounding error. The $5 grant (~6 days) and $25 default (~4.5 weeks) may want revisiting — pending David.
 - **Card-on-file SCA / declines** for off-session auto-reload — handled by falling through to the manual gate, but European cards or step-up auth will fail off-session more often. Not a concern for a US friend group; note it.
 - **BYO-plan friends** spend tokens in their own Claude/ChatGPT for plan-gen, so our metered cost is daily check-ins + ad-hoc only. The runway math already assumes this.
+
+---
+
+## 14. Model selection (`/model`)
+
+**Status: proposed 2026-06-24 — pending David's review.** A `/model` command that lets a friend switch the coaching model between Haiku, Sonnet, and Opus to trade cost for quality. It lives in this doc because **model choice is the single biggest lever on burn rate** — §2/§13 already name "Sonnet-for-daily routing" as the remaining cost lever; this generalizes that from a global config knob to a per-athlete choice.
+
+### Why it fits the metering model with no billing change
+
+The draw-down meters **actual** model cost: each run records `agent_runs.cost_usd` from the SDK's real token usage, and `billedCents` applies the flat 1.5× markup on top (§2, §5). So the model the run used is already baked into the number — switch to Haiku and the debit (and the §8 runway) shrink automatically; switch to Opus and they grow. **No markup change, no per-model pricing table in our code** — the ledger captures the truth per run. The markup is model-agnostic on purpose.
+
+### The lever (list prices, per MTok, measured 2026-06-24 via the Claude API skill)
+
+| Model | Model ID | Input | Output | vs Sonnet | Est. billed/day | $25 runway |
+|---|---|---|---|---|---|---|
+| Haiku 4.5 | `claude-haiku-4-5` | $1 | $5 | ~⅓ | ~$0.27 | ~13 weeks |
+| **Sonnet 4.6 (default)** | `claude-sonnet-4-6` | $3 | $15 | 1× | ~$0.80 | ~4.5 weeks |
+| Opus 4.8 | `claude-opus-4-8` | $5 | $25 | ~1.67× | ~$1.33 | ~2.7 weeks |
+
+The current `COACH_MODEL` default is **Sonnet 4.6** (`worker/config.ts`), so the measured §2 baseline (~$0.53/day raw → ~$0.80 billed) is the Sonnet row. The Haiku/Opus billed-per-day and runway columns scale that baseline by the input/output price ratio — a planning estimate only; real cost depends on the token mix and the 83% cache-read share (§2), and the ledger records the true number per run.
+
+### Decisions (proposed — confirm before building)
+
+| Dimension | Proposed |
+|---|---|
+| Models offered | Haiku 4.5, Sonnet 4.6, Opus 4.8 (the three above). |
+| Default | **Sonnet 4.6 — unchanged.** A friend opts into a different model; the default stays what every athlete runs today. |
+| Scope | The **coaching runs only** — the `query()` call in `worker/run-agent.ts` (`daily_checkin` + `tg_message`). **Not** onboarding (the Sonnet slot engine is fixed) and **not** the plan-repair pass (`worker/plan-repair.ts` — keep it cheap and deterministic). |
+| Storage | `athletes.model_preference text null` (null = default). Coaching-loop state, like `paused_at` — lives on `athletes`, not `athlete_credits`. |
+| Surface | `/model` → three buttons (current one marked); tap writes the preference, collapses the keyboard, confirms. Registered in the BotFather menu + `/help`. |
+| Cost framing | The `/model` copy names the trade-off plainly (Haiku ~3× cheaper, Opus ~1.7× pricier than the default; lower vs higher quality). The metered draw-down already reflects it — nothing else to disclose. |
+
+### Implementation
+
+- **Migration:** `athletes.model_preference text null` with a CHECK constraint on the three allowed ids (or validate in TS against the shared allowlist — pick one place).
+- **Shared allowlist:** one map `{ Haiku → 'claude-haiku-4-5', Sonnet → 'claude-sonnet-4-6', Opus → 'claude-opus-4-8' }` plus the default, in a single module imported by both the worker (resolve) and the bot (`/model` buttons) — the same single-source-of-truth shape as `pricing.ts` and `commands.ts`.
+- **Worker resolve:** in `worker/run-agent.ts`, read the athlete's `model_preference` and fall back to `COACH_MODEL`; pass the resolved id into `query({ options: { model } })` and `persistRun` (which already records `model`). A small `resolveCoachModel(athlete)` helper.
+- **Bot:** `/model` command + `model:<id>` callback in `src/server/telegram/bot.ts`, mirroring `/buy` (onboarded-guard, three-button keyboard with the current pick marked, tap writes the column + collapses the keyboard + confirms). Register `/model` in `commands.ts` (menu + `/help`).
+- **Deploy:** worker change → `fly deploy`; bot/menu change → web push. Both surfaces.
+
+### Open risks / notes
+
+- **Haiku context + effort.** Haiku 4.5 is a 200K context (vs 1M for Sonnet/Opus) and does **not** support the `effort` parameter. The per-athlete folder + 14-day Strava + memory fits 200K comfortably, and the worker doesn't set `effort` today — so neither bites now, but confirm before wiring if the agent options change. The real Haiku trade-off is coaching quality on nuanced conversational turns, which is the athlete's call to make — that's the point of the command.
+- **No guardrail on Opus.** Opus burns ~1.7× faster; for a friends-only group we just disclose it in the copy rather than gating it. Revisit if it becomes a real product.
+- **Interaction with the gate (§5).** None special — a pricier model draws the balance down faster and the `$0` gate (once on) catches it the same way. Runway in `/balance` and the §8 warnings already read from `cost_usd`, so they track the chosen model for free.
 
 ---
 
