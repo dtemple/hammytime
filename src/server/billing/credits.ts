@@ -96,6 +96,44 @@ export function recordStripeRefund(
   return applyStripeCredit(athleteId, paymentIntent, -Math.abs(refundedCents), 'refund');
 }
 
+/**
+ * Manual signed adjustment to an athlete's balance (Specs/METERING_PAYMENTS.md
+ * §11) — the comp / make-good primitive behind the admin console. `amountCents`
+ * is SIGNED (+ credits, − debits); `note` is REQUIRED (the audit reason) and a
+ * blank one is rejected in the RPC. Writes one kind='adjust' ledger row + the
+ * balance bump in one transaction, mirroring grant/debit. NOT idempotent — a
+ * manual adjust is deliberate and repeatable. Returns the new balance in cents.
+ *
+ * Unlike debits this ignores `comped` — an adjust is an explicit override.
+ */
+export async function adjustCredit(
+  athleteId: string,
+  amountCents: number,
+  note: string,
+): Promise<number> {
+  const { data, error } = await supabaseAdmin().rpc('adjust_credit', {
+    p_athlete_id: athleteId,
+    p_amount_cents: amountCents,
+    p_note: note,
+  });
+  if (error) throw error;
+  return data as number;
+}
+
+/**
+ * Flip an athlete's `comped` flag from the admin console (§11). True ⇒ all
+ * automatic billing (debits, warnings, the $0 gate) is skipped. A direct
+ * single-column cache write — no ledger semantics, so no RPC, mirroring
+ * markLowBalanceWarned.
+ */
+export async function setComped(athleteId: string, comped: boolean): Promise<void> {
+  const { error } = await supabaseAdmin()
+    .from('athlete_credits')
+    .update({ comped, updated_at: new Date().toISOString() })
+    .eq('athlete_id', athleteId);
+  if (error) throw error;
+}
+
 export type CreditState = { balanceCents: number; comped: boolean };
 
 /**
