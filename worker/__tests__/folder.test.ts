@@ -24,6 +24,9 @@ import { buildStravaContext } from '../strava';
 type AnyMock = any;
 
 const ATHLETE = '11111111-2222-3333-4444-555555555555';
+const seedPlan = JSON.parse(
+  readFileSync(path.join(__dirname, '../../seeds/marathon_training_plan.json'), 'utf8'),
+);
 
 let memoryRows: { file_name: string; content_md: string }[];
 let planRow: {
@@ -115,6 +118,25 @@ describe('hydrate', () => {
     ]);
   });
 
+  it('writes the read-only current-block view when the plan is schema-valid', async () => {
+    versionRows = [{ id: 'ver-1', plan_json: seedPlan }];
+    const folder = await hydrate(ATHLETE);
+    const viewPath = path.join(folder.dir, 'plan_view_readonly.json');
+    expect(existsSync(viewPath)).toBe(true);
+    const view = JSON.parse(readFileSync(viewPath, 'utf8'));
+    expect(view._readonly).toMatch(/READ-ONLY/);
+    expect(view.metadata).toBeDefined();
+    // It's an input-only file — never recorded as a memory hash.
+    expect(Object.keys(folder.memoryHashes)).not.toContain('plan_view_readonly.json');
+  });
+
+  it('skips the view when the plan fails schema validation', async () => {
+    // The default versionRows ({ weeks: 16 }) is not a valid plan.
+    const folder = await hydrate(ATHLETE);
+    expect(existsSync(path.join(folder.dir, 'marathon_training_plan.json'))).toBe(true);
+    expect(existsSync(path.join(folder.dir, 'plan_view_readonly.json'))).toBe(false);
+  });
+
   it('self-heals a missing baseline anchor to the current version', async () => {
     planRow = { id: 'plan-1', current_version_id: 'ver-1', baseline_version_id: null };
     await hydrate(ATHLETE);
@@ -161,6 +183,17 @@ describe('syncBack', () => {
     const folder = await hydrate(ATHLETE);
     await syncBack(ATHLETE, folder);
     expect(upsertCalls).toHaveLength(0);
+  });
+
+  it('never writes the current-block view back, even if the agent edits it', async () => {
+    versionRows = [{ id: 'ver-1', plan_json: seedPlan }];
+    const folder = await hydrate(ATHLETE);
+    writeFileSync(path.join(folder.dir, 'plan_view_readonly.json'), 'tampered');
+    await syncBack(ATHLETE, folder);
+    const synced = upsertCalls.flatMap((c) =>
+      (c.rows as { file_name: string }[]).map((r) => r.file_name),
+    );
+    expect(synced).not.toContain('plan_view_readonly.json');
   });
 
   it('never writes a knowledge corpus back, even if the agent edits it', async () => {

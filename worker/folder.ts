@@ -18,6 +18,7 @@ import { computeDrift, renderDriftSummary, type PlanDrift } from '@/lib/plan-dri
 import { PlanSchema, type Plan } from '@/lib/plan-schema';
 import { ATHLETE_ROOT, STRAVA_LOOKBACK_DAYS } from './config';
 import { compactJson } from './json-compact';
+import { buildCurrentBlock } from './plan-current-block';
 import { buildStravaContext } from './strava';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -37,6 +38,7 @@ export const INPUT_ONLY_FILES = new Set([
   'strava_recent.json',
   'marathon_training_plan.json',
   'plan_drift.md',
+  'plan_view_readonly.json',
   ...KNOWLEDGE_FILES,
 ]);
 
@@ -59,6 +61,27 @@ export function hash(content: string): string {
   return createHash('sha256').update(content, 'utf8').digest('hex');
 }
 
+// YYYY-MM-DD for now in `timeZone` (same en-CA pattern as system-prompt.ts);
+// the current-block view needs today in the athlete's zone to place the window.
+function localDate(timeZone: string): string {
+  const tz = isValidTimeZone(timeZone) ? timeZone : 'America/Los_Angeles';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+function isValidTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function athleteDir(athleteId: string): string {
   if (!UUID_RE.test(athleteId)) {
     throw new Error(`hydrate: refusing non-uuid athlete id ${JSON.stringify(athleteId)}`);
@@ -71,7 +94,10 @@ function athleteDir(athleteId: string): string {
  * input-only Strava context and active training plan, and returns the dir
  * with per-memory-file content hashes for change detection.
  */
-export async function hydrate(athleteId: string): Promise<HydratedFolder> {
+export async function hydrate(
+  athleteId: string,
+  timezone = 'America/Los_Angeles',
+): Promise<HydratedFolder> {
   const dir = athleteDir(athleteId);
   await rm(dir, { recursive: true, force: true });
   await mkdir(dir, { recursive: true });
@@ -108,6 +134,18 @@ export async function hydrate(athleteId: string): Promise<HydratedFolder> {
   // Drift summary (read-only input) — how far the working plan has moved from
   // the original baseline. The coach reads this and raises material drift.
   await writeFile(path.join(dir, 'plan_drift.md'), buildDriftMarkdown(refs), 'utf8');
+
+  // Current-block plan view (read-only input) — a future-weighted slice of the
+  // full plan the coach reads for routine work instead of loading the whole
+  // ~14k-token file every run (v0.7.41). Excluded from syncBack. A malformed
+  // plan degrades to no view (the coach falls back to the full file).
+  if (refs?.currentJson != null) {
+    const parsed = PlanSchema.safeParse(refs.currentJson);
+    if (parsed.success) {
+      const view = buildCurrentBlock(parsed.data, localDate(timezone));
+      await writeFile(path.join(dir, 'plan_view_readonly.json'), compactJson(view), 'utf8');
+    }
+  }
 
   // Pre-fetched Strava context (input). The coach reads this instead of
   // spawning a fetch — see isolation.ts for why Bash stays denied.

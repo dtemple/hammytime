@@ -96,7 +96,7 @@ export async function runAgent(
   const isFirstAttempt = attempt <= 1;
   const isFinalAttempt = attempt >= MAX_ATTEMPTS;
   const { timezone, name } = await loadAthleteMeta(athleteId);
-  const folder = await hydrate(athleteId);
+  const folder = await hydrate(athleteId, timezone);
 
   // Only for athlete-initiated messages — daily check-ins are proactive, so
   // no one is waiting on a typing indicator. Cleared in the outer finally.

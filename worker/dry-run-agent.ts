@@ -125,7 +125,7 @@ export async function hydrateSnapshot(
   opts: { message?: string; activityId?: number } = {},
 ): Promise<FolderSnapshot> {
   const timezone = await loadTimezone(athleteId);
-  const folder = await hydrate(athleteId);
+  const folder = await hydrate(athleteId, timezone);
 
   const activityId =
     source === 'post_activity'
