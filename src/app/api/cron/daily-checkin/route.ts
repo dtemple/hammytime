@@ -7,8 +7,11 @@ import { enqueueJob } from '@/server/jobs/enqueue';
 import { isOnboarded } from '@/server/telegram/onboarding';
 import {
   INACTIVITY_WINDOW_DAYS,
+  enterDormant,
+  isEventCompleteForAthlete,
   isInactive,
   sendAutoPauseNotice,
+  sendPostEventPauseNotice,
   sweepCheckBacks,
 } from '@/server/telegram/pause';
 import { sweepExpiredProposals } from '@/server/telegram/proposals';
@@ -132,7 +135,31 @@ export async function GET(req: Request) {
     // not-yet-enqueued athletes (their keys are still free).
     let enqueued = 0;
     const paused: string[] = [];
+    const postEventPaused: string[] = [];
     for (const { athlete, date } of due) {
+      // Post-event pause (v4 / V4-W3): a committed athlete whose event is behind
+      // them and whose plan's dated days are spent (after one grounded race-day+1
+      // run) goes dormant — no maintenance plan, daily check-ins stop, Q&A stays
+      // open. Checked before the inactivity scan so the reason is 'dormant' (an
+      // inbound won't wake them), not 'auto_inactivity'. `date` is the athlete's
+      // local calendar day, the same value the enqueue key below uses.
+      if (await isEventCompleteForAthlete(athlete.id, date)) {
+        postEventPaused.push(athlete.id);
+        // Dry run: report the candidate, write nothing, send nothing — same as the
+        // inactivity branch, so David can eyeball the set before it goes live.
+        if (dryRun) continue;
+        await enterDormant(athlete.id, null); // passive pause — no check-back nudge
+        try {
+          await sendPostEventPauseNotice(athlete);
+        } catch (sendErr) {
+          // A missed notice is recoverable (Q&A still works); never let one bad
+          // send abort the batch the way enqueueJob would.
+          Sentry.captureException(sendErr);
+          console.error('[daily-checkin cron] post-event pause notice failed', athlete.id, sendErr);
+        }
+        continue;
+      }
+
       // TODO(§5 gate): once the $0 balance gate ships, skip the inactivity scan
       // for athletes already blocked at $0 — they've stopped running and got the
       // §8 final message; a second "paused" note would just be noise.
@@ -160,7 +187,7 @@ export async function GET(req: Request) {
       enqueued++;
     }
 
-    return NextResponse.json({ ...base, enqueued, paused, dryRun });
+    return NextResponse.json({ ...base, enqueued, paused, postEventPaused, dryRun });
   } catch (err) {
     Sentry.captureException(err);
     console.error('[daily-checkin cron] error', err);

@@ -8,6 +8,7 @@ vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
 
 import {
   isInactive,
+  isEventComplete,
   daysUntilAutoPause,
   INACTIVITY_WINDOW_DAYS,
   sweepCheckBacks,
@@ -19,6 +20,7 @@ import {
 import { supabaseAdmin } from '@/lib/db';
 import { telegramBot } from '../bot';
 import type { Database } from '@/lib/db-types';
+import type { Plan } from '@/lib/plan-schema';
 
 type AthleteRow = Database['public']['Tables']['athletes']['Row'];
 
@@ -256,5 +258,62 @@ describe('clearAutoInactivityPause leaves a manual pause intact', () => {
     } as AthleteRow);
     expect(cleared).toBe(true);
     expect(updates).toEqual([{ id: 'p2', patch: { paused_at: null, pause_reason: null } }]);
+  });
+});
+
+// --- v4 / V4-W3: post-event pause detection (pure predicate) ---
+
+const TODAY = '2026-06-14';
+const committed = (target_date: string | null) => ({ goal_state: 'committed', target_date });
+
+/** A plan whose dated days are exactly `dates` (one week, one day each). Cast past
+ *  the schema — isEventComplete only reads weeks[].days[].date via the plan helpers. */
+function planWithDates(dates: string[]): Plan {
+  return { weeks: [{ days: dates.map((date) => ({ date })) }] } as unknown as Plan;
+}
+
+describe('isEventComplete', () => {
+  it('is true for a committed athlete whose plan ended ≥2 days ago (grounded run already fired)', () => {
+    const plan = planWithDates(['2026-06-10', '2026-06-12']); // last day 2 days before today
+    expect(isEventComplete(committed('2026-06-12'), plan, TODAY)).toBe(true);
+  });
+
+  it('is false the day after the race — the grounded run gets its turn first', () => {
+    const plan = planWithDates(['2026-06-13']); // last day is yesterday
+    expect(isEventComplete(committed('2026-06-13'), plan, TODAY)).toBe(false);
+  });
+
+  it('is false while the plan still has future dated days', () => {
+    const plan = planWithDates(['2026-06-13', '2026-06-20']);
+    expect(isEventComplete(committed('2026-05-01'), plan, TODAY)).toBe(false);
+  });
+
+  it('is false when the committed event date is still ahead', () => {
+    const plan = planWithDates(['2026-06-10']);
+    expect(isEventComplete(committed('2026-07-01'), plan, TODAY)).toBe(false);
+  });
+
+  it('is false for an intended athlete (their plan auto-extends, never ends)', () => {
+    const plan = planWithDates(['2026-06-10']);
+    expect(isEventComplete({ goal_state: 'intended', target_date: '2026-06-10' }, plan, TODAY)).toBe(
+      false,
+    );
+  });
+
+  it('is false for a day_to_day athlete', () => {
+    const plan = planWithDates(['2026-06-10']);
+    expect(
+      isEventComplete({ goal_state: 'day_to_day', target_date: null }, plan, TODAY),
+    ).toBe(false);
+  });
+
+  it('is false for an undated (hand-written) plan — exhaustion is unknown', () => {
+    const undated = { weeks: [{ days: [{ type: 'rest' }] }] } as unknown as Plan;
+    expect(isEventComplete(committed('2026-05-01'), undated, TODAY)).toBe(false);
+  });
+
+  it('is false with no plan and with no target_date', () => {
+    expect(isEventComplete(committed('2026-05-01'), null, TODAY)).toBe(false);
+    expect(isEventComplete(committed(null), planWithDates(['2026-06-10']), TODAY)).toBe(false);
   });
 });

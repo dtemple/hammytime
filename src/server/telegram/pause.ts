@@ -9,6 +9,8 @@
 import { InlineKeyboard } from 'grammy';
 import { supabaseAdmin } from '@/lib/db';
 import type { Database } from '@/lib/db-types';
+import { PlanSchema, type Plan } from '@/lib/plan-schema';
+import { futureDatedDayCount, lastDatedDay } from '@/lib/plan-templates';
 import { telegramBot } from './bot';
 
 type AthleteRow = Database['public']['Tables']['athletes']['Row'];
@@ -233,6 +235,118 @@ export async function sweepCheckBacks(): Promise<number> {
     }
   }
   return sent;
+}
+
+// ---------------------------------------------------------------------------
+// Post-event pause (Onboarding v4 / V4-W3) — the second door into the dormant state
+// ---------------------------------------------------------------------------
+//
+// When a committed event is behind the athlete and their plan's dated days are
+// spent, they go dormant instead of getting a maintenance plan (§4.4): daily
+// check-ins stop, Q&A stays open, naming a new event resumes everything. This is
+// the post-event door; the entry off-ramp (§4.3) is the first. Both land on
+// enterDormant; this door is passive (no check-back nudge — enterDormant(id, null)).
+//
+// "Event-complete" deliberately waits for one grounded post-race run: the plan's
+// last dated day is race day (or its cooldown), and we only pause once it's
+// POST_EVENT_GRACE_DAYS behind. That leaves race-day+1 for one last daily run —
+// the agent sees the race in Strava and speaks to how it actually went — so the
+// static notice below never has to guess finish vs DNF. Committed athletes only:
+// intended/day_to_day plans auto-extend (src/server/plan/extend.ts) and never end.
+
+/** Days the plan's last dated day must be behind `today` before the pause fires.
+ *  2 leaves race-day+1 for the grounded post-race run, then pauses race-day+2. */
+const POST_EVENT_GRACE_DAYS = 2;
+
+/**
+ * Pure event-complete decision, extracted for unit testing. True iff the athlete
+ * committed to a dated event that has passed, their plan's dated days are spent,
+ * AND the grounded post-race run has already had its turn (last dated day is
+ * POST_EVENT_GRACE_DAYS+ behind today). `todayISO` is the athlete's local calendar
+ * date (YYYY-MM-DD); plan dates are the same shape, so the comparisons are exact.
+ */
+export function isEventComplete(
+  profile: { goal_state: string | null; target_date: string | null },
+  plan: Plan | null,
+  todayISO: string,
+): boolean {
+  if (profile.goal_state !== 'committed') return false;
+  if (!profile.target_date || profile.target_date >= todayISO) return false; // event still ahead
+  if (!plan) return false;
+  if (futureDatedDayCount(plan, todayISO) !== 0) return false; // future days left, or undated (null)
+  const last = lastDatedDay(plan);
+  if (last === null) return false;
+  const daysSinceLast = (Date.parse(todayISO) - Date.parse(last)) / 86_400_000;
+  return daysSinceLast >= POST_EVENT_GRACE_DAYS;
+}
+
+/** The athlete's current active plan JSON, or null (no plan / not active /
+ *  unparseable). Mirrors loadWorkingPlan in src/server/plan/extend.ts: the latest
+ *  plans row's current version, accepted only when active. */
+async function loadCurrentActivePlan(athleteId: string): Promise<Plan | null> {
+  const db = supabaseAdmin();
+  const { data: planRow } = await db
+    .from('plans')
+    .select('current_version_id')
+    .eq('athlete_id', athleteId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!planRow?.current_version_id) return null;
+  const { data: v } = await db
+    .from('plan_versions')
+    .select('plan_json, status')
+    .eq('id', planRow.current_version_id)
+    .maybeSingle();
+  if (!v || v.status !== 'active' || !v.plan_json) return null;
+  const parsed = PlanSchema.safeParse(v.plan_json);
+  return parsed.success ? parsed.data : null;
+}
+
+/**
+ * Whether this athlete has finished a committed event (the cron's detection call).
+ * Reads the training profile first — a cheap gate (committed + event date past)
+ * that lets most athletes fall out before the plan load. `todayISO` is the
+ * athlete's local calendar date, the same value the cron keys the enqueue on.
+ */
+export async function isEventCompleteForAthlete(
+  athleteId: string,
+  todayISO: string,
+): Promise<boolean> {
+  const { data: profile } = await supabaseAdmin()
+    .from('athlete_training_profile')
+    .select('goal_state, target_date')
+    .eq('athlete_id', athleteId)
+    .maybeSingle();
+  if (profile?.goal_state !== 'committed') return false;
+  if (!profile.target_date || profile.target_date >= todayISO) return false;
+  const plan = await loadCurrentActivePlan(athleteId);
+  return isEventComplete(profile, plan, todayISO);
+}
+
+/** Static, hand-written post-event pause notice (§4.4) — DRAFT, David to wordsmith
+ *  per CLAUDE.md §3. Outcome-neutral on purpose: the grounded race-day+1 run already
+ *  spoke to how the race went, so this is only the easing-off + the open door for the
+ *  next event. The "next event" line stays soft — until W3b re-activation ships, that
+ *  inbound reaches the coach and David completes the re-plan by hand. */
+export const POST_EVENT_PAUSE_NOTICE =
+  "Now that your event's behind you, I'm easing off the daily check-ins — with " +
+  'nothing on the calendar, a workout every morning would just be noise. I’m still ' +
+  'right here, though: ask me anything, or talk through how it all went. When the ' +
+  "next one lands — a race, an adventure, whatever pulls you — tell me and we'll " +
+  'build the block for it.';
+
+/**
+ * Send the one static post-event pause notice and log it. No keyboard: the way back
+ * is naming an event, not a resume tap (passive pause, §4.4). Mirrors
+ * sendAutoPauseNotice — throws on send failure, the cron guards it so one bad send
+ * never aborts the batch.
+ */
+export async function sendPostEventPauseNotice(
+  athlete: Pick<AthleteRow, 'id' | 'telegram_chat_id'>,
+): Promise<void> {
+  if (!athlete.telegram_chat_id) return;
+  await sendAndLogOutbound(athlete.telegram_chat_id, athlete.id, POST_EVENT_PAUSE_NOTICE);
 }
 
 // ---------------------------------------------------------------------------

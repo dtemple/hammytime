@@ -291,8 +291,11 @@ export async function handleInboundText(ctx: Context): Promise<void> {
     // normally and does NOT flip the daily back on (clearAutoInactivityPause above
     // left a manual pause intact). Append a light reminder so the paused state stays
     // visible. The worker sends the real reply async, so this is a separate inline
-    // message — it lands with the 👀, ahead of the coach reply. Auto/dormant pauses
-    // don't reach here (auto was cleared above; dormant athletes have no active plan).
+    // message — it lands with the 👀, ahead of the coach reply. Only a manual pause
+    // gets the reminder: an auto pause was cleared above; an off-ramp dormant athlete
+    // has no active plan so never reaches here; and a post-event dormant athlete (v4
+    // W3) keeps their finished plan and IS coached here, but stays quiet — naming a
+    // new event, not a nudge, is their way back.
     if (athlete.paused_at != null && athlete.pause_reason === 'manual') {
       await sendAndLog(
         athlete.id,

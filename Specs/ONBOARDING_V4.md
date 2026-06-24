@@ -440,9 +440,17 @@ framing, the off-ramp/pause state, and adopting U1.
   `goal_type='general_fitness'`, two beats), and the `check_back_at` capture with a
   one-shot cron nudge (direct-send, like the auto-pause notice). Planless inbound
   re-opens the engine (Option A) with a written ack + gentle explanation.
-- **V4-W3 · Post-event pause · M.** Detect event-complete → enter pause; daily
-  cron skip; Q&A stays; new event re-activates (§4.4). Shares the dormant-state
-  machinery with W2.
+- **V4-W3 · Post-event pause · M.** ⚙️ **W3a BUILT** (2026-06-24, v0.7.42):
+  detect event-complete (committed + event date past + plan dated days spent, after
+  one grounded race-day+1 run) → `enterDormant(id, null)` + static notice in the
+  daily cron, before the inactivity scan; daily skip is free; Q&A stays open
+  (verified — the finished plan is kept, so `bot.ts` routes inbound to the coach).
+  Shares the dormant-state machinery with W2; web-only (Vercel push), no migration.
+  **W3b deferred (re-activation):** a post-event athlete naming a new event reaches
+  the coach but doesn't yet re-plan — decided path (with David) is a command (e.g.
+  `/next_event`) that resets a `complete` athlete to event-scoped intake so the
+  engine's `finishOnboarding` does `exitDormant` + commit + plan-gen. Until then,
+  David completes it by hand from `messages`/admin.
 - **V4-W4 · Catalog U1 · M.** Adopt `ULTRA_SUPPORT.md` U1: four buckets,
   `ultra-50k`, distance-derived plausibility, widened bands, non-race adventures.
   (`event_kind` column, athlete-stated fill, fuzzy dates land here if not in W1.)
