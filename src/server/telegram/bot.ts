@@ -297,7 +297,7 @@ export async function handleInboundText(ctx: Context): Promise<void> {
       await sendAndLog(
         athlete.id,
         ctx.chat!.id,
-        'Your daily check-ins are still paused — /resume to switch them back on.',
+        "I'll still get back to you on this. Your daily check-ins stay paused until you run /resume.",
       );
     }
   } else {
