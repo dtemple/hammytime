@@ -5,16 +5,41 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { debitRunCredit, getCreditState, sendDavidAlert, sendReply } = vi.hoisted(() => ({
+const {
+  debitRunCredit,
+  getCreditState,
+  getLowBalanceWarnState,
+  markLowBalanceWarned,
+  hasToppedUp,
+  estimateRunwayDays,
+  sendDavidAlert,
+  sendTopupButtons,
+} = vi.hoisted(() => ({
   debitRunCredit: vi.fn(),
   getCreditState: vi.fn(),
+  getLowBalanceWarnState: vi.fn(),
+  markLowBalanceWarned: vi.fn(),
+  hasToppedUp: vi.fn(),
+  estimateRunwayDays: vi.fn(),
   sendDavidAlert: vi.fn(),
-  sendReply: vi.fn(),
+  sendTopupButtons: vi.fn(),
 }));
-vi.mock('@/server/billing/credits', () => ({ debitRunCredit, getCreditState }));
-vi.mock('../send', () => ({ sendDavidAlert, sendReply }));
+vi.mock('@/server/billing/credits', () => ({
+  debitRunCredit,
+  getCreditState,
+  getLowBalanceWarnState,
+  markLowBalanceWarned,
+  hasToppedUp,
+}));
+// estimateRunwayDays reads the rollup (DB) — mock it; runwayLabel is pure, keep it
+// real so the heads-up copy asserts against the actual rendered runway phrase.
+vi.mock('@/server/billing/burn-rate', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/server/billing/burn-rate')>()),
+  estimateRunwayDays,
+}));
+vi.mock('../send', () => ({ sendDavidAlert, sendTopupButtons }));
 
-import { chargeRun, enforceCreditGate } from '../billing';
+import { chargeRun, enforceCreditGate, maybeWarnLowBalance } from '../billing';
 
 const ATHLETE = '11111111-2222-3333-4444-555555555555';
 const job = (kind: string, athleteId: string = ATHLETE) => ({
@@ -25,8 +50,12 @@ const job = (kind: string, athleteId: string = ATHLETE) => ({
 beforeEach(() => {
   debitRunCredit.mockReset().mockResolvedValue(true);
   getCreditState.mockReset();
+  getLowBalanceWarnState.mockReset();
+  markLowBalanceWarned.mockReset().mockResolvedValue(undefined);
+  hasToppedUp.mockReset().mockResolvedValue(false);
+  estimateRunwayDays.mockReset().mockResolvedValue(99);
   sendDavidAlert.mockReset().mockResolvedValue(undefined);
-  sendReply.mockReset().mockResolvedValue(undefined);
+  sendTopupButtons.mockReset().mockResolvedValue(undefined);
   delete process.env.BILLING_GATE_ENABLED;
 });
 
@@ -59,7 +88,7 @@ describe('enforceCreditGate — pre-run $0 gate', () => {
     getCreditState.mockResolvedValue({ balanceCents: 0, comped: false });
     expect(await enforceCreditGate(job('daily_checkin'))).toBe('allowed');
     expect(getCreditState).not.toHaveBeenCalled(); // short-circuits before any read
-    expect(sendReply).not.toHaveBeenCalled();
+    expect(sendTopupButtons).not.toHaveBeenCalled();
     expect(sendDavidAlert).not.toHaveBeenCalled();
   });
 
@@ -76,7 +105,7 @@ describe('enforceCreditGate — pre-run $0 gate', () => {
     it('allows a comped athlete regardless of balance', async () => {
       getCreditState.mockResolvedValue({ balanceCents: -500, comped: true });
       expect(await enforceCreditGate(job('daily_checkin'))).toBe('allowed');
-      expect(sendReply).not.toHaveBeenCalled();
+      expect(sendTopupButtons).not.toHaveBeenCalled();
     });
 
     it('allows a non-comped athlete with a positive balance', async () => {
@@ -84,11 +113,14 @@ describe('enforceCreditGate — pre-run $0 gate', () => {
       expect(await enforceCreditGate(job('tg_message'))).toBe('allowed');
     });
 
-    it('blocks a non-comped athlete at $0 — alerts David and messages them', async () => {
+    it('blocks a non-comped athlete at $0 — alerts David and messages them with buttons', async () => {
       getCreditState.mockResolvedValue({ balanceCents: 0, comped: false });
       expect(await enforceCreditGate(job('daily_checkin'))).toBe('blocked');
       expect(sendDavidAlert).toHaveBeenCalledTimes(1);
-      expect(sendReply).toHaveBeenCalledWith(ATHLETE, expect.stringContaining('/buy'));
+      expect(sendTopupButtons).toHaveBeenCalledWith(
+        ATHLETE,
+        expect.stringContaining('last of your credit'),
+      );
     });
 
     it('blocks a non-comped athlete who overshot into the negative', async () => {
@@ -111,6 +143,121 @@ describe('enforceCreditGate — pre-run $0 gate', () => {
     it('allows (defers to dispatch) when the payload has no athlete id', async () => {
       expect(await enforceCreditGate({ kind: 'daily_checkin', payload: {} })).toBe('allowed');
       expect(getCreditState).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('maybeWarnLowBalance — §8 low-balance heads-up', () => {
+  // A positive balance whose runway sits at/under the 2-day threshold.
+  const low = (over: Partial<{ comped: boolean; warnedAt: string | null }> = {}) =>
+    ({ balanceCents: 120, comped: false, warnedAt: null, ...over });
+
+  it('is OFF by default — never reads or sends in the free era', async () => {
+    getLowBalanceWarnState.mockResolvedValue(low());
+    estimateRunwayDays.mockResolvedValue(1.5);
+    await maybeWarnLowBalance(ATHLETE);
+    expect(getLowBalanceWarnState).not.toHaveBeenCalled();
+    expect(sendTopupButtons).not.toHaveBeenCalled();
+    expect(markLowBalanceWarned).not.toHaveBeenCalled();
+  });
+
+  describe('with BILLING_GATE_ENABLED on', () => {
+    beforeEach(() => {
+      process.env.BILLING_GATE_ENABLED = 'true';
+    });
+
+    it('fires the first-time explainer (never topped up), then marks', async () => {
+      getLowBalanceWarnState.mockResolvedValue(low());
+      estimateRunwayDays.mockResolvedValue(1.5);
+      hasToppedUp.mockResolvedValue(false);
+      await maybeWarnLowBalance(ATHLETE);
+      expect(sendTopupButtons).toHaveBeenCalledWith(
+        ATHLETE,
+        expect.stringContaining('runs on a credits system'),
+      );
+      expect(markLowBalanceWarned).toHaveBeenCalledWith(ATHLETE);
+    });
+
+    it('fires the short version once the athlete has topped up before', async () => {
+      getLowBalanceWarnState.mockResolvedValue(low());
+      estimateRunwayDays.mockResolvedValue(1.5);
+      hasToppedUp.mockResolvedValue(true);
+      await maybeWarnLowBalance(ATHLETE);
+      expect(sendTopupButtons).toHaveBeenCalledWith(
+        ATHLETE,
+        expect.stringContaining('Quick heads-up'),
+      );
+      expect(markLowBalanceWarned).toHaveBeenCalledWith(ATHLETE);
+    });
+
+    it('renders the dynamic runway + dollar amount in the copy', async () => {
+      getLowBalanceWarnState.mockResolvedValue(low());
+      estimateRunwayDays.mockResolvedValue(1.5);
+      hasToppedUp.mockResolvedValue(true);
+      await maybeWarnLowBalance(ATHLETE);
+      const text = sendTopupButtons.mock.calls[0]?.[1] as string;
+      expect(text).toContain('$1.20');
+      expect(text).toContain('about 2 days');
+    });
+
+    it('marks after the send even if the send fails (still dedupes)', async () => {
+      getLowBalanceWarnState.mockResolvedValue(low());
+      estimateRunwayDays.mockResolvedValue(1.5);
+      sendTopupButtons.mockRejectedValue(new Error('telegram down'));
+      await maybeWarnLowBalance(ATHLETE);
+      expect(markLowBalanceWarned).toHaveBeenCalledWith(ATHLETE);
+    });
+
+    it('defaults to the explainer when the top-up history read throws', async () => {
+      getLowBalanceWarnState.mockResolvedValue(low());
+      estimateRunwayDays.mockResolvedValue(1.5);
+      hasToppedUp.mockRejectedValue(new Error('db down'));
+      await maybeWarnLowBalance(ATHLETE);
+      expect(sendTopupButtons).toHaveBeenCalledWith(
+        ATHLETE,
+        expect.stringContaining('runs on a credits system'),
+      );
+    });
+
+    it('skips when runway is still above the threshold', async () => {
+      getLowBalanceWarnState.mockResolvedValue({ balanceCents: 400, comped: false, warnedAt: null });
+      estimateRunwayDays.mockResolvedValue(5);
+      await maybeWarnLowBalance(ATHLETE);
+      expect(sendTopupButtons).not.toHaveBeenCalled();
+      expect(markLowBalanceWarned).not.toHaveBeenCalled();
+    });
+
+    it('skips a comped athlete', async () => {
+      getLowBalanceWarnState.mockResolvedValue(low({ comped: true }));
+      await maybeWarnLowBalance(ATHLETE);
+      expect(estimateRunwayDays).not.toHaveBeenCalled();
+      expect(sendTopupButtons).not.toHaveBeenCalled();
+    });
+
+    it('skips at $0 — the gate owns that case', async () => {
+      getLowBalanceWarnState.mockResolvedValue({ balanceCents: 0, comped: false, warnedAt: null });
+      await maybeWarnLowBalance(ATHLETE);
+      expect(sendTopupButtons).not.toHaveBeenCalled();
+    });
+
+    it('skips (dedupe) when already warned this cycle', async () => {
+      getLowBalanceWarnState.mockResolvedValue(low({ warnedAt: '2026-06-24T00:00:00Z' }));
+      await maybeWarnLowBalance(ATHLETE);
+      expect(estimateRunwayDays).not.toHaveBeenCalled();
+      expect(sendTopupButtons).not.toHaveBeenCalled();
+      expect(markLowBalanceWarned).not.toHaveBeenCalled();
+    });
+
+    it('skips when there is no billing row', async () => {
+      getLowBalanceWarnState.mockResolvedValue(null);
+      await maybeWarnLowBalance(ATHLETE);
+      expect(sendTopupButtons).not.toHaveBeenCalled();
+    });
+
+    it('bails quietly when the balance read throws', async () => {
+      getLowBalanceWarnState.mockRejectedValue(new Error('db down'));
+      await expect(maybeWarnLowBalance(ATHLETE)).resolves.toBeUndefined();
+      expect(sendTopupButtons).not.toHaveBeenCalled();
     });
   });
 });

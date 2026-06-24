@@ -12,7 +12,13 @@ import { config } from 'dotenv';
 config({ path: '.env.local' });
 
 import { supabaseAdmin } from '@/lib/db';
-import { grantSignupCredit, debitRunCredit, getCreditState } from '@/server/billing/credits';
+import {
+  grantSignupCredit,
+  debitRunCredit,
+  getCreditState,
+  hasToppedUp,
+  recordStripeTopup,
+} from '@/server/billing/credits';
 import { billedCents } from '@/server/billing/pricing';
 
 const db = supabaseAdmin();
@@ -135,6 +141,68 @@ async function main() {
   // positive balance → allowed
   await db.from('athlete_credits').update({ comped: false, balance_cents: 100 }).eq('athlete_id', athleteId);
   check('gate ON: allows non-comped with positive balance', (await enforceCreditGate(j('daily_checkin'))) === 'allowed', 'balance=100');
+
+  // ---- 5. low-balance heads-up (§8) -----------------------------------------
+  // Runway = balance_cents / 80 for this athlete (no rollup row → the default
+  // 80¢/day burn). ≤2 days (≤160¢) fires; >2 days doesn't. The throwaway athlete
+  // has no telegram_chat_id, so the send throws-and-is-caught inside the helper
+  // and the dedupe column still lands — we assert against that column.
+  const { maybeWarnLowBalance } = await import('../worker/billing');
+  const setCredits = (over: Record<string, unknown>) =>
+    db.from('athlete_credits').update(over).eq('athlete_id', athleteId);
+  const warnedAt = async (): Promise<string | null> => {
+    const { data } = await db
+      .from('athlete_credits')
+      .select('low_balance_warned_at')
+      .eq('athlete_id', athleteId)
+      .maybeSingle();
+    return (data?.low_balance_warned_at as string | null) ?? null;
+  };
+
+  // gate must be on for the heads-up to fire (set above; make it explicit).
+  process.env.BILLING_GATE_ENABLED = 'true';
+
+  // above threshold → doesn't fire
+  await setCredits({ comped: false, balance_cents: 400, low_balance_warned_at: null });
+  await maybeWarnLowBalance(athleteId);
+  check('heads-up: above threshold (5 days) does not fire', (await warnedAt()) === null, 'balance=400');
+
+  // first-time low → fires; never topped up yet, so the explainer path
+  check('heads-up: not topped up yet', (await hasToppedUp(athleteId)) === false, 'pre-topup');
+  await setCredits({ balance_cents: 120 });
+  await maybeWarnLowBalance(athleteId);
+  const firstWarn = await warnedAt();
+  check('heads-up: fires at ~1.5 days (column set)', firstWarn !== null, `warnedAt=${firstWarn}`);
+
+  // dedupe → a second call doesn't re-mark
+  await maybeWarnLowBalance(athleteId);
+  check('heads-up: dedupes (timestamp unchanged)', (await warnedAt()) === firstWarn, 'second call no-op');
+
+  // a top-up clears the dedupe column AND flips the selector to the short version
+  await recordStripeTopup(athleteId, 'pi_verify_drawdown_topup', 1000);
+  check('heads-up: top-up cleared the dedupe column', (await warnedAt()) === null, 'rearmed');
+  check('heads-up: topped up now true', (await hasToppedUp(athleteId)) === true, 'post-topup');
+
+  // re-arm → next low cycle fires again (now the short-version path)
+  await setCredits({ balance_cents: 120, low_balance_warned_at: null });
+  await maybeWarnLowBalance(athleteId);
+  check('heads-up: re-arms and fires again after top-up', (await warnedAt()) !== null, 'second cycle');
+
+  // $0 → the gate owns it, heads-up bails
+  await setCredits({ balance_cents: 0, low_balance_warned_at: null });
+  await maybeWarnLowBalance(athleteId);
+  check('heads-up: skips at $0 (gate owns it)', (await warnedAt()) === null, 'balance=0');
+
+  // comped → never warned
+  await setCredits({ comped: true, balance_cents: 120, low_balance_warned_at: null });
+  await maybeWarnLowBalance(athleteId);
+  check('heads-up: skips a comped athlete', (await warnedAt()) === null, 'comped');
+
+  // gate off → dark
+  delete process.env.BILLING_GATE_ENABLED;
+  await setCredits({ comped: false, balance_cents: 120, low_balance_warned_at: null });
+  await maybeWarnLowBalance(athleteId);
+  check('heads-up: gate OFF stays dark', (await warnedAt()) === null, 'flag unset');
 
   // ---- index guard sanity: a second debit row for one run is rejected -------
   // (already proven by step 2's no-op; the unique index is what backs it.)

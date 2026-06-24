@@ -15,7 +15,10 @@ vi.mock('../send', () => ({
   resolveStaleProposalMessage: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('../persist', () => ({ persistRun: vi.fn().mockResolvedValue('run-1') }));
-vi.mock('../billing', () => ({ chargeRun: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('../billing', () => ({
+  chargeRun: vi.fn().mockResolvedValue(undefined),
+  maybeWarnLowBalance: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock('../plan-version', () => ({ persistPlanEdit: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../system-prompt', () => ({
   renderSystemPrompt: vi.fn().mockResolvedValue('SYSTEM PROMPT'),

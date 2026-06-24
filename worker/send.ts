@@ -6,6 +6,7 @@ import { Bot, InlineKeyboard } from 'grammy';
 import { supabaseAdmin } from '@/lib/db';
 import { getOrCreatePrehabToken } from '@/lib/calendar-token';
 import { resolveExercise } from '@/lib/exercise-library';
+import { TOPUP_PRESETS_CENTS, dollarsLabel } from '@/server/billing/pricing';
 
 const TELEGRAM_MAX_CHARS = 4096;
 
@@ -148,6 +149,40 @@ export async function sendCalendarConfirm(athleteId: string, token: string): Pro
     .from('plans')
     .update({ proposed_message_id: sent.message_id })
     .eq('proposed_token', token);
+}
+
+/**
+ * Send a billing message with the $10 / $25 / $50 top-up presets under it
+ * (Specs/METERING_PAYMENTS.md §8). Shared by the low-balance heads-up and the
+ * $0 final notice — caller owns the text, this attaches the buttons. The
+ * callback_data `buy:<cents>` is handled by the inbound bot's dispatcher
+ * (src/server/telegram/bot.ts) — both processes share the bot token, so a button
+ * the worker sends opens the same Stripe-checkout flow. Plain text, no parse
+ * mode (mirrors sendCalendarConfirm); logs the out-row.
+ */
+export async function sendTopupButtons(athleteId: string, text: string): Promise<void> {
+  const db = supabaseAdmin();
+  const { data: athlete } = await db
+    .from('athletes')
+    .select('telegram_chat_id')
+    .eq('id', athleteId)
+    .maybeSingle();
+
+  if (!athlete?.telegram_chat_id) {
+    throw new Error(`sendTopupButtons: athlete ${athleteId} has no telegram_chat_id`);
+  }
+
+  const keyboard = new InlineKeyboard();
+  for (const cents of TOPUP_PRESETS_CENTS) keyboard.text(dollarsLabel(cents), `buy:${cents}`);
+
+  await bot().api.sendMessage(athlete.telegram_chat_id, text, { reply_markup: keyboard });
+
+  await db.from('messages').insert({
+    athlete_id: athleteId,
+    channel: 'tg',
+    direction: 'out',
+    body: text,
+  });
 }
 
 /**

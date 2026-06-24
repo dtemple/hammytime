@@ -15,7 +15,7 @@ import { persistPlanEdit } from './plan-version';
 import { CANCEL_SENTINEL, discardPendingProposal } from './proposal';
 import { makePlanEditHook } from './plan-edit-hook';
 import { attemptPlanRepair } from './plan-repair';
-import { chargeRun } from './billing';
+import { chargeRun, maybeWarnLowBalance } from './billing';
 import { ALLOWED_TOOLS, makeIsolationGuard, scrubbedEnv } from './isolation';
 import { persistRun, type CapturedStep, type RunKind } from './persist';
 import { stripCoachPreamble } from './reply-sanitize';
@@ -322,6 +322,15 @@ export async function runAgent(
       }
       await sendCalendarConfirm(athleteId, planProposal.token).catch((e) =>
         console.error(`[run-agent] sendCalendarConfirm failed for ${athleteId}:`, e),
+      );
+    }
+
+    // Low-balance heads-up (Specs/METERING_PAYMENTS.md §8) — after a charged,
+    // clean run, and after the coach's message lands so the nudge follows the
+    // coaching rather than preceding it. Best-effort; gated/deduped internally.
+    if (runId && !runError) {
+      await maybeWarnLowBalance(athleteId).catch((e) =>
+        console.error(`[run-agent] low-balance warn failed for ${athleteId}:`, e),
       );
     }
   } finally {

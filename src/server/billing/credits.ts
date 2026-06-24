@@ -114,3 +114,63 @@ export async function getCreditState(athleteId: string): Promise<CreditState | n
   if (!data) return null;
   return { balanceCents: data.balance_cents, comped: data.comped };
 }
+
+export type LowBalanceWarnState = {
+  balanceCents: number;
+  comped: boolean;
+  warnedAt: string | null;
+};
+
+/**
+ * The one read the §8 low-balance heads-up needs: balance, comp flag, and the
+ * dedupe timestamp in a single row read. Kept separate from getCreditState so
+ * the warn timestamp doesn't ripple into the /balance + gate callers that pin
+ * getCreditState's exact {balanceCents, comped} shape. Null when there's no row.
+ */
+export async function getLowBalanceWarnState(
+  athleteId: string,
+): Promise<LowBalanceWarnState | null> {
+  const { data, error } = await supabaseAdmin()
+    .from('athlete_credits')
+    .select('balance_cents, comped, low_balance_warned_at')
+    .eq('athlete_id', athleteId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    balanceCents: data.balance_cents,
+    comped: data.comped,
+    warnedAt: data.low_balance_warned_at,
+  };
+}
+
+/**
+ * Stamp the §8 heads-up dedupe column (athlete_credits.low_balance_warned_at).
+ * A direct single-column cache write — no ledger semantics, so no RPC. The clear
+ * side lives in apply_stripe_credit (a top-up re-arms the warning).
+ */
+export async function markLowBalanceWarned(athleteId: string): Promise<void> {
+  const { error } = await supabaseAdmin()
+    .from('athlete_credits')
+    .update({ low_balance_warned_at: new Date().toISOString() })
+    .eq('athlete_id', athleteId);
+  if (error) throw error;
+}
+
+/**
+ * Has this athlete ever topped up (a kind='topup' ledger row)? The §8 heads-up
+ * uses it to choose the first-time credits explainer (never topped up) over the
+ * recurring short nudge. Not a dedupe — that's low_balance_warned_at; this only
+ * selects the copy.
+ */
+export async function hasToppedUp(athleteId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin()
+    .from('credit_ledger')
+    .select('id')
+    .eq('athlete_id', athleteId)
+    .eq('kind', 'topup')
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return !!data;
+}
