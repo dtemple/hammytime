@@ -355,7 +355,9 @@ describe('race-day anchoring (T-1)', () => {
             failures.push(`${tag}: weeks ${plan.weeks.length} ≠ totalWeeks ${params.totalWeeks}`);
           }
           if (plan.weeks.length > params.totalWeeks! || plan.weeks.length < 1) {
-            failures.push(`${tag}: weeks ${plan.weeks.length} out of range (totalWeeks ${params.totalWeeks})`);
+            failures.push(
+              `${tag}: weeks ${plan.weeks.length} out of range (totalWeeks ${params.totalWeeks})`,
+            );
           }
         }
       }
@@ -465,23 +467,17 @@ describe('ease-in first week', () => {
   });
 });
 
-describe('caps surface into agent_guidance.compliance_rules', () => {
-  it('includes the three caps-derived rules with the locked numbers', () => {
+describe('caps stay out of agent_guidance.compliance_rules', () => {
+  it('omits the caps-derived rules (enforced chat-time by the system prompt) but keeps coaching rules', () => {
     const profile = buildProfile('marathon', 'some_training', 'committed');
     const { template, params } = selectPlan(profile, SNAP, DRAFT_SAFETY_CAPS);
     const plan = renderPlan(template, params);
-    const rules = plan.agent_guidance?.compliance_rules ?? [];
-    const byId = Object.fromEntries(rules.map((r) => [r.rule_id, r]));
-    expect(byId['long_run_progression']?.max_increase_miles).toBe(
-      DRAFT_SAFETY_CAPS.maxLongRunStepMi,
-    );
-    expect(byId['weekly_volume_cap']?.threshold_percent).toBe(
-      Math.round(DRAFT_SAFETY_CAPS.maxWeeklyRampPct * 100),
-    );
-    expect(byId['long_run_distance_cap']).toBeDefined();
-    expect(byId['long_run_distance_cap']?.description).toContain(
-      String(DRAFT_SAFETY_CAPS.maxLongRunMiByDistance.marathon),
-    );
+    const ids = (plan.agent_guidance?.compliance_rules ?? []).map((r) => r.rule_id);
+    expect(ids).not.toContain('long_run_progression');
+    expect(ids).not.toContain('weekly_volume_cap');
+    expect(ids).not.toContain('long_run_distance_cap');
+    // The coaching-color rules the template owns still ship.
+    expect(ids).toContain('easy_pace_too_fast');
   });
 });
 

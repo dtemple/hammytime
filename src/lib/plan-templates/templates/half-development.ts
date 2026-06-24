@@ -169,43 +169,36 @@ export const halfDevelopment: PlanTemplate = {
   },
 
   guidanceBase: {
-    description: 'Pace-capable development half-marathon guidance.',
     pace_zones: {
       note: 'Lead easy on effort; tempo, intervals, and goal-pace work lead on pace when a time is set.',
       easy: {
         description: 'Conversational; full sentences.',
         hr_zone: [1, 2],
-        hr_percent_max: [60, 75],
         rpe: [3, 5],
       },
       long_run: {
         description: 'Easy to steady; goal-pace finishes layered in late in the build.',
         hr_zone: [1, 3],
-        hr_percent_max: [60, 82],
         rpe: [3, 6],
       },
       tempo: {
         description: 'Threshold — comfortably hard, short phrases only.',
         hr_zone: [3, 4],
-        hr_percent_max: [82, 90],
         rpe: [6, 8],
       },
       interval: {
         description: 'VO2 reps — hard, near top sustainable effort.',
         hr_zone: [4, 5],
-        hr_percent_max: [88, 95],
         rpe: [8, 9],
       },
       marathon_pace: {
         description: 'Goal race pace — steady and repeatable on the edge of comfortable.',
         hr_zone: [3, 4],
-        hr_percent_max: [82, 89],
         rpe: [6, 7],
       },
       strides: {
         description: 'Short relaxed bursts; full recovery.',
         hr_zone: [4, 5],
-        hr_percent_max: [85, 95],
         rpe: [7, 8],
       },
     },

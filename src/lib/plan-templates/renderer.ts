@@ -834,38 +834,19 @@ export function placeStrength(
 // Assemble + overlays.
 // ---------------------------------------------------------------------------
 
-function buildComplianceRules(params: RenderParams, base: ComplianceRule[]): ComplianceRule[] {
-  const { caps, distance } = params;
-  const pct = Math.round(caps.maxWeeklyRampPct * 100);
-  const capsRules: ComplianceRule[] = [
-    {
-      rule_id: 'long_run_progression',
-      description: `Long run should not jump more than ${caps.maxLongRunStepMi} miles week over week.`,
-      max_increase_miles: caps.maxLongRunStepMi,
-      exception: `The week after a cutback may increase up to ${caps.postCutbackLongRunStepMi} miles.`,
-      action:
-        'If the athlete wants a bigger jump, warn about the injury risk and the tradeoff, ask them to confirm, then make the change.',
-    },
-    {
-      rule_id: 'weekly_volume_cap',
-      description: `Weekly mileage should not climb more than ${pct}% or ${caps.minWeeklyRampMi} mi (whichever is greater) week over week.`,
-      threshold_percent: pct,
-      exception:
-        'Cutback weeks go down; re-ramping out of a cutback to the prior peak is expected.',
-      action:
-        'If the athlete asks for a faster ramp, warn clearly with the tradeoff, ask them to confirm, then apply it.',
-    },
-    {
-      rule_id: 'long_run_distance_cap',
-      description: `For this race distance the long run is capped at ${caps.maxLongRunMiByDistance[distance]} miles.`,
-      target: `${caps.maxLongRunMiByDistance[distance]} mi`,
-      action:
-        'Going past this costs more recovery than it returns. If they want it, say so plainly, ask them to confirm, then write it.',
-    },
-  ];
-  const capIds = new Set(capsRules.map((r) => r.rule_id));
-  // Caps win on shared rule_id; keep template coaching-color rules.
-  return [...capsRules, ...base.filter((r) => !capIds.has(r.rule_id))];
+// Ramp / long-run / cap limits are enforced at chat time by the system prompt's
+// safety-caps block (worker/system-prompt.ts, rendered from this same caps.ts).
+// They're deliberately kept OUT of the plan JSON so the coach reads them in one
+// place, not two. Strip any rule a template carries under these ids; emit only
+// the coaching-color rules (easy-pace discipline, goal-pace realism, …).
+const CAPS_RULE_IDS = new Set([
+  'long_run_progression',
+  'weekly_volume_cap',
+  'long_run_distance_cap',
+]);
+
+function buildComplianceRules(base: ComplianceRule[]): ComplianceRule[] {
+  return base.filter((r) => !CAPS_RULE_IDS.has(r.rule_id));
 }
 
 function clone<T>(v: T): T {
@@ -928,7 +909,7 @@ function assemblePlan(
   const restDay = weeks[0]?.days.find((d) => d.type === 'rest')?.day;
 
   const guidance: AgentGuidance = clone(template.guidanceBase);
-  guidance.compliance_rules = buildComplianceRules(params, guidance.compliance_rules ?? []);
+  guidance.compliance_rules = buildComplianceRules(guidance.compliance_rules ?? []);
 
   const plan: Plan = {
     plan_version: 'template-1',
@@ -1107,9 +1088,8 @@ function applyInjuryOverlay(plan: Plan, params: RenderParams): void {
 }
 
 function applyOpenEndedOverlay(plan: Plan): void {
-  if (plan.agent_guidance) {
-    plan.agent_guidance.description = `${plan.agent_guidance.description ? plan.agent_guidance.description + ' ' : ''}No race date locked yet — this is a base + build starting block; the peak and taper get added when a race anchors the calendar.`;
-  }
+  // The "no race date yet" framing rides on the athlete-visible week-1 coaching
+  // note below — not a description field only the agent reads.
   const first = plan.weeks[0];
   if (first) {
     first.coaching_note = `${first.coaching_note ? first.coaching_note + ' ' : ''}Starting point, not a contract — tell me the race whenever you pick it and I’ll anchor the calendar.`;

@@ -171,42 +171,30 @@ export const marathonFinish: PlanTemplate = {
   // Effort-led pace zones (no concrete paces — finish goal). Compliance rules
   // here are the marathon-finish subset; the renderer merges the shared base.
   guidanceBase: {
-    description: 'Effort-led finish-marathon guidance.',
     pace_zones: {
       note: 'Finish goal — lead with heart rate and perceived effort, not pace.',
       easy: {
         description: 'Conversational; full sentences.',
         hr_zone: [1, 2],
-        hr_percent_max: [60, 75],
         rpe: [3, 5],
       },
       long_run: {
         description: 'Slightly slower than easy; time on feet.',
         hr_zone: [1, 2],
-        hr_percent_max: [60, 72],
         rpe: [3, 5],
       },
       tempo: {
         description: 'Comfortably hard; short phrases only.',
         hr_zone: [3, 4],
-        hr_percent_max: [76, 87],
         rpe: [6, 7],
       },
       strides: {
         description: 'Short relaxed bursts; full recovery.',
         hr_zone: [4, 5],
-        hr_percent_max: [85, 95],
         rpe: [7, 8],
       },
     },
     compliance_rules: [
-      {
-        rule_id: 'long_run_progression',
-        description: 'Long run should not jump more than ~2 miles week over week.',
-        max_increase_miles: 2,
-        exception: 'Week after a cutback may increase up to 3 miles.',
-        action: 'If the athlete ran much longer than planned, warn about injury risk.',
-      },
       {
         rule_id: 'easy_pace_too_fast',
         description: 'Easy and long runs should stay in zone 1–2.',

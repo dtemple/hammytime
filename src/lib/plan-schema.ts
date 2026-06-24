@@ -183,8 +183,12 @@ const MetadataSchema = z.object({
 
 const PaceZoneSchema = z.object({
   description: z.string(),
+  // hr_zone drives each day's target_hr_zone (renderer effortFields); it's the
+  // load-bearing HR encoding. hr_percent_max is reference-only — not propagated
+  // to days and read by nothing — so the renderer no longer emits it. Kept
+  // optional for legacy/BYO plans that still carry it.
   hr_zone: z.tuple([z.number(), z.number()]),
-  hr_percent_max: z.tuple([z.number(), z.number()]),
+  hr_percent_max: z.tuple([z.number(), z.number()]).optional(),
   rpe: z.tuple([z.number(), z.number()]),
   // Concrete pace range (sec/mile) — present on road / time-goal plans where pace
   // leads. Effort-led (trail / finish) plans leave this off and use HR/RPE.

@@ -12,10 +12,11 @@
 //     ("A jump that size carries real injury risk; I'd strongly recommend
 //     against it. But if you want it in your plan, I can do that.")
 //
-// One source of truth: these caps flow into BOTH the rendered plan's
-// agent_guidance.compliance_rules (gen-time, via the renderer) AND the worker
-// coach prompt (chat-time, via worker/system-prompt.ts) — so generation and
-// conversation enforce the same numbers.
+// One source of truth, one place the coach reads it: these caps flow into the
+// worker coach prompt's safety-caps block (chat-time, via worker/system-prompt.ts).
+// They used to ALSO be materialized into the rendered plan's
+// agent_guidance.compliance_rules (gen-time), but that duplicated the same
+// numbers in two surfaces the coach reads, so the renderer no longer emits them.
 //
 // Two-level design: each template carries a softer DESIGN TARGET (e.g.
 // volume.longRun.shareOfWeeklyMax = 0.35) the renderer aims for in typical weeks;

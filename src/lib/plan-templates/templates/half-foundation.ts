@@ -150,31 +150,26 @@ export const halfFoundation: PlanTemplate = {
   },
 
   guidanceBase: {
-    description: 'Effort-led foundation half-marathon guidance.',
     pace_zones: {
       note: 'Finish goal — lead with heart rate and perceived effort, not pace.',
       easy: {
         description: 'Conversational; full sentences.',
         hr_zone: [1, 2],
-        hr_percent_max: [60, 75],
         rpe: [3, 5],
       },
       long_run: {
         description: 'Slightly slower than easy; time on feet.',
         hr_zone: [1, 2],
-        hr_percent_max: [60, 72],
         rpe: [3, 5],
       },
       tempo: {
         description: 'Comfortably hard; short phrases only.',
         hr_zone: [3, 4],
-        hr_percent_max: [76, 87],
         rpe: [6, 7],
       },
       strides: {
         description: 'Short relaxed bursts; full recovery.',
         hr_zone: [4, 5],
-        hr_percent_max: [85, 95],
         rpe: [7, 8],
       },
     },

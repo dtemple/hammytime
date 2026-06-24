@@ -164,43 +164,36 @@ export const shortRace: PlanTemplate = {
   },
 
   guidanceBase: {
-    description: 'Pace-driven 5k/10k guidance — speed-forward with a protective aerobic base.',
     pace_zones: {
       note: 'Easy stays easy by effort; intervals and tempo lead on pace, anchored to goal race pace.',
       easy: {
         description: 'Conversational; full sentences.',
         hr_zone: [1, 2],
-        hr_percent_max: [60, 75],
         rpe: [3, 5],
       },
       long_run: {
         description: 'Easy aerobic support run — modest distance for a short-race plan.',
         hr_zone: [1, 2],
-        hr_percent_max: [60, 74],
         rpe: [3, 5],
       },
       tempo: {
         description: 'Threshold / cruise — comfortably hard, controlled.',
         hr_zone: [3, 4],
-        hr_percent_max: [83, 90],
         rpe: [6, 8],
       },
       interval: {
         description: 'VO2 / speed reps — hard, near maximal on the short ones.',
         hr_zone: [4, 5],
-        hr_percent_max: [90, 97],
         rpe: [8, 10],
       },
       marathon_pace: {
         description: 'Goal race pace (5k/10k) — the target for race-pace segments.',
         hr_zone: [4, 5],
-        hr_percent_max: [85, 92],
         rpe: [7, 9],
       },
       strides: {
         description: 'Short relaxed bursts; full recovery.',
         hr_zone: [4, 5],
-        hr_percent_max: [85, 95],
         rpe: [7, 8],
       },
     },
