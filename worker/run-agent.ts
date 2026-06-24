@@ -18,7 +18,7 @@ import { attemptPlanRepair } from './plan-repair';
 import { chargeRun, maybeWarnLowBalance } from './billing';
 import { ALLOWED_TOOLS, makeIsolationGuard, scrubbedEnv } from './isolation';
 import { persistRun, type CapturedStep, type RunKind } from './persist';
-import { stripCoachPreamble } from './reply-sanitize';
+import { sanitizeCoachReply } from './reply-sanitize';
 import {
   resolveStaleProposalMessage,
   sendCalendarConfirm,
@@ -288,10 +288,11 @@ export async function runAgent(
 
     // Any error (incl. a budget stop) sends the fallback — never ship the partial
     // text streamed before the failure as if it were a clean answer.
-    // stripCoachPreamble removes a leading "now I'll write…" + `---` artifact the
+    // sanitizeCoachReply extracts the `<message>…</message>` block coach.md asks
+    // for, and falls back to stripping a leading "now I'll write…" preamble the
     // model sometimes prefixes despite the prompt forbidding it (reply-sanitize.ts).
-    // If stripping empties the text (model produced only a fenced preamble), the
-    // fallback below catches it.
+    // If it empties the text (model produced only a preamble), the fallback below
+    // catches it.
     // A retryable error reaching here is the final attempt (earlier ones threw
     // for a queue retry above) — send the "still overloaded, try in 15" notice
     // rather than the generic snag.
@@ -299,7 +300,7 @@ export async function runAgent(
       ? retryable
         ? OVERLOADED_TERMINAL
         : SOFT_FALLBACK
-      : stripCoachPreamble(replyText).trim() || SOFT_FALLBACK;
+      : sanitizeCoachReply(replyText).trim() || SOFT_FALLBACK;
     // A plan edit the coach described to the athlete couldn't be saved — append a
     // plain notice so they don't trust a calendar change that didn't land. Only on
     // a clean run: a fallback message never claimed a change in the first place.
