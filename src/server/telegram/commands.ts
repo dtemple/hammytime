@@ -20,6 +20,7 @@ export const BOT_COMMANDS: BotCommand[] = [
   { command: 'pause', description: 'pause your daily check-ins', inMenu: true },
   { command: 'resume', description: 'turn your daily check-ins back on', inMenu: true },
   { command: 'adjust_plan', description: 'change your training plan', inMenu: true },
+  { command: 'next_event', description: 'start training for a new event', inMenu: true },
   { command: 'edit_profile', description: 'update your profile', inMenu: true },
   { command: 'calendar', description: 'sync your training to a calendar', inMenu: true },
   { command: 'prehab', description: 'your prehab routine', inMenu: true },

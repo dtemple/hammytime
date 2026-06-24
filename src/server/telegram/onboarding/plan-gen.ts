@@ -254,6 +254,45 @@ export async function getActiveTemplatePlan(
   return { planId: planRow.id, versionId: v.id, plan: parsed.data };
 }
 
+/**
+ * Retire the athlete's active plan so the NEXT generateAndPersistPlan renders a
+ * fresh one instead of returning the stale one (V4-W3b). The generator's
+ * idempotency guard (getActiveTemplatePlan) only yields a plan when the newest
+ * `plans` row's current version is `status='active'` — so superseding that
+ * version and nulling the row's current_version_id makes the guard return null,
+ * and persistTemplatePlan then inserts a brand-new plans row for the new event.
+ * Non-destructive: the old plan_versions rows stay for history, memory and
+ * coaching data are untouched. Returns whether a plan was actually retired
+ * (false when the athlete has no plan yet). Used by the post-event re-activation
+ * reset; the new event's commit refreshes the profile, so the fresh plan picks
+ * up the new dates/distance.
+ */
+export async function supersedeActiveTemplatePlan(athleteId: string): Promise<boolean> {
+  const db = supabaseAdmin();
+  const { data: planRow } = await db
+    .from('plans')
+    .select('id, current_version_id')
+    .eq('athlete_id', athleteId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!planRow?.current_version_id) return false;
+
+  const { error: vErr } = await db
+    .from('plan_versions')
+    .update({ status: 'superseded' })
+    .eq('id', planRow.current_version_id);
+  if (vErr) throw new Error(`supersedeActiveTemplatePlan: version update failed: ${vErr.message}`);
+
+  const { error: pErr } = await db
+    .from('plans')
+    .update({ current_version_id: null })
+    .eq('id', planRow.id);
+  if (pErr) throw new Error(`supersedeActiveTemplatePlan: plans update failed: ${pErr.message}`);
+
+  return true;
+}
+
 async function persistTemplatePlan(
   athleteId: string,
   plan: Plan,

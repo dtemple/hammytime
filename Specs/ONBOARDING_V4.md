@@ -4,10 +4,10 @@ _Status: **SIGNED OFF 2026-06-24.** This doc is source-of-truth for the v4
 direction; the §11 coordinated edits are applied. Build status: **V4-W2 (the
 dormant state + entry off-ramp) and the V4-W1 framing slice are built and on `main`**
 (CHANGELOG v0.7.40 — the authoritative build record; web-only, push to Vercel, no
-`fly deploy`; migration `20260625000000` to apply to prod). **Remaining and
+`fly deploy`; migration `20260625000000` to apply to prod). **W3 (post-event pause
++ re-activation) is fully built** (W3a v0.7.42, W3b v0.7.44). **Remaining and
 unscheduled:** W1's substantive `event_kind`/adventure-fill pieces (fold into W4),
-W3 (post-event pause), W4 (U1 catalog), W5 (web copy), W6 (eval harness — launch
-gate); U2 deferred (§6). This supersedes the no-event routing in `ONBOARDING_V3.md`
+W4 (U1 catalog), W5 (web copy), W6 (eval harness — launch gate); U2 deferred (§6). This supersedes the no-event routing in `ONBOARDING_V3.md`
 (Decision 8) and shelves `GENERAL_FITNESS.md`; it reconciles with `ULTRA_SUPPORT.md`
 rather than duplicating it. The v3 slot-filling engine, chips, recap, numeric
 handling, and `/edit_profile` are unchanged — v4 changes **what the product is
@@ -446,11 +446,14 @@ framing, the off-ramp/pause state, and adopting U1.
   daily cron, before the inactivity scan; daily skip is free; Q&A stays open
   (verified — the finished plan is kept, so `bot.ts` routes inbound to the coach).
   Shares the dormant-state machinery with W2; web-only (Vercel push), no migration.
-  **W3b deferred (re-activation):** a post-event athlete naming a new event reaches
-  the coach but doesn't yet re-plan — decided path (with David) is a command (e.g.
-  `/next_event`) that resets a `complete` athlete to event-scoped intake so the
-  engine's `finishOnboarding` does `exitDormant` + commit + plan-gen. Until then,
-  David completes it by hand from `messages`/admin.
+  ✅ **W3b BUILT** (2026-06-24, v0.7.44): a `/next_event` command resets any
+  `complete` athlete to event-scoped intake behind a warn-and-confirm gate, then
+  the engine's `finishOnboarding` does `exitDormant` + commit + a FRESH plan. The
+  idempotency make-or-break is solved by `supersedeActiveTemplatePlan` (retire the
+  old active version + null `current_version_id` so plan-gen renders new, not
+  stale); the old race is marked `completed`; the dormant check-back / pause copy
+  now points at `/next_event`. Web-only (Vercel push), no migration, no worker
+  change. **W3 fully done.**
 - **V4-W4 · Catalog U1 · M.** Adopt `ULTRA_SUPPORT.md` U1: four buckets,
   `ultra-50k`, distance-derived plausibility, widened bands, non-race adventures.
   (`event_kind` column, athlete-stated fill, fuzzy dates land here if not in W1.)

@@ -14,6 +14,7 @@ import {
   todayInTz,
   buildSelectorProfile,
   generateAndPersistPlan,
+  supersedeActiveTemplatePlan,
 } from '../plan-gen';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -73,6 +74,7 @@ function makeDb(state: DbState = {}) {
     select: () => ({ single: async () => ({ data: { id: 'ver-1' }, error: null }) }),
   }));
   const plansUpdate = vi.fn(() => ({ eq: async () => ({ error: null }) }));
+  const versionsUpdate = vi.fn(() => ({ eq: async () => ({ error: null }) }));
 
   const from = vi.fn((table: string) => {
     if (table === 'athletes') {
@@ -120,12 +122,13 @@ function makeDb(state: DbState = {}) {
           eq: () => ({ maybeSingle: async () => ({ data: state.existingVersionRow ?? null, error: null }) }),
         }),
         insert: versionsInsert,
+        update: versionsUpdate,
       };
     }
     return {};
   });
 
-  return { supa: { from }, plansInsert, versionsInsert, plansUpdate };
+  return { supa: { from }, plansInsert, versionsInsert, plansUpdate, versionsUpdate };
 }
 
 beforeEach(() => {
@@ -306,5 +309,56 @@ describe('generateAndPersistPlan', () => {
     expect(versionsInsert).not.toHaveBeenCalled();
     expect(result.planId).toBe('plan-9');
     expect(result.versionId).toBe('ver-9');
+  });
+
+  // V4-W3b make-or-break: once the old plan is superseded (current_version_id
+  // nulled), the idempotency guard must yield so a FRESH plan generates for the
+  // new event — not the stale one.
+  it('generates a fresh plan once the prior version is superseded (current_version_id null)', async () => {
+    const { supa, plansInsert, versionsInsert } = makeDb({
+      raceRow: CIM_RACE,
+      injuries: [],
+      existingPlanRow: { id: 'plan-9', current_version_id: null },
+    });
+    (supabaseAdmin as AnyMock).mockReturnValue(supa);
+
+    const result = await generateAndPersistPlan('athlete-1');
+
+    expect(plansInsert).toHaveBeenCalledOnce();
+    expect(versionsInsert).toHaveBeenCalledOnce();
+    expect(result.planId).toBe('plan-1');
+    expect(result.versionId).toBe('ver-1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// supersedeActiveTemplatePlan (V4-W3b)
+// ---------------------------------------------------------------------------
+
+describe('supersedeActiveTemplatePlan', () => {
+  it('supersedes the active version, nulls current_version_id, and returns true', async () => {
+    const { supa, versionsUpdate, plansUpdate } = makeDb({
+      existingPlanRow: { id: 'plan-9', current_version_id: 'ver-9' },
+    });
+    (supabaseAdmin as AnyMock).mockReturnValue(supa);
+
+    const retired = await supersedeActiveTemplatePlan('athlete-1');
+
+    expect(retired).toBe(true);
+    expect(versionsUpdate).toHaveBeenCalledWith({ status: 'superseded' });
+    expect(plansUpdate).toHaveBeenCalledWith({ current_version_id: null });
+  });
+
+  it('is a no-op (returns false) when the athlete has no active plan', async () => {
+    const { supa, versionsUpdate, plansUpdate } = makeDb({
+      existingPlanRow: { id: 'plan-9', current_version_id: null },
+    });
+    (supabaseAdmin as AnyMock).mockReturnValue(supa);
+
+    const retired = await supersedeActiveTemplatePlan('athlete-1');
+
+    expect(retired).toBe(false);
+    expect(versionsUpdate).not.toHaveBeenCalled();
+    expect(plansUpdate).not.toHaveBeenCalled();
   });
 });

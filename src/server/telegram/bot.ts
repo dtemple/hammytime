@@ -19,7 +19,7 @@ import {
   resumeAthlete,
   RESUME_AUTO_CALLBACK,
 } from './pause';
-import { handleV3Message, handleV3Callback } from './onboarding/engine/router';
+import { handleV3Message, handleV3Callback, startNextEvent } from './onboarding/engine/router';
 import { fetchRecentActivities, hasStravaConnection } from '@/server/strava/activities';
 import { disconnectStrava } from '@/server/strava/disconnect';
 import { disconnectGoogleCalendar } from '@/server/google/disconnect';
@@ -917,6 +917,38 @@ async function handleEditProfileCommand(ctx: CommandContext<Context>): Promise<v
   );
 }
 
+// /next_event: a completed athlete starts training for a new event (V4-W3b). The
+// re-activation door for a dormant post-event athlete, and the "I changed my goal
+// race" door mid-block. The plan swap is gated behind a confirm in the engine
+// (startNextEvent → handleV3Callback). A v2 athlete has no slot engine, so it
+// degrades to a plain "tell me about it" prompt the coach picks up.
+async function handleNextEventCommand(ctx: CommandContext<Context>): Promise<void> {
+  const db = supabaseAdmin();
+  const { data: athlete } = await db
+    .from('athletes')
+    .select('*')
+    .eq('telegram_chat_id', String(ctx.chat.id))
+    .maybeSingle();
+  if (!athlete) {
+    await ctx.reply('Use your invite link to get started.');
+    return;
+  }
+  await db
+    .from('messages')
+    .insert({ athlete_id: athlete.id, channel: 'tg', direction: 'in', body: '/next_event' });
+
+  const ob = athlete.onboarding_state as { flow?: string } | null;
+  if (ob?.flow !== 'v3') {
+    await sendAndLog(
+      athlete.id,
+      ctx.chat.id,
+      "Tell me about your next event — a race, or a personal goal with a date — and we'll get a plan going.",
+    );
+    return;
+  }
+  await startNextEvent(athlete, ctx.chat.id);
+}
+
 // /balance — dollars left + runway at the athlete's pace (Specs/METERING_PAYMENTS.md
 // §9). Comped friends see "on the house"; a paused athlete gets the pause state
 // prepended. No agent run, so no in-flight guard. Auto-reload line is step 6.
@@ -1263,6 +1295,7 @@ function getBot(): Bot {
     _bot.command('fresh_update', handleFreshUpdateCommand);
     _bot.command('adjust_plan', handleAdjustPlanCommand);
     _bot.command('edit_profile', handleEditProfileCommand);
+    _bot.command('next_event', handleNextEventCommand);
     _bot.command('balance', handleBalanceCommand);
     _bot.command('buy', handleBuyCommand);
     _bot.command('pause', handlePauseCommand);

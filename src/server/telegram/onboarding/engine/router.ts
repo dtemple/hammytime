@@ -25,8 +25,13 @@ import {
   saveV3State,
   type V3OnboardingState,
 } from '../slots/slot-state';
-import { slotsToGaps, type GoalDistanceValue, type SlotState } from '../slots/schema';
-import { slotValue } from '../slots/provenance';
+import {
+  slotsToGaps,
+  type GoalDistanceValue,
+  type SlotKey,
+  type SlotState,
+} from '../slots/schema';
+import { slotValue, unknownSlot } from '../slots/provenance';
 import {
   loadKnownGapsContent,
   parseKnownGaps,
@@ -932,6 +937,117 @@ export async function handleV3Message(ctx: Context, athlete: AthleteRow): Promis
   });
 }
 
+// ---------------------------------------------------------------------------
+// Post-event re-activation (Onboarding v4 / V4-W3b)
+// ---------------------------------------------------------------------------
+
+/** The event slots cleared on a re-activation reset — the goal-specific ones that
+ *  must be re-stated for the new event. The durable facts (experience, days/week,
+ *  long-run day, identity) and the injury beat are kept so re-intake stays short. */
+const EVENT_SLOTS: SlotKey[] = ['goal_type', 'goal_distance', 'goal_race', 'goal_date', 'target_time'];
+
+/**
+ * /next_event (V4-W3b): a completed athlete wants to train for a new event. Gate
+ * on an explicit confirm first — for a mid-block athlete the copy warns the current
+ * plan will be replaced; for a dormant post-event athlete it's a soft "ready for the
+ * next one?". The confirm tap routes back through handleV3Callback → resetForNextEvent.
+ * Called from bot.ts's /next_event command handler.
+ */
+export async function startNextEvent(athlete: AthleteRow, chatId: number | string): Promise<void> {
+  const state = await loadV3State(athlete.id);
+  if (!state || state.phase !== 'complete') {
+    await sendV3(
+      athlete.id,
+      chatId,
+      "We're still getting you set up — keep going here and I'll cover everything before we talk about what's next.",
+    );
+    return;
+  }
+
+  const raceName = (state.slots.goal_race?.value as string | null) ?? null;
+  const dormant = athlete.pause_reason === 'dormant';
+  const prompt = dormant
+    ? "Ready to line up your next one? Tell me the event and I'll build you a fresh plan for it. Want to start?"
+    : raceName
+      ? `You're mid-training for ${raceName}. Starting a new event swaps that out for a fresh plan built around the new race. Go ahead?`
+      : 'Starting a new event swaps your current plan for a fresh one built around the new race. Go ahead?';
+
+  const kb = new InlineKeyboard()
+    .text(dormant ? "Yes, let's go" : 'Yes, new event', `${CHIP_PREFIX}next_event:confirm`)
+    .row()
+    .text('Not now', `${CHIP_PREFIX}next_event:cancel`);
+  await sendV3(athlete.id, chatId, prompt, kb);
+}
+
+/**
+ * The re-activation reset (V4-W3b). Retire the old plan + race, clear the event
+ * slots (keeping the durable facts so re-intake is short), and drop the athlete
+ * back to event intake. The engine then drives a short re-intake; naming a dated
+ * event reaches finishOnboarding, which wakes a dormant athlete (exitDormant),
+ * commits the new race, and generates a FRESH plan (the old one is superseded here,
+ * so the idempotency guard yields).
+ */
+async function resetForNextEvent(
+  athlete: AthleteRow,
+  chatId: number | string,
+  label: string | null,
+): Promise<void> {
+  const athleteId = athlete.id;
+  await logInbound(athleteId, label ?? 'Yes, new event');
+
+  const state = await loadV3State(athleteId);
+  if (!state) return;
+
+  // Retire the old plan so plan-gen renders fresh, and mark the finished race
+  // complete (read before the new commit overwrites the profile's goal_race_id).
+  const { supersedeActiveTemplatePlan } = await import('../plan-gen');
+  await supersedeActiveTemplatePlan(athleteId);
+  await markCurrentRaceCompleted(athleteId);
+
+  const slots: SlotState = {
+    ...state.slots,
+    goal_type: unknownSlot(),
+    goal_distance: unknownSlot(),
+    goal_race: unknownSlot(),
+    goal_date: unknownSlot(),
+    target_time: unknownSlot(),
+  };
+
+  await saveV3State(athleteId, {
+    ...state,
+    slots,
+    asked: state.asked.filter((k) => !EVENT_SLOTS.includes(k)),
+    phase: 'intake',
+    committed: false,
+    off_ramp_offered: undefined,
+    recap_shown: undefined,
+    pending_confirm: undefined,
+    out_of_catalog: undefined,
+    edit_mode: undefined,
+  });
+
+  await sendV3(
+    athleteId,
+    chatId,
+    "Let's do it. What's the next event? A race, or a personal goal with a date and a distance — give me the name and the day.",
+  );
+}
+
+/** Mark the athlete's current goal race complete (V4-W3b). Read at reset time —
+ *  before the new event's commit moves the profile's goal_race_id — so the row we
+ *  retire is the finished one. No-op when there's no committed race (e.g. an
+ *  intended goal with no race row yet). */
+async function markCurrentRaceCompleted(athleteId: string): Promise<void> {
+  const db = supabaseAdmin();
+  const { data: profile } = await db
+    .from('athlete_training_profile')
+    .select('goal_race_id')
+    .eq('athlete_id', athleteId)
+    .maybeSingle();
+  if (!profile?.goal_race_id) return;
+  await db.from('races').update({ status: 'completed' }).eq('id', profile.goal_race_id);
+}
+
 export async function handleV3Callback(
   ctx: Context,
   athlete: AthleteRow,
@@ -955,6 +1071,18 @@ export async function handleV3Callback(
   // /edit_profile fork taps dispatch to the menu, not a conversational turn (W3).
   if (value === 'edit:update' || value === 'edit:finish') {
     await handleEditFork(athlete, chatId, value, label);
+    return;
+  }
+
+  // /next_event confirm gate (V4-W3b): confirm resets the athlete to event intake
+  // (retiring the old plan + race); cancel leaves everything as it was.
+  if (value === 'next_event:confirm') {
+    await resetForNextEvent(athlete, chatId, label);
+    return;
+  }
+  if (value === 'next_event:cancel') {
+    await logInbound(athlete.id, label ?? 'Not now');
+    await sendV3(athlete.id, chatId, "No problem — nothing's changed. Your plan's the same as before.");
     return;
   }
 

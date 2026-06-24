@@ -35,8 +35,12 @@ vi.mock('@/server/admin/alerts', () => ({ sendDavidAlert: vi.fn().mockResolvedVa
 
 const { commitSlots } = vi.hoisted(() => ({ commitSlots: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../commit', () => ({ commitSlots }));
+const { supersedeActiveTemplatePlan } = vi.hoisted(() => ({
+  supersedeActiveTemplatePlan: vi.fn().mockResolvedValue(true),
+}));
 vi.mock('../../plan-gen', () => ({
   generateAndPersistPlan: vi.fn().mockResolvedValue({ plan: {}, params: {} }),
+  supersedeActiveTemplatePlan,
 }));
 const { formatPreview } = vi.hoisted(() => ({ formatPreview: vi.fn(() => 'YOUR PLAN') }));
 vi.mock('../../steps/04-plan-preview', () => ({ formatPreview }));
@@ -80,7 +84,7 @@ const { enterDormant, exitDormant, setCheckBack } = vi.hoisted(() => ({
 }));
 vi.mock('../../../pause', () => ({ enterDormant, exitDormant, setCheckBack }));
 
-import { handleV3Message, handleV3Callback } from '../router';
+import { handleV3Message, handleV3Callback, startNextEvent } from '../router';
 import { lookupRace } from '@/server/agent/race-lookup';
 import { sendDavidAlert } from '@/server/admin/alerts';
 import { KNOWN_GAPS } from '@/lib/known-gaps';
@@ -1527,5 +1531,98 @@ describe('router — v4 entry off-ramp', () => {
     expect(commitSlots).toHaveBeenCalledOnce();
     const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
     expect(saved.phase).toBe('complete');
+  });
+});
+
+// --- /next_event re-activation (V4-W3b) ---
+
+describe('next_event — re-activation', () => {
+  it('gates on completion: a still-onboarding athlete is told to finish first', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+    } as V3OnboardingState);
+
+    await startNextEvent(athlete, 99);
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      99,
+      expect.stringMatching(/still getting you set up/i),
+      expect.anything(),
+    );
+    expect(saveV3State).not.toHaveBeenCalled();
+  });
+
+  it('mid-block: warns the current plan will be swapped and names the race', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'complete',
+      slots: { ...completeSlots(), goal_race: sv('CIM') },
+    } as V3OnboardingState);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await startNextEvent({ id: 'ath-1', pause_reason: null } as any, 99);
+
+    const [, text] = sendMessage.mock.calls.at(-1)!;
+    expect(text).toMatch(/CIM/);
+    expect(text).toMatch(/swaps/i);
+    expect(saveV3State).not.toHaveBeenCalled();
+  });
+
+  it('dormant: a soft re-activation prompt, no "swap" warning', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'complete',
+      slots: completeSlots(),
+    } as V3OnboardingState);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await startNextEvent({ id: 'ath-1', pause_reason: 'dormant' } as any, 99);
+
+    const [, text] = sendMessage.mock.calls.at(-1)!;
+    expect(text).toMatch(/next one/i);
+    expect(text).not.toMatch(/swaps/i);
+  });
+
+  it('confirm resets to event intake: clears event slots, keeps durable facts, retires the old plan', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'complete',
+      committed: true,
+      slots: { ...completeSlots(), goal_race: sv('CIM'), target_time: sv(14400) },
+      asked: ['goal_type', 'goal_distance', 'experience_tier'],
+    } as V3OnboardingState);
+
+    await handleV3Callback(cbCtx('cbconfirm'), athlete, 'v3:next_event:confirm');
+
+    expect(supersedeActiveTemplatePlan).toHaveBeenCalledWith('ath-1');
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.phase).toBe('intake');
+    expect(saved.committed).toBe(false);
+    // event slots cleared
+    expect(saved.slots.goal_type?.value).toBeNull();
+    expect(saved.slots.goal_race?.value).toBeNull();
+    expect(saved.slots.target_time?.value).toBeNull();
+    // durable facts kept (no re-asking experience / days / long-run day)
+    expect(saved.slots.experience_tier?.value).toBe('some_training');
+    expect(saved.slots.days_per_week?.value).toBe(4);
+    expect(saved.slots.long_run_day?.value).toBe(0);
+    // event slots dropped from `asked` so the engine re-asks them; durable stays
+    expect(saved.asked).not.toContain('goal_type');
+    expect(saved.asked).toContain('experience_tier');
+    // re-intake opener
+    expect(sendMessage).toHaveBeenCalledWith(99, expect.stringMatching(/next event/i), expect.anything());
+  });
+
+  it('cancel leaves state and the plan untouched', async () => {
+    await handleV3Callback(cbCtx('cbcancel'), athlete, 'v3:next_event:cancel');
+
+    expect(saveV3State).not.toHaveBeenCalled();
+    expect(supersedeActiveTemplatePlan).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith(
+      99,
+      expect.stringMatching(/nothing's changed/i),
+      expect.anything(),
+    );
   });
 });

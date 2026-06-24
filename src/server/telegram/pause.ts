@@ -151,8 +151,8 @@ export async function autoPauseAthlete(
  *  generated: a dormant athlete has no plan and no folder to run the agent over. */
 export const CHECK_BACK_NUDGE =
   'Checking in like you asked — anything on the calendar yet? A race, or a personal ' +
-  "goal with a date, and I'll build you a plan for it. If not, no rush — just message " +
-  'me whenever something lands.';
+  "goal with a date, and I'll build you a plan for it. When something lands, send " +
+  "/next_event and we're off. If not, no rush.";
 
 /**
  * Move an athlete into the dormant state: pause their daily run, mark the reason
@@ -333,8 +333,8 @@ export const POST_EVENT_PAUSE_NOTICE =
   "Now that your event's behind you, I'm easing off the daily check-ins — with " +
   'nothing on the calendar, a workout every morning would just be noise. I’m still ' +
   'right here, though: ask me anything, or talk through how it all went. When the ' +
-  "next one lands — a race, an adventure, whatever pulls you — tell me and we'll " +
-  'build the block for it.';
+  "next one lands — a race, an adventure, whatever pulls you — send me /next_event " +
+  "and we'll build the block for it.";
 
 /**
  * Send the one static post-event pause notice and log it. No keyboard: the way back
