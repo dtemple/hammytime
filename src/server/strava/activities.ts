@@ -151,8 +151,9 @@ async function callStravaActivities(
   accessToken: string,
   afterUnix: number,
   perPage = 50,
+  page = 1,
 ): Promise<StravaActivitySummary[]> {
-  const url = `${STRAVA_API_BASE}/athlete/activities?after=${afterUnix}&per_page=${perPage}`;
+  const url = `${STRAVA_API_BASE}/athlete/activities?after=${afterUnix}&per_page=${perPage}&page=${page}`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -233,6 +234,57 @@ export async function fetchRecentActivities(
     }
     throw err;
   }
+}
+
+// How many pages fetchActivitiesSince will pull before giving up. A backstop
+// against an unbounded loop, not a real limit: 5 × 200 = 1000 activities covers
+// any marathon build many times over.
+const MAX_BUILD_PAGES = 5;
+const BUILD_PER_PAGE = 200;
+
+/**
+ * Returns every activity since `sinceISO` (a YYYY-MM-DD plan-start date),
+ * paginating until a short page or the page cap. Readiness v2's realized series
+ * needs the full build, which can overflow one page.
+ *
+ * Why paginate: Strava returns `after=` results oldest-first, so a single
+ * capped page would drop the MOST RECENT weeks — exactly the ones the realized
+ * long-run rung depends on. Mirrors fetchRecentActivities' token + 401 handling.
+ *
+ * Returns [] if the athlete has no connected Strava account. Throws on non-401
+ * Strava errors or token decrypt failures (the caller degrades to v1).
+ */
+export async function fetchActivitiesSince(
+  athleteId: string,
+  sinceISO: string,
+): Promise<StravaActivitySummary[]> {
+  const afterUnix = Math.floor(Date.parse(`${sinceISO}T00:00:00Z`) / 1000);
+
+  let accessToken = await getAccessToken(athleteId);
+  if (!accessToken) return [];
+
+  const all: StravaActivitySummary[] = [];
+  for (let page = 1; page <= MAX_BUILD_PAGES; page++) {
+    let batch: StravaActivitySummary[];
+    try {
+      batch = await callStravaActivities(accessToken, afterUnix, BUILD_PER_PAGE, page);
+    } catch (err: unknown) {
+      // On 401, force one token refresh + retry this page (same as fetchRecentActivities).
+      if ((err as { status?: number }).status !== 401) throw err;
+      const db = supabaseAdmin();
+      await db
+        .from('oauth_tokens')
+        .update({ expires_at: new Date(0).toISOString() })
+        .eq('athlete_id', athleteId)
+        .eq('provider', 'strava');
+      accessToken = await getAccessToken(athleteId);
+      if (!accessToken) return all;
+      batch = await callStravaActivities(accessToken, afterUnix, BUILD_PER_PAGE, page);
+    }
+    all.push(...batch);
+    if (batch.length < BUILD_PER_PAGE) break; // last page
+  }
+  return all;
 }
 
 // ---------------------------------------------------------------------------

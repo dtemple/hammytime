@@ -1,10 +1,31 @@
 # Readiness v2 — Strava-aware event readiness
 
-**Status: DRAFT plan, not built.** Pending David's sign-off. Depends on v1 (the
-event-conditioning guardrail) shipped in SPEC v0.7.48 / CHANGELOG v0.7.48:
+**Status: Phase 0 BUILT (SPEC / CHANGELOG v0.7.50, 2026-06-25), divergence folded
+in.** Builds on v1 (the event-conditioning guardrail, v0.7.48):
 `computeReadiness`/`renderReadiness` in `src/lib/plan-drift.ts`, the `# Race
 readiness` headline in `plan_drift.md`, and the coach's "Protect the goal-race
-buildup" floor. This doc plans the next pass.
+buildup" floor. The §11 open questions are resolved (see "Decisions" below);
+weekly-volume adherence and any push remain deferred (§9 Phase 1+).
+
+## Decisions (resolved with David 2026-06-25)
+
+1. **Data source** — separate paginated fetch + a once-per-athlete-per-day cache
+   (`strava_realized_cache`); `strava_recent.json`'s 14-day fetch untouched.
+   NOT a widened raw dump, NOT an append-only log, NOT Strava's MCP (§3).
+2. **Realized rung** — biggest actual long run over a trailing ~5-week window
+   (`REALIZED_RUNG_WINDOW_WEEKS = 5`), not biggest-ever — a long-ago peak since
+   detrained must not flatter reachability.
+3. **"Done" tolerance** — hybrid: `actual ≥ 0.85 × planned` OR `actual ≥ planned − 2 mi`
+   (`LR_DONE_PCT = 0.85`, `LR_DONE_ABS_MI = 2`).
+4. **Divergence** — built now (folded into Phase 0), inform-only with an
+   ask-don't-assert coach framing; no auto plan-edit / confirm button.
+   `DIVERGENCE_SLACK_WEEKS = 1`.
+
+Built surface: `fetchActivitiesSince` + `bucketRealizedSeries` +
+`buildRealizedSeries` (cache) + the `computeReadiness` realized logic + the
+render reconcile/caveat lines + the `goalBuildupGuidance` reconcile sentence +
+the `strava_realized_cache` migration. Thresholds above are DRAFT — they join
+v1's in the single calibration pass once real Strava + edit history exists.
 
 ---
 
@@ -194,11 +215,13 @@ exists.
 
 ## 9. Phasing
 
-- **Phase 0 (smallest useful):** the rollup + realized rung + the silent-skip →
-  AT RISK path + Strava-broken fallback. This alone closes the v1 blind spot.
-- **Phase 1:** the divergence flag + the coach's "reconcile plan vs reality" line.
-- **Phase 2:** weekly-volume adherence axis + the calibration pass against real
-  data.
+- **Phase 0 — BUILT (v0.7.50).** The rollup + realized rung + the silent-skip →
+  AT RISK path + Strava-broken fallback, **plus the divergence flag** and the
+  coach's reconcile line (folded forward from the draft's Phase 1: it shares the
+  same per-week bucketed data the rung needs, so splitting it was artificial).
+- **Phase 1 (remaining):** weekly-volume adherence as a verdict axis (the rollup
+  already computes `actualVolumeMi`; it doesn't feed the verdict yet) + the
+  calibration pass against real data.
 
 ---
 
@@ -212,16 +235,14 @@ exists.
 
 ---
 
-## 11. Open questions for David
+## 11. Open questions for David — RESOLVED (2026-06-25)
 
-1. **Strava call budget / caching** — confirm once-per-athlete-per-day rollup is
-   fine, or specify a cache (the realized series only changes on a new activity).
-2. **"Done" tolerance** — within 2 mi, or a percentage of planned? This sets how
-   forgiving the miss/divergence count is.
-3. **Untracked long runs** — accept the false-divergence risk with the "reconcile"
-   framing, or add an athlete affordance to mark a long run done off-Strava?
-4. **Divergence action** — should `planDiverged` just inform the coach, or
-   actively prompt a plan-reconciliation edit (with the confirm button)?
-5. **Realized rung definition** — biggest long run ever in the build, or biggest in
-   a recent window (so a long-ago peak that's since detrained doesn't flatter the
-   rung)?
+See "Decisions" at the top. In short:
+
+1. **Strava call budget / caching** → once-per-athlete-per-day cache
+   (`strava_realized_cache`), recomputed on day-roll or plan-version change.
+2. **"Done" tolerance** → hybrid (85% of planned OR within 2 mi).
+3. **Untracked long runs** → accept the false-divergence risk with the reconcile /
+   ask-don't-assert framing; no off-Strava affordance (deferred).
+4. **Divergence action** → inform the coach only; no auto plan-reconciliation edit.
+5. **Realized rung** → biggest in a trailing ~5-week window (not biggest-ever).

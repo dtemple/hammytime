@@ -20,6 +20,7 @@ import {
   renderDriftSummary,
   renderReadiness,
   type PlanDrift,
+  type RealizedWeek,
 } from '@/lib/plan-drift';
 import { PlanSchema, type Plan } from '@/lib/plan-schema';
 import { ATHLETE_ROOT, STRAVA_LOOKBACK_DAYS } from './config';
@@ -27,7 +28,7 @@ import { localDate } from './dates';
 import { compactJson } from './json-compact';
 import { rotateLogByDate } from './log-rotation';
 import { buildCurrentBlock } from './plan-current-block';
-import { buildStravaContext } from './strava';
+import { buildRealizedSeries, buildStravaContext } from './strava';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -171,11 +172,21 @@ export async function hydrate(
   // verdict counts weeks-to-race from it) and the current-block view below.
   const today = localDate(new Date(), timezone);
 
+  // Readiness v2: the athlete's actual per-week long-run history from Strava,
+  // cached once per athlete per day (Specs/READINESS_V2.md). Null — so readiness
+  // degrades to v1 (plan-only) — when there's no datable plan or Strava is down.
+  // Separate from strava_recent.json below by design (its 14-day fetch is untouched).
+  const realized = await buildRealizedSeries(athleteId, workingPlan, refs?.currentVersionId ?? null, today);
+
   // Drift + race-readiness summary (read-only input). The drift half is how far
   // the working plan has moved from the original baseline; the readiness half is
   // the macro verdict on whether the goal-race buildup is still on track. The
   // coach reads this on any change that touches the long run and every Sunday.
-  await writeFile(path.join(dir, 'plan_drift.md'), buildDriftMarkdown(refs, workingPlan, today), 'utf8');
+  await writeFile(
+    path.join(dir, 'plan_drift.md'),
+    buildDriftMarkdown(refs, workingPlan, today, realized),
+    'utf8',
+  );
 
   // Current-block plan view (read-only input) — a future-weighted slice of the
   // full plan the coach reads for routine work instead of loading the whole
@@ -299,11 +310,16 @@ const NO_DRIFT: PlanDrift = {
 // the baseline is parsed here. A missing/invalid plan on either side → no drift.
 // The readiness headline is prepended when there's a dated, upcoming goal race
 // with a long-run spine to read (computeReadiness returns null otherwise).
-function buildDriftMarkdown(refs: PlanRefs | null, working: Plan | null, today: string): string {
+function buildDriftMarkdown(
+  refs: PlanRefs | null,
+  working: Plan | null,
+  today: string,
+  realized: RealizedWeek[] | null,
+): string {
   if (!working || !refs?.baselineJson) return renderDriftSummary(NO_DRIFT);
   const baseline = PlanSchema.safeParse(refs.baselineJson);
   if (!baseline.success) return renderDriftSummary(NO_DRIFT);
   const drift = renderDriftSummary(computeDrift(baseline.data, working));
-  const readiness = computeReadiness(baseline.data, working, today);
+  const readiness = computeReadiness(baseline.data, working, today, realized);
   return readiness ? `${renderReadiness(readiness)}\n${drift}` : drift;
 }

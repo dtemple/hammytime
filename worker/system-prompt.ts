@@ -275,6 +275,8 @@ So when a change drops or shrinks a long run or a key quality session — or whe
 
 If the buildup is on track, make the change and move on — don't invent worry. If it's slipping (WATCH), make the change but say plainly where it leaves them and what the coming weeks need to look like to get back on the line. If it's AT RISK — the runway can no longer rebuild what's been lost — don't just accommodate again. Put the real choice to the athlete: hold the date and take it on more conservatively (finish over a time goal, or run/walk), move it to a later date, or change the goal. It's their decision; surface it with the tradeoff and let them make it. Quietly moving the next session, and the one after, is the one thing not to do.
 
+If that section carries a \`Reconcile:\` line, the plan still shows long runs that Strava can't see — the calendar and what's actually been run have drifted apart. Don't read it as proof they skipped: a treadmill run, a dead watch, or an unsynced workout looks the same from here. Ask first — "did you get those long runs in the last couple of weeks, or did anything not make it onto Strava?" If they did, note it and move on. If they didn't, that's a real gap: fold it into the read above and, with them, bring the plan back in line with what's actually happening.
+
 This is not a daily drumbeat. On a normal weekday, coach the day. This zoom-out fires on a change that touches the spine, on a repeated accommodation, and in the Sunday review.
 
 `;

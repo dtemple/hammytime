@@ -13,12 +13,12 @@ vi.mock('../config', async () => {
 });
 
 vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
-vi.mock('../strava', () => ({ buildStravaContext: vi.fn() }));
+vi.mock('../strava', () => ({ buildStravaContext: vi.fn(), buildRealizedSeries: vi.fn() }));
 
 import { hydrate, syncBack, cleanup, INPUT_ONLY_FILES } from '../folder';
 import { ATHLETE_ROOT } from '../config';
 import { supabaseAdmin } from '@/lib/db';
-import { buildStravaContext } from '../strava';
+import { buildStravaContext, buildRealizedSeries } from '../strava';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyMock = any;
@@ -84,6 +84,9 @@ beforeEach(() => {
   planUpdateCalls = [];
   (supabaseAdmin as AnyMock).mockImplementation(() => makeDb());
   (buildStravaContext as AnyMock).mockResolvedValue({ connected: true, activities: [] });
+  // Readiness v2's realized series is exercised in plan-drift.test.ts; here it
+  // degrades to null (v1) so hydrate's other behavior stays the assertion target.
+  (buildRealizedSeries as AnyMock).mockResolvedValue(null);
 });
 
 afterEach(() => {

@@ -234,6 +234,21 @@ const CUM_WATCH_PCT = 10;
 // the build runway (you don't grow the long run into the final stretch).
 const DEFAULT_TAPER_WEEKS = 2;
 
+// --- Readiness v2 (Strava-aware) thresholds. DRAFT — calibrate alongside the v1
+// ones above once real Strava + edit history exists. See Specs/READINESS_V2.md.
+//
+// The realized rung is read over a trailing window so a long-ago peak the athlete
+// has since detrained away doesn't flatter reachability. ~5 weeks spans a
+// 3-up-1-down long-run cycle plus slack.
+const REALIZED_RUNG_WINDOW_WEEKS = 5;
+// An actual long run counts as "done" against its planned one if it clears either
+// bar (hybrid): proportional for the big long runs, absolute for the small ones.
+const LR_DONE_PCT = 0.85;
+const LR_DONE_ABS_MI = 2;
+// Missed long runs past this many fire planDiverged. One week of grace absorbs a
+// long run shifted across a week boundary (week-max bucketing handles the rest).
+const DIVERGENCE_SLACK_WEEKS = 1;
+
 export type ReadinessVerdict = 'on_track' | 'watch' | 'at_risk';
 
 export type Readiness = {
@@ -253,6 +268,13 @@ export type Readiness = {
   cumulativeDeltaPct: number | null;
   verdict: ReadinessVerdict;
   reason: string;
+  // --- Readiness v2 (Strava-aware). When realizedDataAvailable is false the
+  // verdict is plan-only (v1) — render warns so it's never read as reality-grounded.
+  realizedDataAvailable: boolean;
+  realizedRungMi: number | null; // biggest actual long run in the trailing window
+  missedLongRuns: number; // past covered weeks whose planned long run has no matching actual
+  planDiverged: boolean; // missedLongRuns past the slack — the calendar shows long runs reality lacks
+  divergedWeeks: number[]; // the week numbers behind missedLongRuns, for the reconcile line
 };
 
 type SpineWeek = { week_number: number; phase: string; miles: number; start?: string; end?: string };
@@ -297,13 +319,111 @@ function buildWeeksBeforeTaper(spine: SpineWeek[], today: string, weeksToRace: n
   return Math.max(0, weeksToRace - DEFAULT_TAPER_WEEKS);
 }
 
+// ---------------------------------------------------------------------------
+// Realized series — what the athlete actually ran (from Strava), per plan week.
+// computeReadiness reads this so the verdict catches the plan and reality
+// diverging without an edit (the v1 blind spot). See Specs/READINESS_V2.md.
+// ---------------------------------------------------------------------------
+
+const METERS_PER_MILE = 1609.344;
+
+// Run sport types that count toward the realized series. Mirrors RUN_TYPES in
+// src/server/strava/activities.ts; kept local so this module stays free of any
+// server-only imports (it's pure and unit-tested with plain activity objects).
+const REALIZED_RUN_TYPES = new Set(['Run', 'TrailRun', 'VirtualRun']);
+
+// One elapsed week reduced from the athlete's actual Strava runs: the biggest
+// single run (realized long run) and the summed run distance (realized volume).
+export type RealizedWeek = {
+  week_number: number;
+  actualLongRunMi: number;
+  actualVolumeMi: number;
+};
+
+// The minimal activity shape the reducer reads — structurally satisfied by
+// StravaActivitySummary, declared here so plan-drift imports no server code.
+type RealizedActivity = {
+  type: string;
+  start_date_local: string; // ISO datetime, athlete-local
+  distance_m: number;
+};
+
+/**
+ * Buckets actual Strava runs into the plan's weeks by date and reduces each
+ * STARTED week (week start on/before `today`) to its realized long run + volume.
+ * Pure. Returns null when no week carries usable date bounds — without them there
+ * is nothing to bucket against, and readiness falls back to v1 (plan-only).
+ *
+ * Non-run activities are ignored; a run outside every week window is dropped.
+ * Week-max on the long run is robust to a long run done a day or two off its
+ * planned slot (it still lands in the same week).
+ */
+export function bucketRealizedSeries(
+  plan: Plan,
+  activities: RealizedActivity[],
+  today: string,
+): RealizedWeek[] | null {
+  const bounds = [...plan.weeks]
+    .sort((a, b) => a.week_number - b.week_number)
+    .map((w) => ({ week_number: w.week_number, ...weekBounds(w) }))
+    .filter(
+      (b): b is { week_number: number; start: string; end: string } =>
+        b.start !== undefined && b.end !== undefined,
+    );
+  if (bounds.length === 0) return null;
+
+  // Only weeks that have started have actuals to read.
+  const started = bounds.filter((b) => b.start <= today);
+  const byNum = new Map(
+    started.map((b) => [
+      b.week_number,
+      { week_number: b.week_number, actualLongRunMi: 0, actualVolumeMi: 0 },
+    ]),
+  );
+
+  for (const a of activities) {
+    if (!REALIZED_RUN_TYPES.has(a.type)) continue;
+    const date = a.start_date_local.slice(0, 10);
+    if (date.length !== 10) continue;
+    const wk = started.find((b) => b.start <= date && date <= b.end);
+    if (!wk) continue;
+    const bucket = byNum.get(wk.week_number);
+    if (!bucket) continue;
+    const mi = a.distance_m / METERS_PER_MILE;
+    bucket.actualVolumeMi += mi;
+    if (mi > bucket.actualLongRunMi) bucket.actualLongRunMi = mi;
+  }
+
+  return [...byNum.values()].map((b) => ({
+    week_number: b.week_number,
+    actualLongRunMi: round1(b.actualLongRunMi),
+    actualVolumeMi: round1(b.actualVolumeMi),
+  }));
+}
+
+// "week 6" / "weeks 6, 7" — names the diverged weeks in the reconcile line.
+function divergedSummary(weeks: number[]): string {
+  return weeks.length === 1 ? `week ${weeks[0]}` : `weeks ${weeks.join(', ')}`;
+}
+
 /**
  * The macro readiness read for a dated, upcoming goal race. Pure and total —
  * returns null (no signal) for a placeholder race, a race on/before `today`, or
  * a plan whose long-run spine can't be read (no long_run days). `today` is the
  * athlete-local ISO date.
+ *
+ * `realized` (Readiness v2) is the athlete's actual per-week long-run history
+ * from Strava (bucketRealizedSeries). When present the verdict is grounded in
+ * what was actually run — the realized rung, missed long runs, and divergence.
+ * When null (Strava broken/disconnected, or the plan can't be bucketed) it
+ * degrades to exact v1 behavior, and render flags the verdict as plan-only.
  */
-export function computeReadiness(baseline: Plan, working: Plan, today: string): Readiness | null {
+export function computeReadiness(
+  baseline: Plan,
+  working: Plan,
+  today: string,
+  realized: RealizedWeek[] | null = null,
+): Readiness | null {
   const race = working.metadata?.race;
   if (!race || isPlaceholderRace(race) || !race.date) return null;
   if (race.date < today) return null; // already run — post-event pause owns this
@@ -336,21 +456,76 @@ export function computeReadiness(baseline: Plan, working: Plan, today: string): 
 
   const cumulativeDeltaPct = computeDrift(baseline, working).cumulative.deltaPct;
 
+  // --- Readiness v2: ground the verdict in what the athlete actually ran.
+  const realizedByNum = realized ? new Map(realized.map((r) => [r.week_number, r])) : null;
+  const realizedDataAvailable = realizedByNum !== null;
+
+  // Started weeks (week start on/before today), in order — the span we have (or
+  // expect) actuals for.
+  const started = [...workSpine]
+    .filter((w) => (w.start ?? w.end ?? '') <= today)
+    .sort((a, b) => a.week_number - b.week_number);
+
+  let realizedRungMi: number | null = null;
+  let missedLongRuns = 0;
+  const divergedWeeks: number[] = [];
+  if (realizedByNum) {
+    // Realized rung: biggest actual long run over the trailing window. Reachability
+    // climbs from real fitness, not a planned rung the athlete may not have hit.
+    const window = started.slice(-REALIZED_RUNG_WINDOW_WEEKS);
+    realizedRungMi = round1(
+      Math.max(0, ...window.map((w) => realizedByNum.get(w.week_number)?.actualLongRunMi ?? 0)),
+    );
+
+    // Coverage anchor: the first started week with any actual running. Weeks before
+    // it predate Strava coverage (athlete connected mid-build) — not skips.
+    const firstObserved = started.find(
+      (w) => (realizedByNum.get(w.week_number)?.actualVolumeMi ?? 0) > 0,
+    );
+
+    // Missed long runs: a fully-past week (ended before today) at/after coverage
+    // whose planned long run has no actual clearing the hybrid "done" bar.
+    if (firstObserved) {
+      for (const w of workSpine) {
+        if (w.week_number < firstObserved.week_number) continue;
+        if ((w.end ?? w.start ?? '') >= today) continue; // not fully past
+        if (w.miles <= 0) continue; // no planned long run to miss
+        const actual = realizedByNum.get(w.week_number)?.actualLongRunMi ?? 0;
+        const done = actual >= LR_DONE_PCT * w.miles || actual >= w.miles - LR_DONE_ABS_MI;
+        if (!done) {
+          missedLongRuns++;
+          divergedWeeks.push(w.week_number);
+        }
+      }
+    }
+  }
+  const planDiverged = realizedDataAvailable && missedLongRuns > DIVERGENCE_SLACK_WEEKS;
+
   // The spine is intact when the biggest long run still scheduled ahead is
   // within tolerance of the original peak — the peak is still on the calendar.
   const peakGap = round1(baselinePeakMi - longestAheadMi);
   const spineIntact = peakGap <= LR_TOLERANCE_MI;
-  // When it isn't, can the runway still rebuild it? Climb from the current rung
-  // at the safety-cap long-run step across the build weeks left.
-  const reachablePeak = round1(currentRungMi + buildWeeksLeft * DRAFT_SAFETY_CAPS.maxLongRunStepMi);
+  // Can the runway still rebuild the peak? Climb from the rung at the safety-cap
+  // long-run step across the build weeks left. v2 climbs from the realized rung
+  // (real fitness); v1 (no realized series) climbs from the planned current rung.
+  const rungForReach = realizedRungMi ?? currentRungMi;
+  const reachablePeak = round1(rungForReach + buildWeeksLeft * DRAFT_SAFETY_CAPS.maxLongRunStepMi);
   const rebuildable = reachablePeak >= baselinePeakMi - LR_TOLERANCE_MI;
 
   const wk = (n: number) => `${n} build week${n === 1 ? '' : 's'}`;
 
   let verdict: ReadinessVerdict;
   let reason: string;
-  if (spineIntact) {
-    if (cumulativeDeltaPct !== null && cumulativeDeltaPct <= -CUM_WATCH_PCT) {
+  if (realizedDataAvailable && !rebuildable) {
+    // Silent-skip / detrained: what's actually been run can't reach the peak in the
+    // runway — fires even when the calendar still shows an intact spine.
+    verdict = 'at_risk';
+    reason = `Going by what's actually been run, the biggest long run in the last few weeks is ${fmtMi(realizedRungMi!)} mi, and ${wk(buildWeeksLeft)} before the taper can't build that to the ${fmtMi(baselinePeakMi)} mi peak — even though the plan still has it. The original target may no longer be realistic.`;
+  } else if (spineIntact) {
+    if (planDiverged) {
+      verdict = 'watch';
+      reason = `The plan and what's actually been run have drifted apart — long runs are on the calendar that don't show up in Strava.`;
+    } else if (cumulativeDeltaPct !== null && cumulativeDeltaPct <= -CUM_WATCH_PCT) {
       verdict = 'watch';
       reason = `Long-run spine intact (the ${fmtMi(baselinePeakMi)} mi peak is still scheduled), but total planned running is down ${Math.abs(cumulativeDeltaPct)}% — keep volume from sliding further.`;
     } else {
@@ -379,6 +554,11 @@ export function computeReadiness(baseline: Plan, working: Plan, today: string): 
     cumulativeDeltaPct,
     verdict,
     reason,
+    realizedDataAvailable,
+    realizedRungMi,
+    missedLongRuns,
+    planDiverged,
+    divergedWeeks,
   };
 }
 
@@ -389,15 +569,32 @@ const VERDICT_LABEL: Record<ReadinessVerdict, string> = {
 };
 
 export function renderReadiness(r: Readiness): string {
+  const spineLine =
+    `Long-run spine: original peak ${fmtMi(r.baselinePeakMi)} mi${r.baselinePeakWeek ? ` (week ${r.baselinePeakWeek})` : ''}; ` +
+    `longest still scheduled ahead ${fmtMi(r.longestAheadMi)} mi; biggest reached so far ${fmtMi(r.currentRungMi)} mi` +
+    (r.realizedDataAvailable && r.realizedRungMi !== null
+      ? `; biggest actually run (last few weeks) ${fmtMi(r.realizedRungMi)} mi`
+      : '') +
+    '.';
   const lines = [
     '# Race readiness',
     '',
     `Goal: ${r.raceName} — ${r.weeksToRace} week${r.weeksToRace === 1 ? '' : 's'} out (${r.raceDate}).`,
-    `Long-run spine: original peak ${fmtMi(r.baselinePeakMi)} mi${r.baselinePeakWeek ? ` (week ${r.baselinePeakWeek})` : ''}; longest still scheduled ahead ${fmtMi(r.longestAheadMi)} mi; biggest reached so far ${fmtMi(r.currentRungMi)} mi.`,
+    spineLine,
     `Build weeks before taper: ${r.buildWeeksLeft}. Long runs cut from the original: ${r.longRunsLost}.`,
     '',
     `Verdict: ${VERDICT_LABEL[r.verdict]} — ${r.reason}`,
   ];
+  if (!r.realizedDataAvailable) {
+    lines.push(
+      'Reading the plan only — no Strava-confirmed run history this run, so this may overstate readiness.',
+    );
+  }
+  if (r.planDiverged) {
+    lines.push(
+      `Reconcile: the plan still shows long runs in ${divergedSummary(r.divergedWeeks)} that Strava has no match for — ask the athlete (an off-Strava treadmill run counts) or align the plan before trusting the calendar.`,
+    );
+  }
   if (r.verdict === 'at_risk') {
     lines.push('');
     lines.push(

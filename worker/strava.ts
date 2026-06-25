@@ -5,7 +5,11 @@
 // before the agent runs, so the agent reads a file rather than spawning Bash.
 // The shape is JSON the coach can reason over directly.
 
+import { supabaseAdmin } from '@/lib/db';
+import { bucketRealizedSeries, type RealizedWeek } from '@/lib/plan-drift';
+import type { Plan } from '@/lib/plan-schema';
 import {
+  fetchActivitiesSince,
   fetchRecentActivities,
   hasStravaConnection,
   StravaTokenBrokenError,
@@ -102,4 +106,72 @@ export async function buildStravaContext(
       summary_28d: null,
     };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Readiness v2 — the realized per-week long-run series (Specs/READINESS_V2.md).
+//
+// computeReadiness reads this to ground the verdict in what the athlete actually
+// ran. It needs the whole build (12–18+ weeks), which is a paginated Strava
+// fetch — too expensive to repeat on every hydrate (an inbound message triggers
+// a run). So it's cached once per athlete per day in strava_realized_cache and
+// recomputed only when the day rolls or the plan version changes.
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the realized per-week series for the athlete's current build, reading
+ * the once-per-day cache and recomputing on a miss. Returns null — so readiness
+ * degrades to v1 (plan-only) — when there's no datable plan, no Strava
+ * connection, the Strava pull fails, or the plan can't be bucketed.
+ *
+ * `today` is the athlete-local YYYY-MM-DD (the cache's per-day key).
+ */
+export async function buildRealizedSeries(
+  athleteId: string,
+  plan: Plan | null,
+  planVersionId: string | null,
+  today: string,
+): Promise<RealizedWeek[] | null> {
+  if (!plan || !planVersionId) return null;
+  const planStart = plan.metadata?.plan_structure?.start_date;
+  if (!planStart) return null;
+
+  const db = supabaseAdmin();
+
+  // Cache hit: same athlete-local day AND same working plan version (a plan edit
+  // re-buckets). The series only changes on a new activity, so daily is plenty.
+  const { data: cached } = await db
+    .from('strava_realized_cache')
+    .select('plan_version_id, computed_date, series')
+    .eq('athlete_id', athleteId)
+    .maybeSingle();
+  if (cached && cached.computed_date === today && cached.plan_version_id === planVersionId) {
+    return cached.series as RealizedWeek[];
+  }
+
+  // Miss: pull the build window and reduce it. A broken/disconnected Strava (or a
+  // plan we can't bucket) degrades to v1 — and we don't poison the cache with it.
+  if (!(await hasStravaConnection(athleteId))) return null;
+  let activities: StravaActivitySummary[];
+  try {
+    activities = await fetchActivitiesSince(athleteId, planStart);
+  } catch {
+    return null;
+  }
+
+  const series = bucketRealizedSeries(plan, activities, today);
+  if (series === null) return null;
+
+  await db.from('strava_realized_cache').upsert(
+    {
+      athlete_id: athleteId,
+      plan_version_id: planVersionId,
+      computed_date: today,
+      series,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'athlete_id' },
+  );
+
+  return series;
 }
