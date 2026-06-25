@@ -237,6 +237,9 @@ const DEFAULT_TAPER_WEEKS = 2;
 export type ReadinessVerdict = 'on_track' | 'watch' | 'at_risk';
 
 export type Readiness = {
+  // The committed event the buildup is for — a race OR a personal adventure
+  // (a self-set long run, a route, an FKT). Same signal either way; the rendered
+  // copy stays event-neutral so the coach never calls an adventure a "race".
   raceName: string;
   raceDate: string;
   weeksToRace: number;
@@ -352,14 +355,14 @@ export function computeReadiness(baseline: Plan, working: Plan, today: string): 
       reason = `Long-run spine intact (the ${fmtMi(baselinePeakMi)} mi peak is still scheduled), but total planned running is down ${Math.abs(cumulativeDeltaPct)}% — keep volume from sliding further.`;
     } else {
       verdict = 'on_track';
-      reason = `Long-run spine intact — the ${fmtMi(baselinePeakMi)} mi peak is still on the calendar ahead of race day.`;
+      reason = `Long-run spine intact — the ${fmtMi(baselinePeakMi)} mi peak is still on the calendar ahead of the event.`;
     }
   } else if (rebuildable) {
     verdict = 'watch';
     reason = `Longest long run still scheduled (${fmtMi(longestAheadMi)} mi) is ${fmtMi(peakGap)} mi short of the original ${fmtMi(baselinePeakMi)} mi peak, but ${wk(buildWeeksLeft)} before the taper can rebuild it. Get the long run climbing again.`;
   } else {
     verdict = 'at_risk';
-    reason = `The long-run peak has eroded to ${fmtMi(longestAheadMi)} mi scheduled vs ${fmtMi(baselinePeakMi)} mi originally, and ${wk(buildWeeksLeft)} left can't rebuild it before the taper. The original race target may no longer be realistic.`;
+    reason = `The long-run peak has eroded to ${fmtMi(longestAheadMi)} mi scheduled vs ${fmtMi(baselinePeakMi)} mi originally, and ${wk(buildWeeksLeft)} left can't rebuild it before the taper. The original target may no longer be realistic.`;
   }
 
   return {
@@ -389,7 +392,7 @@ export function renderReadiness(r: Readiness): string {
   const lines = [
     '# Race readiness',
     '',
-    `Goal race: ${r.raceName} — ${r.weeksToRace} week${r.weeksToRace === 1 ? '' : 's'} out (${r.raceDate}).`,
+    `Goal: ${r.raceName} — ${r.weeksToRace} week${r.weeksToRace === 1 ? '' : 's'} out (${r.raceDate}).`,
     `Long-run spine: original peak ${fmtMi(r.baselinePeakMi)} mi${r.baselinePeakWeek ? ` (week ${r.baselinePeakWeek})` : ''}; longest still scheduled ahead ${fmtMi(r.longestAheadMi)} mi; biggest reached so far ${fmtMi(r.currentRungMi)} mi.`,
     `Build weeks before taper: ${r.buildWeeksLeft}. Long runs cut from the original: ${r.longRunsLost}.`,
     '',
@@ -398,7 +401,7 @@ export function renderReadiness(r: Readiness): string {
   if (r.verdict === 'at_risk') {
     lines.push('');
     lines.push(
-      'Put the fork to the athlete rather than accommodating again: hold the date and run a more conservative race (finish over a time goal, or run/walk), move the race to a later date, or change the goal. It is their call — but they can only make it if you name it.',
+      'Put the fork to the athlete rather than accommodating again: hold the date and take it on more conservatively (aim to finish rather than chase a time, or plan to run/walk), move it to a later date, or change the goal. It is their call — but they can only make it if you name it.',
     );
   }
   return lines.join('\n') + '\n';

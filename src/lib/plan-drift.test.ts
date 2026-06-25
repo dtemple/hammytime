@@ -186,6 +186,20 @@ describe('computeReadiness', () => {
     expect(r.reason).toContain('may no longer be realistic');
   });
 
+  it('fires for an adventure the same as a race, with event-neutral copy', () => {
+    // An adventure (W4b) commits a real, non-placeholder dated event into
+    // metadata.race, so it flows through identically — and the rendered copy must
+    // not call it a "race".
+    const adventure = { name: 'Rae Lakes Loop', date: '2026-11-15', distance_miles: 33 };
+    const base = racePlan(RACE_BASELINE.weeks as never, adventure as never);
+    const r = computeReadiness(base, base, '2026-10-08')!;
+    expect(r).not.toBeNull();
+    expect(r.verdict).toBe('on_track');
+    const out = renderReadiness(r);
+    expect(out).toContain('Rae Lakes Loop');
+    expect(out).not.toMatch(/race day|goal race|conservative race/i);
+  });
+
   it('returns null for a placeholder race, a past race, or a spine-less plan', () => {
     const placeholder = racePlan(RACE_BASELINE.weeks as never, {
       ...GOAL_RACE,
@@ -220,12 +234,12 @@ describe('renderReadiness', () => {
     expect(out).toContain('# Race readiness');
     expect(out).toContain('Verdict: AT RISK');
     expect(out).toContain('original peak 20 mi');
-    expect(out).toContain('move the race to a later date'); // the fork
+    expect(out).toContain('move it to a later date'); // the fork (event-neutral)
   });
 
   it('omits the fork when not at risk', () => {
     const out = renderReadiness(computeReadiness(RACE_BASELINE, RACE_BASELINE, '2026-10-08')!);
     expect(out).toContain('Verdict: ON TRACK');
-    expect(out).not.toContain('move the race to a later date');
+    expect(out).not.toContain('move it to a later date');
   });
 });
