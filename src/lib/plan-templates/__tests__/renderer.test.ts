@@ -28,6 +28,7 @@ const MILES: Record<GoalDistance, number> = {
   '10k': 6.2,
   half: 13.1,
   marathon: 26.2,
+  '50k': 31.1,
   keep_fit: 5,
 };
 
@@ -73,12 +74,13 @@ const TEMPLATE_CASES: Array<[TemplateId | string, GoalDistance, ExperienceTier]>
   ['half-development', 'half', 'some_training'],
   ['short-race(5k)', '5k', 'for_fun'],
   ['short-race(10k)', '10k', 'experienced'],
+  ['ultra-50k', '50k', 'experienced'],
   ['base-maintenance', 'keep_fit', 'experienced'],
 ];
 
 const GOAL_STATES: GoalState[] = ['committed', 'intended-date', 'intended-nodate'];
 
-describe('renderPlan — 6 templates × 3 goal states produce valid, safety-passing plans', () => {
+describe('renderPlan — 7 templates × 3 goal states produce valid, safety-passing plans', () => {
   for (const [label, distance, tier] of TEMPLATE_CASES) {
     for (const state of GOAL_STATES) {
       it(`${label} / ${state}`, () => {
@@ -156,6 +158,53 @@ describe('renderPlan — overlays stay valid and safe', () => {
     // achilles → no hill_repeats anywhere
     const hasHills = plan.weeks.some((w) => w.days.some((d) => d.type === 'hill_repeats'));
     expect(hasHills).toBe(false);
+  });
+});
+
+describe('ultra-50k (V4-W4)', () => {
+  it('selects ultra-50k across tiers and renders a valid, safety-passing plan', () => {
+    for (const tier of ['beginner', 'experienced'] as ExperienceTier[]) {
+      const { templateId, template, params } = selectPlan(
+        buildProfile('50k', tier, 'committed'),
+        SNAP,
+        DRAFT_SAFETY_CAPS,
+      );
+      expect(templateId).toBe('ultra-50k');
+      const plan = renderPlan(template, params);
+      expect(PlanSchema.safeParse(plan).success).toBe(true);
+      expect(validateSafety(plan, DRAFT_SAFETY_CAPS, '50k').ok).toBe(true);
+    }
+  });
+
+  it('is effort-led — a stated time attaches no time_goal overlay and no goal paces', () => {
+    const profile = buildProfile('50k', 'experienced', 'committed', { time: 5 * 3600 });
+    const { template, params } = selectPlan(profile, SNAP, DRAFT_SAFETY_CAPS);
+    expect(params.overlays).not.toContain('time_goal');
+    const plan = renderPlan(template, params);
+    const anyGoalPace = plan.weeks.some((w) => w.days.some((d) => d.target_pace_sec_per_mile));
+    expect(anyGoalPace).toBe(false);
+  });
+
+  it('never exceeds the 26-mile long-run cap', () => {
+    const profile = buildProfile('50k', 'experienced', 'committed');
+    const { template, params } = selectPlan(profile, SNAP, DRAFT_SAFETY_CAPS);
+    const plan = renderPlan(template, params);
+    const longest = Math.max(
+      ...plan.weeks.flatMap((w) =>
+        w.days.filter((d) => d.type === 'long_run').map((d) => d.planned_distance_miles ?? 0),
+      ),
+    );
+    expect(longest).toBeLessThanOrEqual(26);
+  });
+
+  it('flags race-day fueling on mid-build long runs', () => {
+    const profile = buildProfile('50k', 'experienced', 'committed', { trail: true });
+    const { template, params } = selectPlan(profile, SNAP, DRAFT_SAFETY_CAPS);
+    const plan = renderPlan(template, params);
+    const fuelLong = plan.weeks.some((w) =>
+      w.days.some((d) => d.type === 'long_run' && d.nutrition_practice),
+    );
+    expect(fuelLong).toBe(true);
   });
 });
 

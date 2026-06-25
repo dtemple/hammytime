@@ -62,6 +62,7 @@ export const DRAFT_SAFETY_CAPS: SafetyCaps = {
     '10k': 10,
     half: 15,
     marathon: 22, // performance ceiling; finish band caps itself at 20
+    '50k': 26, // a marathon-distance long run is the ceiling for the bucket (ULTRA_SUPPORT §3.3)
     keep_fit: 14, // no race — keep maintenance from drifting toward ultra distance
   },
 };

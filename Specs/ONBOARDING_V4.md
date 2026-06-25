@@ -374,6 +374,12 @@ or an adventure with a date."
 
 ## 9. Eval / verification — narrowed but event-broadened
 
+> **Superseded for beyond-50k (V4-W4, 2026-06-24, v0.7.46).** The "consented proxy
+> for a 50mi+ goal" fixtures below (the 44-mile adventure, Western States 100) were
+> built as an **off-ramp**, not a proxy: a goal past the 50k is acknowledged and
+> redirected to a shorter event, with no proxy plan. The **50k race → real `ultra-50k`
+> plan** fixture stands as written. The `event_kind: adventure` fixtures are W4b.
+
 The v3 eval set (`ONBOARDING_V3.md` §7) is the base. v4's job is **net different,
 not simpler**: ultras and adventures add fixtures while no-event ones convert.
 This set is a launch gate for opening to more users (mirrors the V3-W5 gate).
@@ -454,9 +460,24 @@ framing, the off-ramp/pause state, and adopting U1.
   stale); the old race is marked `completed`; the dormant check-back / pause copy
   now points at `/next_event`. Web-only (Vercel push), no migration, no worker
   change. **W3 fully done.**
-- **V4-W4 · Catalog U1 · M.** Adopt `ULTRA_SUPPORT.md` U1: four buckets,
-  `ultra-50k`, distance-derived plausibility, widened bands, non-race adventures.
-  (`event_kind` column, athlete-stated fill, fuzzy dates land here if not in W1.)
+- **V4-W4 · Catalog U1 · M.** ⚙️ **Catalog slice BUILT** (2026-06-24, v0.7.46 — the
+  authoritative record). Adopted `ULTRA_SUPPORT.md` U1, with two David decisions that
+  diverge from the §6/§9 body below:
+  - **Lean enum — only `50k`, not the four buckets.** `50mi/100k/100mi` are NOT in the
+    enum: the total-record types would force them to map to a template that doesn't exist
+    until U2, and the §3.2 ultra fallback rows never fire (50mi+ always carries a concrete
+    distance → the pace-envelope path). The `ultra-50k` template, distance-derived
+    plausibility (`deriveBucketFromMiles` 28–40→`50k`, `target_time` max→48h, `50k` finish
+    band), and widened bands all landed.
+  - **Beyond-50k OFF-RAMPS — it does NOT proxy.** Supersedes the §6/§9 "consented proxy
+    for 50mi+" design: a 44-mile/100k/100mi goal is acknowledged, the 50k ceiling is stated,
+    and the athlete is asked for a shorter event or tune-up to build around — no proxy plan,
+    no keep_fit, no future-plan promise; the real goal rides as an intent. Same shape as the
+    W2 no-event off-ramp.
+  - Needed ONE small `goal_distance` CHECK migration (`20260626000000_goal_distance_50k.sql`).
+  - **W4b remains** (the W1-deferred half): `races.event_kind` migration + the
+    `ULTRA_SUPPORT.md` §3.5 athlete-stated **adventure fill** (non-race goal + fuzzy dates) +
+    the recap `event_kind` line. The §9 adventure fixtures land with W4b.
 - **V4-W5 · Web positioning copy · S.** Home page H1/lede/how-it-works, signup
   headline (§8). David wordsmiths; web-only (Vercel push).
 - **V4-W6 · Eval harness + fixtures · M.** §9. The V3-W5 harness with the v4

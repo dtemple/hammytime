@@ -480,8 +480,8 @@ describe('router — confirmed-race distance derivation (V3-W8)', () => {
   });
 });
 
-describe('router — out-of-catalog race opens the pocket (V3-W8)', () => {
-  it('a 100-mile race offers the marathon-proxy with consent, never a bucket write', async () => {
+describe('router — beyond-50k race takes the off-ramp (V4-W4)', () => {
+  it('a 100-mile race is acknowledged and asks for a shorter event — no bucket/proxy/pocket', async () => {
     loadV3State.mockResolvedValue({
       ...initialV3State(null),
       phase: 'intake',
@@ -506,20 +506,18 @@ describe('router — out-of-catalog race opens the pocket (V3-W8)', () => {
 
     expect(commitSlots).not.toHaveBeenCalled();
     const call = sendMessage.mock.calls.at(-1)!;
-    expect(call[1]).toMatch(/past what I can build/i);
-    expect(labels(call)).toEqual(['Do that', 'Not now']);
+    expect(call[1]).toMatch(/Western States 100/);
+    expect(call[1]).toMatch(/top out at the 50k/i);
+    expect(labels(call)).toEqual([]); // no consent chips — an open ask, not a proxy offer
     const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
-    expect(saved.slots.goal_distance).toBeUndefined(); // no nearest-bucket write
-    expect(saved.out_of_catalog).toMatchObject({
-      distance_mi: 100,
-      proxy: 'marathon',
-      consent: 'pending',
-    });
+    expect(saved.slots.goal_distance).toBeUndefined(); // no bucket/proxy write
+    expect(saved.out_of_catalog).toBeUndefined(); // off-ramp, not a pocket
+    expect(saved.intents).toContain('Western States 100'); // rides as coach context
   });
 });
 
-describe('router — stated out-of-bucket distance opens the pocket (V3-W8)', () => {
-  it('"44 miles" with no race lookup pockets the goal', async () => {
+describe('router — stated beyond-50k distance takes the off-ramp (V4-W4)', () => {
+  it('"44 miles" with no race lookup off-ramps, no pocket', async () => {
     loadV3State.mockResolvedValue({
       ...initialV3State(null),
       phase: 'intake',
@@ -534,10 +532,30 @@ describe('router — stated out-of-bucket distance opens the pocket (V3-W8)', ()
     await handleV3Message(ctx(52, '44 miles in the mountains'), athlete);
 
     const call = sendMessage.mock.calls.at(-1)!;
-    expect(call[1]).toMatch(/past what I can build/i);
+    expect(call[1]).toMatch(/top out at the 50k/i);
     const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
-    expect(saved.out_of_catalog?.consent).toBe('pending');
+    expect(saved.out_of_catalog).toBeUndefined(); // off-ramp, not a pocket
     expect(saved.slots.goal_distance).toBeUndefined();
+    expect(saved.intents).toContain('44 miles in the mountains'); // rides as coach context
+  });
+
+  it('a stated 50k is bucketed in code, no off-ramp (V4-W4)', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race') },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({ next_action: 'ask', goal_distance_mi: 35, message: 'a 50k then' }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(54, 'a 35-mile trail ultra'), athlete);
+
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.slots.goal_distance?.value).toBe('50k');
+    expect(saved.out_of_catalog).toBeUndefined();
   });
 
   it('an in-bucket stated distance is set in code, no pocket', async () => {
@@ -1082,18 +1100,20 @@ describe('router — the reflection turn (R2)', () => {
   });
 
   it('a pocket opening past the reflection turn keeps the standard chips', async () => {
+    // The short-side 5k pocket (a sub-floor mile) — the long-side beyond-50k case
+    // off-ramps now (V4-W4), but the reflection-vs-standard chip logic is unchanged.
     loadV3State.mockResolvedValue({
       ...initialV3State(null),
       phase: 'intake',
       slots: { goal_type: sv('race') }, // goal content already present → reflected (grandfather)
     } as V3OnboardingState);
     callExtractAndAdvance.mockResolvedValue({
-      output: out({ next_action: 'ask', goal_distance_mi: 44, message: 'got it' }),
+      output: out({ next_action: 'ask', goal_distance_mi: 1, message: 'got it' }),
       inputTokens: 1,
       outputTokens: 1,
     });
 
-    await handleV3Message(ctx(85, '44 miles actually'), athlete);
+    await handleV3Message(ctx(85, 'a mile actually'), athlete);
 
     expect(labels(sendMessage.mock.calls.at(-1)!)).toEqual(['Do that', 'Not now']);
   });

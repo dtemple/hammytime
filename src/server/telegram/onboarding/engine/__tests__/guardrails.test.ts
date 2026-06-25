@@ -71,7 +71,8 @@ function stateWith(slots: SlotState, over: Partial<V3OnboardingState> = {}): V3O
 describe('coerceFill', () => {
   it('drops out-of-enum values', () => {
     expect(coerceFill('experience_tier', 'pro')).toBeUndefined();
-    expect(coerceFill('goal_distance', '50k')).toBeUndefined();
+    expect(coerceFill('goal_distance', '100k')).toBeUndefined(); // beyond the 50k → off-ramp, not a bucket
+    expect(coerceFill('goal_distance', '50k')).toBe('50k'); // the 50k IS in catalog now (V4-W4)
     expect(coerceFill('experience_tier', 'beginner')).toBe('beginner');
   });
   it('drops the prose "intermediate" label that stranded the loop; accepts every tier literal', () => {

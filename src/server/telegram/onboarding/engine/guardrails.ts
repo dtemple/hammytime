@@ -31,7 +31,7 @@ import { isPastISODate, todayISOInTz } from './numeric';
 import type { Chip, ExtractAdvanceOutput, NextAction, SlotFill } from './extract-and-advance';
 
 const EXPERIENCE = new Set(['beginner', 'for_fun', 'some_training', 'experienced']);
-const DISTANCE = new Set(['5k', '10k', 'half', 'marathon', 'keep_fit']);
+const DISTANCE = new Set(['5k', '10k', 'half', 'marathon', '50k', 'keep_fit']);
 const GOAL_TYPE = new Set(['race', 'general_fitness']);
 const INJURY_STATUS = new Set(['none', 'active', 'monitoring', 'past', 'unknown']);
 const INJURY_DETAIL_STATUS = new Set(['active', 'monitoring', 'past']);
@@ -348,6 +348,7 @@ const DISTANCE_LABELS: Record<string, string> = {
   '10k': '10K',
   half: 'half marathon',
   marathon: 'marathon',
+  '50k': '50K',
   keep_fit: 'general fitness',
 };
 

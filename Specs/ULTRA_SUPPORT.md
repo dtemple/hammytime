@@ -4,6 +4,12 @@ _Status: proposal, unscheduled. First pass 2026-06-05 after the Western States t
 
 _**v4 reconciliation (2026-06-24).** `Specs/ONBOARDING_V4.md` (signed off) adopts this doc's catalog scope as **v4-W4**: **U1 is locked as v1 catalog scope** (the four buckets, `ultra-50k`, distance-derived plausibility, widened bands, non-race adventures / `event_kind`) and **U2 (50mi+ renderer work: back-to-back long runs, time-on-feet) is deferred** with the §6 pointer. v4 owns the event *framing* + the no-event off-ramp; this doc keeps owning catalog + plan-gen. The `event_kind` column and the §3.5 athlete-stated adventure fill land with W4 (the v4-W1 framing slice shipped without them, v0.7.40)._
 
+_**U1 catalog slice LANDED (V4-W4, 2026-06-24, v0.7.46 — the authoritative record).** Two David decisions amend this doc's design:_
+- _**Lean enum — only `50k` is a real bucket.** `50mi/100k/100mi` are NOT added to the enum (a total-record `SELECTION_TABLE`/caps would force them to map to a template that doesn't exist until U2; the §3.2 ultra fallback rows never fire because 50mi+ always carries a concrete distance → the pace envelope). So §2.2/§3.1's "four granular buckets" is **`50k`-only** in v1; the `50mi/100k/100mi` archetypes stay conceptual until U2. `deriveBucketFromMiles` tops at the 50k band (28–40mi); the §3.2 envelope + a single `50k` fallback row shipped; the `ultra-50k` template (§3.4) shipped with `time_goal` suppressed and DRAFT caps (long-run 26, peak ~60) **David-confirmed**._
+- _**Beyond-50k OFF-RAMPS — no consented proxy.** §3.1/§3.4's "a 44-miler selects the 50mi archetype" and "proxy with consent" for 50mi+ is **superseded**: a goal past the 50k is acknowledged, the 50k ceiling stated, and the athlete asked for a shorter event/tune-up to build around — no proxy plan, no future-plan promise. The intake pocket's long-side marathon-proxy is retained-but-unrouted (revivable). The short-side 5k proxy is unchanged._
+
+_**Still U1-but-W4b:** `races.event_kind` + the §3.5 athlete-stated adventure fill (non-race goal + fuzzy dates) + the recap `event_kind` line._
+
 ---
 
 ## 1. What the live tests showed

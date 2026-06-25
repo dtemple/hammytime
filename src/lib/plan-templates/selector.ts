@@ -58,6 +58,15 @@ export const SELECTION_TABLE: Record<GoalDistance, Record<ExperienceTier, Templa
     some_training: 'marathon-finish',
     experienced: 'marathon-performance',
   },
+  // One template across all tiers (volume params scale with tier). No hard gate —
+  // a beginner naming a 50k selects it; the safety-contradiction confirm surfaces
+  // any mismatch before plan-gen (ULTRA_SUPPORT §3.4, decision #3).
+  '50k': {
+    beginner: 'ultra-50k',
+    for_fun: 'ultra-50k',
+    some_training: 'ultra-50k',
+    experienced: 'ultra-50k',
+  },
   keep_fit: {
     beginner: 'base-maintenance',
     for_fun: 'base-maintenance',
@@ -162,6 +171,7 @@ const DISTANCE_MILES: Record<GoalDistance, number> = {
   '10k': 6.2,
   half: 13.1,
   marathon: 26.2,
+  '50k': 31.1,
   keep_fit: 5,
 };
 

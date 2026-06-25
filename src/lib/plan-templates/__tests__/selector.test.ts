@@ -64,6 +64,12 @@ describe('selectTemplateId — the (distance × tier) table', () => {
       some_training: 'marathon-finish',
       experienced: 'marathon-performance',
     },
+    '50k': {
+      beginner: 'ultra-50k',
+      for_fun: 'ultra-50k',
+      some_training: 'ultra-50k',
+      experienced: 'ultra-50k',
+    },
     keep_fit: {
       beginner: 'base-maintenance',
       for_fun: 'base-maintenance',

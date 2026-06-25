@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   applyStatedDistance,
+  applyUltraOffRamp,
   applyVolumeGoal,
   acceptPocketAndAdvance,
   declinePocket,
@@ -11,6 +12,7 @@ import {
   reconcilePocket,
   setPocket,
   supersedePocket,
+  ultraOffRampBody,
   volumeBoundaryBody,
   VOLUME_REDIRECT_CHIPS,
 } from '../pocket';
@@ -48,18 +50,22 @@ describe('applyStatedDistance', () => {
     expect(r.state.out_of_catalog).toBeUndefined();
   });
 
-  it('opens the pocket for an out-of-catalog stated distance', () => {
+  it('buckets a 50k stated distance in catalog (V4-W4) — no pocket', () => {
+    const r = applyStatedDistance(stateWith({}), 35, 'a 35-mile trail ultra');
+    expect(r.pocket).toBe(false);
+    expect(r.state.slots.goal_distance).toEqual(sv('50k', 'stated', true));
+    expect(r.state.out_of_catalog).toBeUndefined();
+  });
+
+  it('off-ramps a beyond-50k stated distance — no pocket, asks for a shorter event (V4-W4)', () => {
     const r = applyStatedDistance(stateWith({}), 44, '44 miles in the mountains');
-    expect(r.pocket).toBe(true);
-    expect(r.state.slots.goal_distance).toBeUndefined(); // never a nearest-bucket write
-    expect(r.state.out_of_catalog).toMatchObject({
-      words: '44 miles in the mountains',
-      distance_mi: 44,
-      proxy: 'marathon',
-      consent: 'pending',
-    });
-    expect(r.message).toMatch(/past what I can build/i);
-    expect(r.chips.map((c) => c.value)).toEqual(['yes', 'no']);
+    expect(r.pocket).toBe(false);
+    expect(r.state.slots.goal_distance).toBeUndefined(); // no nearest-bucket write, no proxy
+    expect(r.state.out_of_catalog).toBeUndefined(); // off-ramp, not a pocket
+    expect(r.state.intents).toEqual(['44 miles in the mountains']); // rides as coach context
+    expect(r.message).toMatch(/top out at the 50k/i);
+    expect(r.message).toMatch(/shorter event or a tune-up/i);
+    expect(r.chips).toEqual([]); // no consent chips
   });
 
   it('opens the pocket below the catalog floor with the 5k proxy (R1 fix 1)', () => {
@@ -80,6 +86,34 @@ describe('applyStatedDistance', () => {
   it('a shapeless (null-distance) pocket still proxies to the marathon', () => {
     const state = setPocket(stateWith({}), 'be ready for anything', null);
     expect(state.out_of_catalog?.proxy).toBe('marathon');
+  });
+});
+
+describe('ultraOffRampBody + applyUltraOffRamp (V4-W4 — the beyond-50k off-ramp)', () => {
+  it('states the 50k ceiling and asks for a shorter event, with no keep_fit path', () => {
+    const body = ultraOffRampBody(100);
+    expect(body).toContain('100 miles is');
+    expect(body).toMatch(/top out at the 50k/i);
+    expect(body).toMatch(/shorter event or a tune-up/i);
+    // v4 is event-only — never offers "keep you fit" / "stay fit"
+    expect(body.toLowerCase()).not.toContain('keep you fit');
+    expect(body.toLowerCase()).not.toContain('stay fit');
+    // no promise to reach back out when 50mi+ ships (nothing remembers to)
+    expect(body.toLowerCase()).not.toContain('check back');
+  });
+
+  it('clears the goal slots and demotes the words to an intent (no pocket)', () => {
+    const state = stateWith({
+      goal_race: sv('Western States'),
+      goal_date: sv('2026-06-27'),
+      goal_distance: sv('marathon'),
+    });
+    const next = applyUltraOffRamp(state, 'Western States, 100mi');
+    expect(next.slots.goal_race).toBeUndefined();
+    expect(next.slots.goal_date).toBeUndefined();
+    expect(next.slots.goal_distance).toBeUndefined();
+    expect(next.out_of_catalog).toBeUndefined();
+    expect(next.intents).toEqual(['Western States, 100mi']);
   });
 });
 

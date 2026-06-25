@@ -20,8 +20,15 @@ describe('deriveBucketFromMiles (V3-W8)', () => {
     expect(deriveBucketFromMiles(28)).toBe('marathon'); // wide band — a 28mi trail "marathon"
   });
 
-  it('returns null past the current catalog → the pocket', () => {
-    expect(deriveBucketFromMiles(31)).toBeNull(); // 50k
+  it('buckets the 50k band (V4-W4 / U1): 28–40mi trains as a 50k', () => {
+    expect(deriveBucketFromMiles(28.5)).toBe('50k'); // just past the marathon band
+    expect(deriveBucketFromMiles(31.1)).toBe('50k'); // a 50k
+    expect(deriveBucketFromMiles(35)).toBe('50k'); // a 35mi trail ultra trains like a 50k
+    expect(deriveBucketFromMiles(40)).toBe('50k'); // top of the 50k band
+  });
+
+  it('returns null beyond the 50k → the off-ramp (V4-W4)', () => {
+    expect(deriveBucketFromMiles(40.1)).toBeNull(); // just past the 50k band
     expect(deriveBucketFromMiles(44)).toBeNull(); // Rae Lakes
     expect(deriveBucketFromMiles(100)).toBeNull(); // Western States
   });
@@ -77,6 +84,11 @@ describe('resolveFinishTime', () => {
 
   it('returns no_range for keep_fit (no finish-time goal)', () => {
     expect(resolveFinishTime(15900, 'keep_fit')).toEqual({ status: 'no_range' });
+  });
+
+  it('checks an intended 50k against its bucket fallback band (V4-W4)', () => {
+    expect(resolveFinishTime(6 * 3600, '50k')).toEqual({ status: 'ok', seconds: 21600 }); // 6:00:00
+    expect(resolveFinishTime(2 * 3600, '50k')).toEqual({ status: 'out_of_range', seconds: 7200 }); // sub-3h floor
   });
 });
 

@@ -26,10 +26,11 @@ import {
   type ResolvedTurn,
 } from './guardrails';
 
-/** The nearest in-catalog structure, by direction (R1 fix 1): a goal below the
- *  catalog floor proxies to the smallest bucket, anything else (oversize, or a
- *  shapeless objective with no distance) to the largest. ULTRA_SUPPORT U1 widens
- *  the catalog underneath the long side and the proxy graduates to a real plan. */
+/** The nearest in-catalog structure for a pocketed goal. Since V4-W4 only the SHORT
+ *  side reaches the pocket — a sub-floor goal proxies to the 5k. The long-side
+ *  branch (oversize / shapeless → marathon) is retained but no longer routed to:
+ *  a goal beyond the 50k takes the off-ramp (applyUltraOffRamp), not a proxy plan.
+ *  Left in place, revivable — mirrors the keep_fit-retirement posture. */
 function proxyFor(distanceMi: number | null): GoalDistanceValue {
   return distanceMi != null && distanceMi < CATALOG_FLOOR_MI ? '5k' : 'marathon';
 }
@@ -101,9 +102,43 @@ export interface StatedDistanceResult {
 }
 
 /**
+ * The beyond-50k boundary + redirect (V4-W4). The catalog tops at the 50k, so a goal
+ * past it — a 44-miler, a 100k, a 100-miler — is NOT proxied down to a 50k plan: the
+ * engine says so plainly and asks for a shorter event it CAN build around. v4 is
+ * event-only (no keep_fit fallback), and there's no promise to reach back out when
+ * 50mi+ support ships (nothing remembers to). The caller may prepend race context
+ * ("Found it — Western States, June 28. …").
+ */
+export function ultraOffRampBody(distanceMi: number | null): string {
+  const lead = distanceMi != null ? `${Math.round(distanceMi)} miles is` : "That's";
+  return `${lead} past what I can build a structured plan for right now — I top out at the 50k. Is there a shorter event or a tune-up race you'd want me to build around instead? Anything from a 5K up to a 50k and we're set.`;
+}
+
+/**
+ * Off-ramp a beyond-50k goal: clear the goal slots so a shorter event re-opens the
+ * normal flow (the same clear-and-reopen `declinePocket` uses), and demote the
+ * athlete's words to the intents so the daily coach still sees the real target. No
+ * pocket, no proxy plan.
+ */
+export function applyUltraOffRamp(state: V3OnboardingState, words: string): V3OnboardingState {
+  const slots = { ...state.slots };
+  delete slots.goal_race;
+  delete slots.goal_date;
+  delete slots.goal_distance;
+  return {
+    ...state,
+    slots,
+    out_of_catalog: undefined,
+    intents: mergeIntents(state.intents, [words]),
+  };
+}
+
+/**
  * Bucket a distance the athlete STATED (no race lookup) — Chase's "44 miles" case.
- * In range → set `goal_distance` in code (stated; the athlete said it), so the
- * model never maps a number to a bucket. Out of range → open the pocket.
+ * In catalog → set `goal_distance` in code (stated; the athlete said it), so the
+ * model never maps a number to a bucket. Out of catalog splits by direction: the
+ * SHORT side (below the floor) opens the 5k pocket (a consented proxy); the LONG
+ * side (beyond the 50k) takes the off-ramp — no proxy, ask for a shorter event.
  */
 export function applyStatedDistance(
   state: V3OnboardingState,
@@ -115,14 +150,23 @@ export function applyStatedDistance(
     const slots = { ...state.slots, goal_distance: slotValue(bucket, 'stated', true) };
     return { state: { ...state, slots }, pocket: false, message: '', chips: [] };
   }
-  // The same turn often fills target_time ("1 mile in under 5") — the caller
-  // merges fills before this runs, so the slot is current here.
-  const targetTime = state.slots.target_time?.value as number | null | undefined;
+  if (miles < CATALOG_FLOOR_MI) {
+    // The same turn often fills target_time ("1 mile in under 5") — the caller
+    // merges fills before this runs, so the slot is current here.
+    const targetTime = state.slots.target_time?.value as number | null | undefined;
+    return {
+      state: setPocket(state, words, miles),
+      pocket: true,
+      message: pocketBody(miles, targetTime ?? null),
+      chips: POCKET_CHIPS,
+    };
+  }
+  // Beyond the 50k → off-ramp (no pocket, no consent chips).
   return {
-    state: setPocket(state, words, miles),
-    pocket: true,
-    message: pocketBody(miles, targetTime ?? null),
-    chips: POCKET_CHIPS,
+    state: applyUltraOffRamp(state, words),
+    pocket: false,
+    message: ultraOffRampBody(miles),
+    chips: [],
   };
 }
 

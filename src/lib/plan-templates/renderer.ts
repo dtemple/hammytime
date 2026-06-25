@@ -616,7 +616,8 @@ function longRunDayEntry(
   params: RenderParams,
   alloc: PhaseAllocation,
 ): Day {
-  const longRace = params.distance === 'marathon' || params.distance === 'half';
+  const longRace =
+    params.distance === 'marathon' || params.distance === 'half' || params.distance === '50k';
   const practiceNutrition = longRace && alloc.weekNumber >= 9 && miles >= 12;
   return {
     day,

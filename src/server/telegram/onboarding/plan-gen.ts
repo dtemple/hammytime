@@ -44,6 +44,7 @@ const NOMINAL_MILES: Record<GoalDistance, number> = {
   '10k': 6.2,
   half: 13.1,
   marathon: 26.2,
+  '50k': 31.1,
   keep_fit: 5,
 };
 

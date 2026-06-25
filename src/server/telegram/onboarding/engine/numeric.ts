@@ -93,19 +93,22 @@ export const CATALOG_FLOOR_MI = 2.5;
  * confirmed race's `distance_mi`, or a stated distance the model surfaced, runs
  * through here; the model only maps freeform distance *vocabulary* when no number
  * exists. Bands are wide on purpose — a 27-mile trail "marathon" trains like a
- * marathon (the full table, widened for the ultra buckets, lives in
- * ULTRA_SUPPORT.md §3.1). Returns null for anything outside the current catalog
- * (below ~2.5 mi or past ~28 mi) — the caller routes that to the uncatalogued-goal
- * pocket (§5.2). `keep_fit` is never derived from miles (it's a no-race state).
+ * marathon, a 35-miler trains like a 50k (the full table lives in ULTRA_SUPPORT.md
+ * §3.1). The catalog tops at the 50k (V4-W4 / U1): 28–40 mi is the 50k bucket.
+ * Returns null for anything outside the catalog — below ~2.5 mi routes to the
+ * short-side pocket (5k proxy); past ~40 mi routes to the beyond-50k off-ramp (no
+ * proxy plan — the athlete is asked for a shorter event). `keep_fit` is never
+ * derived from miles (it's a no-race state).
  */
 export function deriveBucketFromMiles(mi: number): GoalDistanceValue | null {
   if (!Number.isFinite(mi) || mi <= 0) return null;
-  if (mi < CATALOG_FLOOR_MI) return null; // out of catalog (short) → the pocket
+  if (mi < CATALOG_FLOOR_MI) return null; // out of catalog (short) → the 5k pocket
   if (mi < 4.65) return '5k'; // 5k=3.1, 10k=6.2 → split at the midpoint
   if (mi < 8) return '10k';
   if (mi < 17) return 'half';
   if (mi <= 28) return 'marathon';
-  return null; // out of catalog (long) → the pocket
+  if (mi <= 40) return '50k'; // 28–40 trains as a long trail marathon
+  return null; // beyond the 50k → the off-ramp (no proxy plan; V4-W4)
 }
 
 /** Implied finish time for a goal pace (seconds per mile) over a distance.

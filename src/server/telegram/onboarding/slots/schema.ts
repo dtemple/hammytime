@@ -29,7 +29,7 @@ import type { SlotValue } from './provenance';
 
 export type GoalTypeValue = 'race' | 'general_fitness';
 export type ExperienceTierValue = 'beginner' | 'for_fun' | 'some_training' | 'experienced';
-export type GoalDistanceValue = '5k' | '10k' | 'half' | 'marathon' | 'keep_fit';
+export type GoalDistanceValue = '5k' | '10k' | 'half' | 'marathon' | '50k' | 'keep_fit';
 export type InjuryStatusValue = 'none' | 'active' | 'monitoring' | 'past' | 'unknown';
 
 /** A described injury: the part and how live it is. `past` maps to the
@@ -132,6 +132,9 @@ export const FINISH_TIME_RANGES_SEC: Partial<
   '10k': { min: 25 * 60, max: 105 * 60 }, // 25:00 – 1:45:00
   half: { min: 55 * 60, max: 4 * 3600 }, // 55:00 – 4:00:00
   marathon: { min: 2 * 3600, max: 7.5 * 3600 }, // 2:00:00 – 7:30:00
+  // Bucket-only fallback for an intended 50k with no concrete race (ULTRA_SUPPORT
+  // §3.2). When a real distance exists, the distance-derived pace envelope governs.
+  '50k': { min: 3 * 3600, max: 12 * 3600 }, // 3:00:00 – 12:00:00
 };
 
 export const SLOTS: Record<SlotKey, SlotDef> = {
@@ -258,7 +261,10 @@ export const SLOTS: Record<SlotKey, SlotDef> = {
     planDriving: true,
     safety: false,
     raceOnly: true,
-    numeric: { unit: 'seconds', plausibleRange: { min: 10 * 60, max: 8 * 3600 } },
+    // Pre-distance catch-all only — the distance-derived window (numeric.ts pace
+    // envelope) does the tight check. 48h admits ultra finish times (a 100-mile
+    // "sub-30" no longer trips this before the real distance check runs).
+    numeric: { unit: 'seconds', plausibleRange: { min: 10 * 60, max: 48 * 3600 } },
     knownGapKey: 'target_time',
   },
   tune_up_races: {

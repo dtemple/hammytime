@@ -22,7 +22,7 @@ import type { KnownGapKey, StrengthEquipment } from '@/lib/known-gaps';
 // ---------------------------------------------------------------------------
 
 export type ExperienceTier = 'beginner' | 'for_fun' | 'some_training' | 'experienced';
-export type GoalDistance = '5k' | '10k' | 'half' | 'marathon' | 'keep_fit';
+export type GoalDistance = '5k' | '10k' | 'half' | 'marathon' | '50k' | 'keep_fit';
 export type Terrain = 'road' | 'trail' | 'mixed';
 export type TargetType = 'finish' | 'time';
 
@@ -32,7 +32,8 @@ export type TemplateId =
   | 'half-foundation'
   | 'half-development'
   | 'short-race'
-  | 'base-maintenance';
+  | 'base-maintenance'
+  | 'ultra-50k';
 
 /** The structural band a template embodies. Tier maps onto a band; the band
  *  fixes the structure (quality-day count, intensity menu, long-run ceiling),

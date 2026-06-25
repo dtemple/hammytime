@@ -236,7 +236,7 @@ const INJURY_RULES = [
 const ENUM_RULES = [
   'Closed-enum slots take ONLY these exact literal values — never a paraphrase:',
   '- experience_tier: "beginner" (new to running), "for_fun" (runs but no structure), "some_training" (some structured training), "experienced" (years of consistent training). There is no "intermediate" — map it to some_training or experienced.',
-  '- goal_distance: "5k", "10k", "half", "marathon", "keep_fit" (no race, staying fit). For ANY other stated distance — a number of miles/km, or a named distance like "50k" / "50 miler" / "44 miles" — do NOT guess a bucket; set goal_distance_mi (in miles) and leave goal_distance alone. The boundary cuts both ways: anything SHORTER than a 5K — "a mile" (goal_distance_mi: 1), "1500m" (≈ 0.93), "800m" (≈ 0.5) — is also not a bucket. Never map a stated distance to the nearest bucket in either direction.',
+  '- goal_distance: "5k", "10k", "half", "marathon", "50k", "keep_fit" (no race, staying fit). A stated "50k" or "50 km" IS the "50k" bucket — fill goal_distance directly. For ANY other off-catalog distance — a number of miles/km, or a named distance like "50 miler" / "100k" / "44 miles" — do NOT guess a bucket; set goal_distance_mi (in miles) and leave goal_distance alone. The boundary cuts both ways: anything SHORTER than a 5K — "a mile" (goal_distance_mi: 1), "1500m" (≈ 0.93), "800m" (≈ 0.5) — is also not a bucket. Never map a stated distance to the nearest bucket in either direction.',
   '- goal_type: "race", "general_fitness".',
   '- injury_status: "none", "active", "monitoring", "past", "unknown".',
   '- injury_detail.status: "active", "monitoring", "past".',
@@ -315,8 +315,9 @@ export function summarizeState(state: V3OnboardingState): string {
     ? `A confirm is pending for ${pending.slot} = ${JSON.stringify(pending.value)}. If the athlete affirms it ("yes", "looks right", "yep"), emit a fill for ${pending.slot} with provenance "stated" to resolve it. If they correct it, emit the corrected value.`
     : null;
 
-  // An out-of-catalog goal is awaiting consent to the marathon-proxy. A chip tap
-  // resolves it in code; this covers a typed reply. (V3-W8.)
+  // An out-of-catalog goal is awaiting consent to its proxy (since V4-W4 only the
+  // short side reaches here — the 5k proxy; beyond-50k goals off-ramp instead). A
+  // chip tap resolves it in code; this covers a typed reply. (V3-W8.)
   const ooc = state.out_of_catalog;
   const oocLine =
     ooc?.consent === 'pending'

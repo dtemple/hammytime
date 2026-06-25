@@ -56,15 +56,14 @@ import {
 import {
   acceptPocketAndAdvance,
   applyStatedDistance,
+  applyUltraOffRamp,
   applyVolumeGoal,
   declinePocket,
   formatShortTarget,
-  pocketBody,
-  POCKET_CHIPS,
   REFLECTION_POCKET_CHIPS,
   reconcilePocket,
-  setPocket,
   supersedePocket,
+  ultraOffRampBody,
   volumeBoundaryBody,
   VOLUME_REDIRECT_CHIPS,
 } from './pocket';
@@ -399,7 +398,9 @@ async function runTurn({
     } else if (result.output.goal_distance_mi != null && !resolved.overridden) {
       const sd = applyStatedDistance(working, result.output.goal_distance_mi, text);
       working = sd.state;
-      if (sd.pocket) {
+      // Set when the turn became a pocket offer (short side) OR the beyond-50k
+      // off-ramp (long side) — both own the message and read under the mirror lead.
+      if (sd.message) {
         message = sd.message;
         chips = sd.chips;
         pocketOfferOwnsMessage = true;
@@ -587,19 +588,14 @@ async function resolveRace(
     const dateStr = date ?? 'date still TBD';
     const derived = f.distance_mi != null ? deriveBucketFromMiles(f.distance_mi) : null;
 
-    // Out of catalog (e.g. Western States, 100 mi): the consent turn doubles as the
-    // race confirm, so name + date land `stated`; a `yes` takes the proxy.
+    // Beyond the 50k (e.g. Western States, 100 mi): the catalog tops at the 50k, so
+    // there's no proxy plan. Acknowledge the race plainly and ask for a shorter event
+    // to build around; the race name rides to the intents for the coach (V4-W4).
     if (f.distance_mi != null && derived === null) {
-      const slots: SlotState = {
-        ...state.slots,
-        goal_type: state.slots.goal_type ?? mkSlot('race', 'inferred', true),
-        goal_race: mkSlot(f.canonical_name, 'stated', true),
-        goal_date: date ? mkSlot(date, 'stated', true) : state.slots.goal_date,
-      };
       return {
-        state: setPocket({ ...state, slots }, f.canonical_name, f.distance_mi),
-        message: `Found it — ${f.canonical_name}, ${dateStr}. Heads up though: ${pocketBody(f.distance_mi)}`,
-        chips: POCKET_CHIPS,
+        state: applyUltraOffRamp(state, f.canonical_name),
+        message: `Found it — ${f.canonical_name}, ${dateStr}. ${ultraOffRampBody(f.distance_mi)}`,
+        chips: [],
       };
     }
 

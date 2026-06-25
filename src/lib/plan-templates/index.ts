@@ -25,8 +25,9 @@ import { halfFoundation } from './templates/half-foundation';
 import { halfDevelopment } from './templates/half-development';
 import { shortRace } from './templates/short-race';
 import { baseMaintenance } from './templates/base-maintenance';
+import { ultra50k } from './templates/ultra-50k';
 
-/** All six authored templates by id. */
+/** All authored templates by id. */
 export const TEMPLATES: Record<TemplateId, PlanTemplate> = {
   'marathon-finish': marathonFinish,
   'marathon-performance': marathonPerformance,
@@ -34,6 +35,7 @@ export const TEMPLATES: Record<TemplateId, PlanTemplate> = {
   'half-development': halfDevelopment,
   'short-race': shortRace,
   'base-maintenance': baseMaintenance,
+  'ultra-50k': ultra50k,
 };
 
 export function getTemplate(id: TemplateId): PlanTemplate {

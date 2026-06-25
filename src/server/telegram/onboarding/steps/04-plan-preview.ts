@@ -20,6 +20,7 @@ const DISTANCE_LABEL: Record<GoalDistance, string> = {
   '10k': 'a 10K',
   half: 'a half marathon',
   marathon: 'a marathon',
+  '50k': 'a 50K',
   keep_fit: 'general fitness',
 };
 
