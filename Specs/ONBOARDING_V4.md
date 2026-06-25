@@ -492,8 +492,16 @@ framing, the off-ramp/pause state, and adopting U1.
     (mid-month ISO — not a non-ISO placeholder, which the `date` columns reject); the recap
     reads `event_kind` ("your run"). The §9 adventure fixtures landed. The worker race-week
     "your run vs your race" copy stays deferred (cosmetic, a `fly deploy`).
-- **V4-W5 · Web positioning copy · S.** Home page H1/lede/how-it-works, signup
-  headline (§8). David wordsmiths; web-only (Vercel push).
+- **V4-W5 · Web positioning copy · S.** ✅ **BUILT** (2026-06-25, v0.7.49).
+  Home page (`src/app/page.tsx`): H1 first beat `Your race goals.` → `Your event.`;
+  lede dropped "race" (`a training companion`); the how-it-works `plan` row →
+  `Creates a training plan for your race or adventure.`. **Signup headline left
+  unchanged** (`Let's get you running.`) — David's call, a conscious DoD deviation.
+  The `plan` row carries `race or adventure` but **drops "free"** (pricing stays in
+  the hero-note — no forever-free promise). The full load-bearing phrase ("…with a
+  date") lands on no web surface by choice; the bot orientation + Opener 1 do the
+  no-event self-selection (verified event-scoped, left untouched). Web-only (Vercel
+  push), no migration, build green + preview-verified.
 - **V4-W6 · Eval harness + fixtures · M.** §9. The V3-W5 harness with the v4
   fixture/assertion deltas. Launch gate before opening to more users.
 - **Retire / shelve · S.** Mark `GENERAL_FITNESS.md` shelved; note GF-W1/W2
