@@ -127,16 +127,16 @@ function isNoEventGoal(state: V3OnboardingState): boolean {
  *  alert David, and return the state stamped off_ramp_offered (phase stays
  *  'intake' so naming a goal next flows back through the normal engine; coming
  *  back still event-less reaches finishOnboarding's beat 2 — ack + check-back).
- *  Two entry points call it: the generate gate (a general_fitness athlete reaching
- *  the end, who then sends a bare OFF_RAMP_OFFER) and the volume-goal boundary (a
- *  stated rate with no event, routed here mid-intake, whose send composes the
- *  owed reflection mirror onto the offer). The caller owns the save + send. */
-async function offerOffRamp(
+ *  The caller owns the save + send (it doesn't send here — hence "enter", not
+ *  "offer"): the generate gate sends a bare OFF_RAMP_OFFER, the volume-goal
+ *  boundary composes the owed reflection mirror onto it. */
+async function enterOffRamp(
   athleteId: string,
   state: V3OnboardingState,
 ): Promise<V3OnboardingState> {
-  await enterDormant(athleteId, null);
-  await alertOffRamp(athleteId);
+  // Independent — the dormant write and the David alert share no data, and the
+  // alert is fire-and-forget (it swallows its own errors), so run them together.
+  await Promise.all([enterDormant(athleteId, null), alertOffRamp(athleteId)]);
   return { ...state, phase: 'intake', off_ramp_offered: true };
 }
 
@@ -441,7 +441,7 @@ async function runTurn({
       working = vg.state;
       if (vg.boundary) {
         volumeBoundaryFired = true;
-        working = await offerOffRamp(athleteId, {
+        working = await enterOffRamp(athleteId, {
           ...working,
           // The no-event signal: marks isNoEventGoal so a later event-less generate
           // reaches beat 2 (ack + check-back). A named event next overrides it (a
@@ -451,9 +451,8 @@ async function runTurn({
         });
         message = OFF_RAMP_OFFER;
         chips = [];
-        // The offer carries its own "I'll be straight with you:" opener, so it
-        // does NOT take the bare-offer "One thing to be straight about:" lead — the
-        // owed mirror just leads it on its own line (composeReflection, no prefix).
+        // Leave the boundary lead off: OFF_RAMP_OFFER brings its own "I'll be
+        // straight with you:" opener, so the mirror just leads it on its own line.
         pocketOfferOwnsMessage = false;
       }
     }
@@ -702,7 +701,7 @@ async function finishOnboarding(
   // set → acknowledge + capture a check-back. The athlete is dormant either way.
   if (isNoEventGoal(state)) {
     if (!state.off_ramp_offered) {
-      const s = await offerOffRamp(athleteId, state);
+      const s = await enterOffRamp(athleteId, state);
       await saveV3State(athleteId, s);
       await sendV3(athleteId, chatId, OFF_RAMP_OFFER);
       return;

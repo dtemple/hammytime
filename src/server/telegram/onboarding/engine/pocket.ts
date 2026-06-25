@@ -285,7 +285,7 @@ export function supersedePocket(state: V3OnboardingState): V3OnboardingState {
 // ---------------------------------------------------------------------------
 // "100 miles a month" is a no-event goal — a rate with no day to taper toward.
 // The catalog can't hold it and v4 (§3/§9) doesn't proxy it: when it's the
-// headline goal the router routes it to the no-event off-ramp (offerOffRamp),
+// headline goal the router routes it to the no-event off-ramp (enterOffRamp),
 // not a "keep me fit" path. This module only normalizes the target and decides
 // whether the boundary fires; the number rides as an intent (context, not a
 // commitment) so the recap and the daily coach still see it in the profile.
