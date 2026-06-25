@@ -77,9 +77,18 @@ flat regardless of history length. Pass it into `computeReadiness` from
   eventual-consistency hole: a backfilled/late-synced activity, or any run before
   the log existed, is missed. A fresh rollup over the window each hydrate is
   simpler and self-healing.
-- *Use the Kailo/Strava MCP `context_*` tools.* Not available in the worker (Bash
-  denied, no MCP catalog; Strava is pre-fetched by design). The rollup lives in
-  the same pre-fetch path as everything else.
+- *Use an MCP — the Kailo `context_*` tools, or Strava's official MCP connector
+  (launched 2026, `support.strava.com/.../15401531`).* Doesn't fit. Strava's MCP
+  is explicitly **consumer-facing, "not for application backends"**: per-user
+  **interactive OAuth** inside an AI client (Claude.ai/Cowork/Claude Code — no
+  human in a headless cron worker to click "Connect"), and **subscriber-only**
+  (we require only the free `activity:read_all` scope, not Strava premium for
+  every friend). It's also redundant — we already hold each athlete's OAuth token
+  and call the REST API server-side — and it would reopen the §4 scope lock (no
+  MCP catalog in the worker; Bash denied; Strava pre-fetched so the agent never
+  makes live calls). The rollup lives in the same pre-fetch path as everything
+  else; the deterministic per-week reduction belongs in code, not an LLM-driven
+  MCP query.
 
 **Cost/rate-limit note.** The rollup is extra Strava API calls per hydrate
 (paginated over the build window). At friends scale (5–25 athletes, one daily run
