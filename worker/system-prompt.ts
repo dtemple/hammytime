@@ -255,6 +255,31 @@ function dailyStatusLead(mode: CoachMode, profile: LoadedData['trainingProfile']
   );
 }
 
+// The "Protect the goal-race buildup" section — the floor under the safety caps.
+// '' for a no_race athlete (no event to condition for); the full section for
+// every race-ish mode (committed/intended/unknown). Same empty-substitution
+// pattern as {{ease_in_context}}. The numbers it relies on live in the readiness
+// signal (plan_drift.md, src/lib/plan-drift.ts), not here.
+export function goalBuildupGuidance(mode: CoachMode): string {
+  if (mode === 'no_race') return '';
+  return `## Protect the goal-race buildup — the floor under the caps
+
+The safety caps above are a ceiling: they stop a change loading too much, too fast. This is the floor — the conditioning the athlete needs to reach the start line ready and get through the race without breaking down.
+
+Readiness for the race is built by the long-run progression and the peak long runs, plus the weekly volume under them. It comes from the whole arc, not any single week. One long run moved or cut for a sore knee or a busy week costs nothing. The same long run moved or cut week after week is how someone reaches race day underprepared — and underprepared means a harder race and higher injury risk on the day, not just a slower time. Each change is reasonable on its own. The cost is in the sum, and nothing flags the sum unless you look.
+
+So when a change drops or shrinks a long run or a key quality session — or when you've already accommodated more than once in the last couple of weeks — zoom out before you settle it:
+
+- Read the \`# Race readiness\` section at the top of \`plan_drift.md\`: the verdict (ON TRACK / WATCH / AT RISK), the long-run spine against the original, the build weeks left before the taper, and how many long runs have been cut.
+- Open the full \`marathon_training_plan.json\` and look at what the weeks remaining can still build, given how fast the long run and volume are allowed to climb.
+
+If the buildup is on track, make the change and move on — don't invent worry. If it's slipping (WATCH), make the change but say plainly where it leaves them and what the coming weeks need to look like to get back on the line. If it's AT RISK — the runway can no longer rebuild what's been lost — don't just accommodate again. Put the real choice to the athlete: hold the date and run a more conservative race (finish over a time goal, or run/walk), move the race to a later date, or change the goal. It's their decision; surface it with the tradeoff and let them make it. Quietly moving the next session, and the one after, is the one thing not to do.
+
+This is not a daily drumbeat. On a normal weekday, coach the day. This zoom-out fires on a change that touches the spine, on a repeated accommodation, and in the Sunday review.
+
+`;
+}
+
 // The through-line paragraph after the daily-run list — '' on every mode except
 // no_race (GF-W2). Same empty-substitution pattern as {{ease_in_context}}.
 function dailyNarrativeGuidance(mode: CoachMode): string {
@@ -342,6 +367,7 @@ export async function renderSystemPrompt(
     known_gaps_examples: knownGapsExamples(mode),
     daily_status_lead: dailyStatusLead(mode, data.trainingProfile),
     daily_narrative_guidance: dailyNarrativeGuidance(mode),
+    goal_buildup_guidance: goalBuildupGuidance(mode),
     asthma_line: data.athlete.asthma ? '- Mild asthma — watch cold/dry/high-effort conditions' : '',
     injury_history: injuryHistory(data.injuries),
     safety_caps: safetyCapsBlock(DRAFT_SAFETY_CAPS, data.goalRace?.distance_mi ?? null),
@@ -374,7 +400,14 @@ export function buildPrompt(
   const transcript = formatHistory(history);
 
   if (source === 'daily_checkin') {
-    const base = `It's the morning of ${weekday}, ${date}. Write today's coaching message: read the Strava file and the athlete's memory files first, then send a training-focused note for today.`;
+    // Sunday is the weekly big-picture beat, not a regular daily note. It points
+    // at the "What a Sunday review looks like" section and the macro sources the
+    // weekday notes deliberately skip (plan_drift.md's readiness headline + the
+    // full plan). The athlete comes to expect it as their "Sunday review".
+    const base =
+      weekday === 'Sunday'
+        ? `It's the morning of Sunday, ${date}. This is the weekly Sunday review, not a regular daily note — write it per the "What a Sunday review looks like" section of your instructions. Read strava_recent.json, plan_drift.md (its "# Race readiness" headline), the full marathon_training_plan.json, and the recent checkin_log.md first, then give the week-behind / big-picture / week-ahead review and end on a question that sets up the week.`
+        : `It's the morning of ${weekday}, ${date}. Write today's coaching message: read the Strava file and the athlete's memory files first, then send a training-focused note for today.`;
     return transcript ? `${base}\n\nRecent conversation, oldest first:\n${transcript}` : base;
   }
 

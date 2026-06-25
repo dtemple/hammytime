@@ -14,7 +14,13 @@ import { copyFile, mkdir, readFile, readdir, rm, writeFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { supabaseAdmin } from '@/lib/db';
-import { computeDrift, renderDriftSummary, type PlanDrift } from '@/lib/plan-drift';
+import {
+  computeDrift,
+  computeReadiness,
+  renderDriftSummary,
+  renderReadiness,
+  type PlanDrift,
+} from '@/lib/plan-drift';
 import { PlanSchema, type Plan } from '@/lib/plan-schema';
 import { ATHLETE_ROOT, STRAVA_LOOKBACK_DAYS } from './config';
 import { localDate } from './dates';
@@ -161,16 +167,22 @@ export async function hydrate(
   const workingPlan =
     refs?.currentJson != null ? (PlanSchema.safeParse(refs.currentJson).data ?? null) : null;
 
-  // Drift summary (read-only input) — how far the working plan has moved from
-  // the original baseline. The coach reads this and raises material drift.
-  await writeFile(path.join(dir, 'plan_drift.md'), buildDriftMarkdown(refs, workingPlan), 'utf8');
+  // Athlete-local "today" — shared by the drift/readiness summary (the readiness
+  // verdict counts weeks-to-race from it) and the current-block view below.
+  const today = localDate(new Date(), timezone);
+
+  // Drift + race-readiness summary (read-only input). The drift half is how far
+  // the working plan has moved from the original baseline; the readiness half is
+  // the macro verdict on whether the goal-race buildup is still on track. The
+  // coach reads this on any change that touches the long run and every Sunday.
+  await writeFile(path.join(dir, 'plan_drift.md'), buildDriftMarkdown(refs, workingPlan, today), 'utf8');
 
   // Current-block plan view (read-only input) — a future-weighted slice of the
   // full plan the coach reads for routine work instead of loading the whole
   // ~14k-token file every run (v0.7.41). Excluded from syncBack. A malformed
   // plan degrades to no view (the coach falls back to the full file).
   if (workingPlan) {
-    const view = buildCurrentBlock(workingPlan, localDate(new Date(), timezone));
+    const view = buildCurrentBlock(workingPlan, today);
     await writeFile(path.join(dir, 'plan_view_readonly.json'), compactJson(view), 'utf8');
   }
 
@@ -285,9 +297,13 @@ const NO_DRIFT: PlanDrift = {
 
 // `working` is the already-validated working plan (parsed once in hydrate); only
 // the baseline is parsed here. A missing/invalid plan on either side → no drift.
-function buildDriftMarkdown(refs: PlanRefs | null, working: Plan | null): string {
+// The readiness headline is prepended when there's a dated, upcoming goal race
+// with a long-run spine to read (computeReadiness returns null otherwise).
+function buildDriftMarkdown(refs: PlanRefs | null, working: Plan | null, today: string): string {
   if (!working || !refs?.baselineJson) return renderDriftSummary(NO_DRIFT);
   const baseline = PlanSchema.safeParse(refs.baselineJson);
   if (!baseline.success) return renderDriftSummary(NO_DRIFT);
-  return renderDriftSummary(computeDrift(baseline.data, working));
+  const drift = renderDriftSummary(computeDrift(baseline.data, working));
+  const readiness = computeReadiness(baseline.data, working, today);
+  return readiness ? `${renderReadiness(readiness)}\n${drift}` : drift;
 }

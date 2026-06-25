@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
@@ -6,6 +6,7 @@ import {
   safetyCapsBlock,
   renderSystemPrompt,
   easeInContext,
+  goalBuildupGuidance,
   planExtensionContext,
   pendingProposalContext,
 } from '../system-prompt';
@@ -109,6 +110,49 @@ describe('buildPrompt — post_activity', () => {
     );
     expect(prompt).toContain('Recent conversation, oldest first:');
     expect(prompt).toContain('Athlete: thanks coach');
+  });
+});
+
+describe('buildPrompt — daily check-in: Sunday review vs weekday note', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('Sunday → the weekly review trigger, pointed at the section + readiness sources', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-28T19:00:00Z')); // Sunday, midday Pacific
+    const p = buildPrompt('daily_checkin', TZ);
+    expect(p).toContain('weekly Sunday review');
+    expect(p).toContain('What a Sunday review looks like');
+    expect(p).toContain('Race readiness'); // the macro signal it must read
+    expect(p).toContain('marathon_training_plan.json');
+  });
+
+  it('a weekday → the standard daily note, not the Sunday review', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-24T19:00:00Z')); // Wednesday, midday Pacific
+    const p = buildPrompt('daily_checkin', TZ);
+    expect(p).toContain("Write today's coaching message");
+    expect(p).not.toContain('Sunday review');
+  });
+});
+
+describe('goalBuildupGuidance — the floor under the caps (mode-gated)', () => {
+  it('empty for a no-race athlete (no event to condition for)', () => {
+    expect(goalBuildupGuidance('no_race')).toBe('');
+  });
+
+  it('present for every race-ish mode, carries the fork, no residual placeholders', () => {
+    for (const mode of ['committed', 'intended', 'unknown'] as const) {
+      const out = goalBuildupGuidance(mode);
+      expect(out).toContain('Protect the goal-race buildup');
+      expect(out).toContain('AT RISK');
+      expect(out).toContain('plan_drift.md');
+      expect(out).not.toContain('{{');
+    }
+  });
+
+  it('coach.md carries the {{goal_buildup_guidance}} placeholder', () => {
+    const md = readFileSync(join(process.cwd(), 'worker/prompts/coach.md'), 'utf8');
+    expect(md).toContain('{{goal_buildup_guidance}}');
   });
 });
 
@@ -278,7 +322,9 @@ describe('renderSystemPrompt — three-way goal branch (V3-W7)', () => {
         "Today's status in a sentence or two — on track, minor concern, or off track, read off recent Strava and the plan.",
       );
       expect(out).not.toContain('consistency story');
-      expect(out).not.toContain('North-star goal');
+      // The no_race daily-narrative block is absent. (Use a phrase unique to that
+      // block — "North-star goal" now also lives in the always-on Sunday review.)
+      expect(out).not.toContain('through-line of its own');
     }
   });
 
