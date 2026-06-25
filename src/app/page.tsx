@@ -87,6 +87,13 @@ export default function Home() {
 
         <section className="ht-founder-section">
           <AboutNote />
+          <div className="ht-disclaimer">
+            <div className="ht-disclaimer-label">Disclaimer</div>
+            <p>
+              Daybreak is a side project &mdash; and it&rsquo;s going to have bugs and make
+              mistakes. Like with anything AI, use your own judgement.
+            </p>
+          </div>
         </section>
       </main>
 

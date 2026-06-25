@@ -91,13 +91,6 @@ export default function AboutNote() {
                 <p>I hope you like it.</p>
               </div>
               <div className="ht-modal-sign">David</div>
-              <div className="ht-modal-disclaimer">
-                <div className="ht-modal-disclaimer-label">Disclaimer</div>
-                <p>
-                  Daybreak is a side project &mdash; and it&rsquo;s going to have bugs
-                  and make mistakes. Like with anything AI, use your own judgement.
-                </p>
-              </div>
             </div>
             <div className="ht-modal-photo">
               <Image

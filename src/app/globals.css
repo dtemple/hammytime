@@ -493,14 +493,14 @@ body {
   margin-top: 26px;
 }
 
-.ht-modal-disclaimer {
-  margin-top: 26px;
+.ht-disclaimer {
+  margin-top: 24px;
   background: var(--bubble);
   border: 1px solid var(--hair);
   border-radius: 14px;
   padding: 18px 20px;
 }
-.ht-modal-disclaimer-label {
+.ht-disclaimer-label {
   font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   letter-spacing: 0.08em;
@@ -508,7 +508,7 @@ body {
   color: var(--ink-3);
   margin-bottom: 8px;
 }
-.ht-modal-disclaimer p {
+.ht-disclaimer p {
   margin: 0;
   font-size: 14.5px;
   line-height: 1.6;
