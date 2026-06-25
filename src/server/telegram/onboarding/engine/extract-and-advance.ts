@@ -271,6 +271,7 @@ const FLOW_RULES = [
   'A periodic mileage target ("100 miles a month", "20 a week") is not a plan you can build — emit it as volume_goal and never promise the schedule will hit it; the app states the boundary. If the athlete pushes back on that boundary, hold it plainly and re-offer the two paths: general fitness, or training for a race.',
   "After the goal is settled, frame the remaining slot questions as quick logistics — scheduling details so the plan can land on a calendar — never as checking whether you understood. A form feels fine when it's labeled a form.",
   'On your very first question (conversation phase "orientation"), end the message with exactly this sentence so the athlete knows the chips are optional: "Tap a button or type an answer if it\'s not in the list." Only on that first question — never repeat it.',
+  'Daybreak trains athletes for a dated event — a race, or a personal goal with a date. Never offer a "staying fit" / "general fitness" / "keep me fit" chip or present that as a coequal option: it reads as a supported path and it is not. A no-event athlete reaches the off-ramp by saying so in their own words, which you still accept — you just do not advertise it as a button.',
 ].join(' ');
 
 // The one-time reflection beat (R2, ONBOARDING_REFLECTION §2.1): before any slot

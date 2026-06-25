@@ -561,7 +561,6 @@ describe('applyChipPolicy', () => {
       '10k',
       'half',
       'marathon',
-      'keep_fit',
     ]);
   });
 
@@ -574,7 +573,12 @@ describe('applyChipPolicy', () => {
 
   it('overrides whatever chips the model proposed for a closed slot', () => {
     const r = applyChipPolicy('ask', 'goal_distance', [{ label: 'X', value: 'x' }]);
-    expect(r.map((c) => c.label)).toEqual(['5K', '10K', 'Half', 'Marathon', 'Staying fit']);
+    expect(r.map((c) => c.label)).toEqual(['5K', '10K', 'Half', 'Marathon']);
+  });
+
+  it('forces the event-led goal_type opener (no staying-fit tap)', () => {
+    const r = applyChipPolicy('ask', 'goal_type', [{ label: 'Just staying fit', value: 'keep_fit' }]);
+    expect(r.map((c) => c.label)).toEqual(['A race', 'Personal goal with a date']);
   });
 
   it('leaves an open-slot ask with the model chips (no forced set)', () => {
@@ -595,7 +599,7 @@ describe('enforceGuardrails — chip policy wiring', () => {
       stateWith({}),
       out({ next_action: 'ask', asked_slot: 'goal_distance' }),
     );
-    expect(r.chips.map((c) => c.value)).toEqual(['5k', '10k', 'half', 'marathon', 'keep_fit']);
+    expect(r.chips.map((c) => c.value)).toEqual(['5k', '10k', 'half', 'marathon']);
   });
 
   it('an injury ask ships the Nothing/Skip chips', () => {
@@ -627,7 +631,7 @@ describe('enforceGuardrails — chip policy wiring', () => {
     delete slots.goal_distance;
     const r = enforceGuardrails(stateWith(slots), out({ next_action: 'generate' }));
     expect(r.action).toBe('ask');
-    expect(r.chips.map((c) => c.value)).toEqual(['5k', '10k', 'half', 'marathon', 'keep_fit']);
+    expect(r.chips.map((c) => c.value)).toEqual(['5k', '10k', 'half', 'marathon']);
   });
 
   it('a generate override forced to ask a missing experience ships tappable tier chips', () => {
@@ -668,8 +672,16 @@ describe('chip registry — round-trip safety', () => {
     for (const c of all) expect(c.value.length).toBeLessThanOrEqual(60);
   });
 
-  it('uses coercer-safe values for enum slots', () => {
+  // The opener (goal_type) chips are model-interpreted free text, not enum
+  // literals — both taps replay through extract_and_advance like a typed answer
+  // (there is no "adventure" goal_type literal; the adventure tap rides the
+  // event_kind path). So coercer-safety is the contract only for the enum-literal
+  // sets, where the model may echo the value straight back to the coercer.
+  const MODEL_INTERPRETED: ReadonlySet<SlotKey> = new Set<SlotKey>(['goal_type']);
+
+  it('uses coercer-safe values for enum-literal slots', () => {
     for (const [slot, chips] of Object.entries(SLOT_CHIPS)) {
+      if (MODEL_INTERPRETED.has(slot as SlotKey)) continue;
       for (const c of chips ?? []) {
         expect(coerceFill(slot as SlotKey, c.value)).toBe(c.value);
       }

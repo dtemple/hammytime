@@ -16,23 +16,31 @@
 import type { Chip } from '../engine/extract-and-advance';
 import type { SlotKey } from './schema';
 
-/** Canonical tap sets keyed by the slot being asked. W4 ships the load-bearing
- *  pair: goal_distance (the closed list, including the non-race "Staying fit"
- *  escape) and the injury beat
+/** Canonical tap sets keyed by the slot being asked. The load-bearing sets:
+ *  goal_type (the v4 event-led opener — a race or a dated personal goal, never a
+ *  stay-fit tap), goal_distance (the closed distance list), and the injury beat
  *  (INJURY_CHIPS, below). The Strava-inferred slots (experience / days /
  *  long-run) are confirmed via one batch yes/no in Opener 2; their option chips
  *  only matter on a rare "Fix it" re-ask and want multi-column rendering, so
  *  they're deferred (see the W4 plan's flagged follow-ups). */
 export const SLOT_CHIPS: Partial<Record<SlotKey, readonly Chip[]>> = {
+  // Onboarding v4 (§4.2 / §8): the opener is event-led. Both taps point at a
+  // dated effort; there is NO "staying fit" chip — Daybreak is built around
+  // training for something, and a no-event athlete self-selects the off-ramp by
+  // typing it (router's no-event off-ramp catches goal_type=general_fitness),
+  // never by tapping an option the product advertises as coequal. Values are
+  // plain text replayed through extract_and_advance: "a race" → goal_type=race;
+  // the adventure tap pushes the model onto the event_kind=adventure path so it
+  // asks for the effort's distance + date.
+  goal_type: [
+    { label: 'A race', value: 'a race' },
+    { label: 'Personal goal with a date', value: 'my own dated goal, not an official race' },
+  ],
   goal_distance: [
     { label: '5K', value: '5k' },
     { label: '10K', value: '10k' },
     { label: 'Half', value: 'half' },
     { label: 'Marathon', value: 'marathon' },
-    // Always offer the non-race path — a stay-fit athlete needs a tap that isn't
-    // a distance. `keep_fit` round-trips through coerceFill and the model reads it
-    // as goal_type=general_fitness (the base-maintenance plan).
-    { label: 'Staying fit', value: 'keep_fit' },
   ],
   // The enum literal is the chip value so it round-trips cleanly through
   // coerceFill; this also guarantees a tappable escape if the model ever fails

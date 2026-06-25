@@ -234,7 +234,7 @@ export function declinePocket(state: V3OnboardingState): {
     },
     message: redo
       ? "My read was off, then — tell me again what you're going for, in a line or two, and I'll take another swing."
-      : 'No problem — want to aim at something I can build a full plan for? Anything from a 5K to a marathon, or just staying fit.',
+      : 'No problem — want to aim at something I can build a full plan for? A race, or any dated effort from a 5K to a marathon.',
     chips: [],
   };
 }
