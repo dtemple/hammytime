@@ -64,8 +64,6 @@ import {
   reconcilePocket,
   supersedePocket,
   ultraOffRampBody,
-  volumeBoundaryBody,
-  VOLUME_REDIRECT_CHIPS,
 } from './pocket';
 import { withTyping } from './typing';
 
@@ -123,6 +121,23 @@ const CHECK_BACK_MONTHS: Record<string, number> = {
  *  fit" with no single dated effort). Race + intended both stay first-class. */
 function isNoEventGoal(state: V3OnboardingState): boolean {
   return state.slots.goal_type?.value === 'general_fitness';
+}
+
+/** Beat 1 of the no-event off-ramp (§4.3) — the side effects only: go dormant,
+ *  alert David, and return the state stamped off_ramp_offered (phase stays
+ *  'intake' so naming a goal next flows back through the normal engine; coming
+ *  back still event-less reaches finishOnboarding's beat 2 — ack + check-back).
+ *  Two entry points call it: the generate gate (a general_fitness athlete reaching
+ *  the end, who then sends a bare OFF_RAMP_OFFER) and the volume-goal boundary (a
+ *  stated rate with no event, routed here mid-intake, whose send composes the
+ *  owed reflection mirror onto the offer). The caller owns the save + send. */
+async function offerOffRamp(
+  athleteId: string,
+  state: V3OnboardingState,
+): Promise<V3OnboardingState> {
+  await enterDormant(athleteId, null);
+  await alertOffRamp(athleteId);
+  return { ...state, phase: 'intake', off_ramp_offered: true };
 }
 
 /** ISO timestamp `months` out from now — the one-shot check-back nudge date. */
@@ -413,21 +428,33 @@ async function runTurn({
       }
     }
 
-    // A stated periodic volume goal ("100 miles a month") — ULTRA_SUPPORT §6 is
-    // deferred, so the engine doesn't build toward it. The clause always rides to
-    // the intents; when it's the headline goal (newly stated, no race in play),
-    // this turn states the boundary plainly and redirects to the two things the
-    // engine CAN do. Deliberately not an `else` branch: a volume target alongside
-    // a race turn still demotes to an intent without touching that turn's message.
+    // A stated periodic volume goal ("100 miles a month") is a no-event goal — a
+    // rate with no day to taper toward. v4 (§3/§9) routes it to the same off-ramp
+    // as any event-less signup, NOT a "keep me fit" path. The clause always rides
+    // to the intents; when it's the headline goal (newly stated, no race in play),
+    // this turn marks the athlete general_fitness, goes dormant, and fires the
+    // honest off-ramp offer. Deliberately not an `else` branch: a volume target
+    // alongside a race turn still demotes to an intent without touching that turn.
     let volumeBoundaryFired = false;
     if (result.output.volume_goal && !resolved.overridden) {
       const vg = applyVolumeGoal(working, result.output.volume_goal, result.output);
       working = vg.state;
       if (vg.boundary) {
         volumeBoundaryFired = true;
-        message = volumeBoundaryBody(result.output.volume_goal.period);
-        chips = VOLUME_REDIRECT_CHIPS;
-        pocketOfferOwnsMessage = true; // the boundary reads under the mirror's lead
+        working = await offerOffRamp(athleteId, {
+          ...working,
+          // The no-event signal: marks isNoEventGoal so a later event-less generate
+          // reaches beat 2 (ack + check-back). A named event next overrides it (a
+          // changed-value goal_type fill wins the merge) and exitDormant runs at
+          // commit — the off-ramp self-heals, same as the typed stay-fit path.
+          slots: { ...working.slots, goal_type: mkSlot('general_fitness', 'stated', true) },
+        });
+        message = OFF_RAMP_OFFER;
+        chips = [];
+        // The offer carries its own "I'll be straight with you:" opener, so it
+        // does NOT take the bare-offer "One thing to be straight about:" lead — the
+        // owed mirror just leads it on its own line (composeReflection, no prefix).
+        pocketOfferOwnsMessage = false;
       }
     }
 
@@ -675,10 +702,9 @@ async function finishOnboarding(
   // set → acknowledge + capture a check-back. The athlete is dormant either way.
   if (isNoEventGoal(state)) {
     if (!state.off_ramp_offered) {
-      await enterDormant(athleteId, null);
-      await saveV3State(athleteId, { ...state, phase: 'intake', off_ramp_offered: true });
+      const s = await offerOffRamp(athleteId, state);
+      await saveV3State(athleteId, s);
       await sendV3(athleteId, chatId, OFF_RAMP_OFFER);
-      await alertOffRamp(athleteId);
       return;
     }
     await saveV3State(athleteId, { ...state, phase: 'off_ramp' });

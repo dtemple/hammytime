@@ -13,8 +13,6 @@ import {
   setPocket,
   supersedePocket,
   ultraOffRampBody,
-  volumeBoundaryBody,
-  VOLUME_REDIRECT_CHIPS,
 } from '../pocket';
 import { initialV3State, type V3OnboardingState } from '../../slots/slot-state';
 import type { SlotState } from '../../slots/schema';
@@ -406,26 +404,6 @@ describe('applyVolumeGoal', () => {
       const r = applyVolumeGoal(stateWith({}), { miles: 60, period: 'month' }, o);
       expect(r.boundary).toBe(false);
       expect(r.state.intents).toEqual(['60 miles a month']);
-    }
-  });
-});
-
-describe('volumeBoundaryBody + VOLUME_REDIRECT_CHIPS', () => {
-  it('states the boundary plainly and offers the two paths', () => {
-    const monthly = volumeBoundaryBody('month');
-    expect(monthly).toContain(
-      "A monthly mileage target isn't something I can coach you toward yet",
-    );
-    expect(monthly).toContain('keep you generally fit');
-    expect(monthly).toContain('train you for a race');
-    expect(monthly.endsWith('?')).toBe(true);
-    expect(volumeBoundaryBody('week')).toContain('A weekly mileage target');
-  });
-
-  it('redirect chips are plain typed-text values, not consent tokens', () => {
-    expect(VOLUME_REDIRECT_CHIPS.map((c) => c.label)).toEqual(['Keep me fit', 'Train for a race']);
-    for (const c of VOLUME_REDIRECT_CHIPS) {
-      expect(['yes', 'no']).not.toContain(c.value); // never trips the consent fast path
     }
   });
 });

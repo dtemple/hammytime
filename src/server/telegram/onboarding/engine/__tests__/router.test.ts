@@ -1259,7 +1259,7 @@ describe('router — volume-goal boundary (ULTRA_SUPPORT §6 interim)', () => {
     return { ...initialV3State(null), phase: 'intake', slots: {} };
   }
 
-  it('a volume-only ramble gets mirror + boundary + the two redirect chips; the clause rides as an intent', async () => {
+  it('a volume-only ramble gets mirror + the no-event off-ramp; the athlete goes dormant and the clause rides as an intent', async () => {
     loadV3State.mockResolvedValue(freshIntake());
     callExtractAndAdvance.mockResolvedValue({
       output: out({
@@ -1275,15 +1275,21 @@ describe('router — volume-goal boundary (ULTRA_SUPPORT §6 interim)', () => {
     await handleV3Message(ctx(90, 'I wanna run 100 miles every month for the next year'), athlete);
 
     const call = sendMessage.mock.calls.at(-1)!;
+    // The mirror leads, then the off-ramp offer (its own "I'll be straight with you:"
+    // opener — no "keep me fit" path, no redirect chips).
     expect(call[1]).toMatch(/^Here's what I'm hearing/);
-    expect(call[1]).toContain(
-      "One thing to be straight about: a monthly mileage target isn't something I can coach you toward yet",
-    );
-    expect(labels(call)).toEqual(['Keep me fit', 'Train for a race']);
+    expect(call[1]).toContain('Daybreak is built around training for something');
+    expect(call[1]).not.toContain('keep me fit');
+    expect(labels(call)).toEqual([]);
+    expect(enterDormant).toHaveBeenCalledWith('ath-1', null);
+    expect(sendDavidAlert).toHaveBeenCalled();
     const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
     expect(saved.intents).toEqual(['100 miles a month']);
     expect(saved.reflected).toBe(true);
-    expect(saved.out_of_catalog).toBeUndefined(); // no pocket — this is a redirect
+    expect(saved.off_ramp_offered).toBe(true);
+    expect(saved.phase).toBe('intake'); // naming a goal next re-opens the engine
+    expect(saved.slots.goal_type?.value).toBe('general_fitness');
+    expect(saved.out_of_catalog).toBeUndefined();
   });
 
   it('a volume target alongside a race lookup demotes silently — the race turn stands', async () => {
@@ -1347,7 +1353,7 @@ describe('router — volume-goal boundary (ULTRA_SUPPORT §6 interim)', () => {
     callExtractAndAdvance.mockResolvedValue({
       output: out({
         next_action: 'ask',
-        message: 'I hear you — the two paths are still general fitness or a race.',
+        message: 'I hear you. Anything with a date on it you might point at?',
         volume_goal: { miles: 100, period: 'month' },
       }),
       inputTokens: 1,
@@ -1357,7 +1363,10 @@ describe('router — volume-goal boundary (ULTRA_SUPPORT §6 interim)', () => {
     await handleV3Message(ctx(93, 'no really, 100 miles a month'), athlete);
 
     const call = sendMessage.mock.calls.at(-1)!;
-    expect(call[1]).not.toContain("isn't something I can coach you toward");
+    // Already off-ramped once (clause in intents) — the boundary doesn't re-fire, so
+    // the model's turn passes through and the athlete is not re-dormanted.
+    expect(call[1]).toBe('I hear you. Anything with a date on it you might point at?');
+    expect(enterDormant).not.toHaveBeenCalled();
     const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
     expect(saved.intents).toEqual(['100 miles a month']); // no dupe
   });
@@ -1388,9 +1397,12 @@ describe('router — volume-goal boundary (ULTRA_SUPPORT §6 interim)', () => {
 
     await handleV3Message(ctx(94, '100 miles a month, build it'), athlete);
 
+    // The boundary still blocks the same-turn generate — now it off-ramps instead
+    // of building a keep_fit plan.
     expect(commitSlots).not.toHaveBeenCalled();
+    expect(enterDormant).toHaveBeenCalledWith('ath-1', null);
     const call = sendMessage.mock.calls.at(-1)!;
-    expect(call[1]).toContain("isn't something I can coach you toward yet");
+    expect(call[1]).toContain('Daybreak is built around training for something');
   });
 });
 
