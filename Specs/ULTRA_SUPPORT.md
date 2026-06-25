@@ -8,7 +8,7 @@ _**U1 catalog slice LANDED (V4-W4, 2026-06-24, v0.7.46 — the authoritative rec
 - _**Lean enum — only `50k` is a real bucket.** `50mi/100k/100mi` are NOT added to the enum (a total-record `SELECTION_TABLE`/caps would force them to map to a template that doesn't exist until U2; the §3.2 ultra fallback rows never fire because 50mi+ always carries a concrete distance → the pace envelope). So §2.2/§3.1's "four granular buckets" is **`50k`-only** in v1; the `50mi/100k/100mi` archetypes stay conceptual until U2. `deriveBucketFromMiles` tops at the 50k band (28–40mi); the §3.2 envelope + a single `50k` fallback row shipped; the `ultra-50k` template (§3.4) shipped with `time_goal` suppressed and DRAFT caps (long-run 26, peak ~60) **David-confirmed**._
 - _**Beyond-50k OFF-RAMPS — no consented proxy.** §3.1/§3.4's "a 44-miler selects the 50mi archetype" and "proxy with consent" for 50mi+ is **superseded**: a goal past the 50k is acknowledged, the 50k ceiling stated, and the athlete asked for a shorter event/tune-up to build around — no proxy plan, no future-plan promise. The intake pocket's long-side marathon-proxy is retained-but-unrouted (revivable). The short-side 5k proxy is unchanged._
 
-_**Still U1-but-W4b:** `races.event_kind` + the §3.5 athlete-stated adventure fill (non-race goal + fuzzy dates) + the recap `event_kind` line._
+_**W4b LANDED (2026-06-25, v0.7.47):** `races.event_kind` + the §3.5 athlete-stated adventure fill (non-race goal + fuzzy dates) + the recap `event_kind` line — see the §3.5 status note for the two refinements (model `event_kind` signal; `not_found` disambiguation; mid-month ISO date). The only remaining U1 rider is the worker race-week "your run" tone touch (step 15) — cosmetic, deferred._
 
 ---
 
@@ -121,11 +121,13 @@ Tier feeds volume params as elsewhere. There is no hard tier gate (decision #3, 
 
 ### 3.5 Non-race events (U1 rider)
 
+_**LANDED (V4-W4b, 2026-06-25, v0.7.47).** Built largely as written, with two refinements: detection is a model `event_kind` signal on `extract_and_advance` (a self-set bare-distance run never hits the lookup, so a failed-lookup-only hook couldn't tag it), not only a `not_found` reinterpretation; and the `not_found` path **disambiguates** ("organized race, or your own thing?") rather than silently filling, so an obscure-but-real race isn't mislabeled. The fuzzy date resolves to a **mid-month ISO date (the 15th)**, not a non-ISO placeholder — `races.date` / `target_date` are `date` columns and reject non-ISO. The ceiling holds: a >40mi adventure off-ramps (reuses W4's `applyUltraOffRamp`), it does not proxy._
+
 Rae Lakes is the type case: a named route, a real distance, "September," a friend — and not a race. No lookup hit, no official date. Today the only homes are `committed` (requires a looked-up race) or `intended` (distance + placeholder, loses the name and specifics). The fix is small because the `races` table never required officialness — it's name/date/distance:
 
-- **Athlete-stated fill.** When the athlete describes a personal objective (or `lookupRace` returns `not_found` for something that isn't a race), the engine fills `goal_race`/`goal_date`/`distance_mi` from the athlete's own words — provenance `stated`, one inline confirm, no lookup.
-- **Fuzzy-date resolution.** "September" → ask once ("got a specific day, or just sometime September?"); a month-only answer takes a mid-month placeholder, the same mechanics the intended branch already uses. The plan builds toward the placeholder; the coach firms it up when the athlete does.
-- **`event_kind: race | adventure`** on the `races` row (one nullable column, default `race`) so race-week copy can say "your run" instead of "your race." Cosmetic but cheap, and the coach reads it from `race_calendar.md` context anyway.
+- **Athlete-stated fill.** When the athlete describes a personal objective, the model flags `event_kind: adventure` and fills `goal_race` from their words; the engine skips the lookup and fills the rest — provenance `stated`, one inline confirm. (For a named-but-unfound query the `not_found` branch asks which it is and pre-fills the name.) The stated distance rides to the row as the real `distance_mi` via `event_distance_mi`.
+- **Fuzzy-date resolution.** "September" → ask once ("got a specific day, or just sometime in September?"); a month-only answer takes the **15th** of that month (a valid future ISO date the past-date guard passes). The plan builds toward it; the coach firms it up when the athlete does.
+- **`event_kind: race | adventure`** on the `races` row (default `race`) so the recap says "your run" instead of "your race." The coach reads it from `race_calendar.md` context; the worker race-week tone touch (step 15) stays deferred (cosmetic, a `fly deploy`).
 
 ### 3.6 Renderer changes (U2 only)
 

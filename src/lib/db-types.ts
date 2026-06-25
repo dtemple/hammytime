@@ -873,6 +873,7 @@ export type Database = {
           date: string | null
           distance_mi: number | null
           elevation_ft: number | null
+          event_kind: string
           id: string
           name: string
           status: string
@@ -886,6 +887,7 @@ export type Database = {
           date?: string | null
           distance_mi?: number | null
           elevation_ft?: number | null
+          event_kind?: string
           id?: string
           name: string
           status?: string
@@ -899,6 +901,7 @@ export type Database = {
           date?: string | null
           distance_mi?: number | null
           elevation_ft?: number | null
+          event_kind?: string
           id?: string
           name?: string
           status?: string

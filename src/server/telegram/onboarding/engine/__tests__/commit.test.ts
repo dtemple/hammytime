@@ -124,6 +124,52 @@ describe('buildGoalWrite', () => {
     expect(race!.distance_mi).toBe(100); // but the row tells the truth
   });
 
+  it('defaults event_kind to "race" for an ordinary committed race (V4-W4b)', () => {
+    const { race } = buildGoalWrite(
+      state({
+        ...trainingBase,
+        goal_type: sv('race'),
+        goal_distance: sv('marathon'),
+        goal_race: sv('CIM'),
+        goal_date: sv('2026-12-06'),
+      }),
+    );
+    expect(race!.event_kind).toBe('race');
+  });
+
+  it('writes event_kind="adventure" and the real stated distance for an adventure (V4-W4b)', () => {
+    const { profile, race } = buildGoalWrite({
+      ...state({
+        ...trainingBase,
+        goal_type: sv('race'),
+        goal_distance: sv('50k'), // the bucket the plan is built toward
+        goal_race: sv('Rae Lakes Loop'),
+        goal_date: sv('2026-09-15'),
+      }),
+      event_kind: 'adventure',
+      event_distance_mi: 33, // the athlete's real distance
+    });
+    expect(profile.goal_state).toBe('committed');
+    expect(profile.goal_distance).toBe('50k'); // bucket still drives selection
+    expect(race!.event_kind).toBe('adventure');
+    expect(race!.distance_mi).toBe(33); // the real distance, not the 50k nominal
+  });
+
+  it('falls back to the bucket nominal for an adventure named as "a 50k" (no stashed mi)', () => {
+    const { race } = buildGoalWrite({
+      ...state({
+        ...trainingBase,
+        goal_type: sv('race'),
+        goal_distance: sv('50k'),
+        goal_race: sv('a backyard 50k'),
+        goal_date: sv('2026-09-15'),
+      }),
+      event_kind: 'adventure', // but no event_distance_mi
+    });
+    expect(race!.event_kind).toBe('adventure');
+    expect(race!.distance_mi).toBeCloseTo(31.1, 1); // the 50k nominal
+  });
+
   it('rides target_time and the real distance together for a short pocket (R1 fixes 1 + 5)', () => {
     const { profile, race } = buildGoalWrite({
       ...state({
@@ -265,6 +311,7 @@ describe('commitSlots — a superseded pocket leaves no trace (stale-pocket fix)
       intents: [],
       reflection: null,
       volume_goal: null,
+      event_kind: null,
     }).state;
 
     await commitSlots('ath-1', pivoted);

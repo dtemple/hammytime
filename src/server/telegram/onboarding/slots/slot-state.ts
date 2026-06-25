@@ -152,6 +152,16 @@ export interface V3OnboardingState {
    *  event in between flips goal_type off general_fitness and this never fires
    *  again. See router finishOnboarding §4.3. */
   off_ramp_offered?: boolean;
+  /** Whether the committed goal is an organized race or the athlete's own dated
+   *  adventure (V4-W4b). Absent = 'race' (back-compat — no schema bump). Set by
+   *  the model's event_kind signal (or the not_found disambiguation), written to
+   *  races.event_kind at commit, and read by the recap for the "your run" framing.
+   *  Cleared by applyUltraOffRamp when a beyond-50k goal demotes to an intent. */
+  event_kind?: 'race' | 'adventure';
+  /** The athlete's exact stated event distance in miles (V4-W4b), stashed by
+   *  applyStatedDistance so an adventure row carries the real distance, not the
+   *  bucket nominal (a 33-mile route writes 33, not the 50k nominal 31.1). */
+  event_distance_mi?: number;
 }
 
 /**

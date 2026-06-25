@@ -375,6 +375,27 @@ function recapGoalLine(s: SlotState): string {
   return `• Goal: ${distLabel}`;
 }
 
+/** The goal line for the athlete's own dated adventure (V4-W4b): framed as "your
+ *  run", not "your race", with the real stated mileage when we have it (else the
+ *  bucket label, for an adventure named as "a 50k"). */
+function recapAdventureLine(s: SlotState, distanceMi: number | null | undefined): string {
+  const name = s.goal_race?.value as string | undefined;
+  const date = s.goal_date?.value as string | undefined;
+  const dateLabel = date != null ? formatSlotValue('goal_date', date) : undefined;
+  const distance = s.goal_distance?.value as string | undefined;
+  const distText =
+    distanceMi != null
+      ? `${Math.round(distanceMi)} mi`
+      : distance
+        ? (DISTANCE_LABELS[distance] ?? distance)
+        : undefined;
+  const detail = [distText, 'your own adventure'].filter(Boolean).join(', ');
+  if (name && dateLabel) return `• Your run: ${name} — ${dateLabel} (${detail})`;
+  if (name) return `• Your run: ${name} (${detail})`;
+  if (dateLabel) return `• Your run: ${dateLabel} (${detail})`;
+  return `• Your run (${detail})`;
+}
+
 /** The injury line, from the described detail if there is one, else the status. */
 function recapInjuryLine(s: SlotState): string | null {
   const detail = s.injury_detail?.value as { body_part: string; status: string } | undefined;
@@ -395,7 +416,9 @@ export function buildRecapMessage(state: V3OnboardingState): string {
   const goalLine =
     ooc?.consent === 'accepted'
       ? `• Goal: ${ooc.words}${ooc.distance_mi != null ? `, ${Math.round(ooc.distance_mi)} mi` : ''} (training as a ${DISTANCE_LABELS[ooc.proxy] ?? ooc.proxy} block)`
-      : recapGoalLine(s);
+      : state.event_kind === 'adventure'
+        ? recapAdventureLine(s, state.event_distance_mi)
+        : recapGoalLine(s);
   const lines: string[] = [goalLine];
 
   const tier = s.experience_tier?.value as string | undefined;
@@ -710,6 +733,7 @@ export const SYNTHETIC_GENERATE: ExtractAdvanceOutput = {
   intents: [],
   reflection: null,
   volume_goal: null,
+  event_kind: null,
 };
 
 /**

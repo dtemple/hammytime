@@ -129,6 +129,12 @@ export function applyUltraOffRamp(state: V3OnboardingState, words: string): V3On
     ...state,
     slots,
     out_of_catalog: undefined,
+    // The goal is demoted to an intent — it's no longer an adventure-in-progress
+    // (V4-W4b), so clear the adventure flags a beyond-50k stated distance may have
+    // set this turn. Without this a >40 adventure would off-ramp yet leave the
+    // event_kind flag dangling for whatever the athlete names next.
+    event_kind: undefined,
+    event_distance_mi: undefined,
     intents: mergeIntents(state.intents, [words]),
   };
 }
@@ -148,7 +154,15 @@ export function applyStatedDistance(
   const bucket = deriveBucketFromMiles(miles);
   if (bucket) {
     const slots = { ...state.slots, goal_distance: slotValue(bucket, 'stated', true) };
-    return { state: { ...state, slots }, pocket: false, message: '', chips: [] };
+    // Stash the exact stated miles (V4-W4b) so an adventure row commits the real
+    // distance, not the bucket nominal. Read only in the adventure branch of
+    // buildGoalWrite — harmless for an organized race (it uses the nominal).
+    return {
+      state: { ...state, slots, event_distance_mi: miles },
+      pocket: false,
+      message: '',
+      chips: [],
+    };
   }
   if (miles < CATALOG_FLOOR_MI) {
     // The same turn often fills target_time ("1 mile in under 5") — the caller

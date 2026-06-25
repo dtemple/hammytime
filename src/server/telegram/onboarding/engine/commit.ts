@@ -33,6 +33,7 @@ interface RaceWrite {
   distance_mi: number;
   target_type: 'finish' | 'time';
   target_time_sec: number | null;
+  event_kind: 'race' | 'adventure';
 }
 
 export interface GoalWrite {
@@ -90,14 +91,20 @@ export function buildGoalWrite(state: V3OnboardingState): GoalWrite {
   const raceDate = slotVal<string>(state, 'goal_date');
   const targetTime = slotVal<number>(state, 'target_time');
 
-  // An accepted out-of-catalog goal: the plan is structured toward the proxy
-  // bucket, but the race row carries the athlete's REAL distance so the coach and
-  // race_calendar read the truth, not the proxy's nominal mileage (V3-W8 §5.2).
+  // The race row carries the athlete's REAL distance, not the bucket nominal, in
+  // two cases: an accepted out-of-catalog goal (the plan is built toward the proxy
+  // bucket, but the row tells the truth — V3-W8 §5.2), and an adventure stated as a
+  // raw distance (a 33-mile route writes 33, not the 50k nominal 31.1 — V4-W4b).
   const ooc = state.out_of_catalog;
+  const eventKind = state.event_kind ?? 'race';
   const realDistanceMi =
-    ooc?.consent === 'accepted' && ooc.distance_mi != null ? ooc.distance_mi : null;
+    eventKind === 'adventure' && state.event_distance_mi != null
+      ? state.event_distance_mi
+      : ooc?.consent === 'accepted' && ooc.distance_mi != null
+        ? ooc.distance_mi
+        : null;
 
-  // Committed: a named, dated race.
+  // Committed: a named, dated race (or adventure).
   if (raceName && raceDate) {
     return {
       profile: {
@@ -113,6 +120,7 @@ export function buildGoalWrite(state: V3OnboardingState): GoalWrite {
         distance_mi: realDistanceMi ?? nominalRaceMiles(distance),
         target_type: targetTime ? 'time' : 'finish',
         target_time_sec: targetTime ?? null,
+        event_kind: eventKind,
       },
     };
   }
@@ -203,6 +211,7 @@ async function commitGoal(athleteId: string, state: V3OnboardingState): Promise<
         target_type: race.target_type,
         target_time_sec: race.target_time_sec,
         status: 'upcoming',
+        event_kind: race.event_kind,
       })
       .select('id')
       .single();

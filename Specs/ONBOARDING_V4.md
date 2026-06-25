@@ -401,19 +401,25 @@ confirm-loop replay, goal-change (date must not survive).
 - **Volume goal** ("20 miles a week") — **now** routes to the off-ramp +
   check-back, not the pocket's proxy attempt.
 
-**Add (event-broadened):**
+**Add (event-broadened).** _Adventure fixtures BUILT (W4b, 2026-06-25, v0.7.47) —
+amended to the off-ramp reconciliation: a beyond-50k adventure off-ramps, it does
+not proxy._
 
-- **Non-race adventure with a fuzzy date** — Chase's profile: 44mi, "September,"
-  ~15mi/wk, 3 days, long-standing right ITB. Asserts: `event_kind: adventure`;
-  athlete-stated fill (no `lookupRace` hit); fuzzy date → mid-month placeholder;
-  44mi recognized as a real goal; **plan is the consented proxy** (not wedged,
-  not silently a marathon); the safety contradiction (15mi/wk + 3 days + ITB + 44
-  mountain miles ~12 weeks out) surfaces before plan-gen.
+- **Beyond-50k adventure → off-ramp** — Chase's profile: 44mi, "September,"
+  ~15mi/wk, 3 days, long-standing right ITB. Asserts: `event_kind: adventure`
+  cleared at the off-ramp; athlete-stated (no `lookupRace` hit); 44mi recognized
+  as past the catalog → the **W4 off-ramp** (acknowledge, state the 50k ceiling,
+  ask for a shorter event), **no proxy plan, no race row**, the goal rides as an
+  intent. (The pre-W4 "consented proxy" expectation is retired.)
 - **Sub-40 adventure that gets a real plan** — David's mid-July ~20-miler:
   `event_kind: adventure`, marathon-band, a **real structured plan** (proof the
-  adventure path isn't always a proxy).
+  adventure path isn't a proxy); a 33-mile route → `ultra-50k`, real distance (33)
+  on the row, fuzzy "September" → the 15th. Athlete-stated fill, one confirm.
+- **not_found disambiguation** — a named-but-unfound query (the Dipsea): asks
+  "organized race, or your own thing?" (two chips), pre-fills `goal_race`, never
+  dead-ends; the answer sets `event_kind`.
 - **Ultra race** — Western States 100: `event_kind: race`, looked up, 100mi
-  recognized, consented proxy until U2, no enum wedge (the V3-W8 / U1 fix).
+  recognized → off-ramp (no proxy until U2), no enum wedge (the V3-W8 / U1 fix).
 - **50k race** — `ultra-50k` template selected, real plan, effort-led paces, no
   time-goal pace driver.
 
@@ -423,8 +429,9 @@ for the unstated; a confirmed race's `distance_mi` sets `goal_distance` in code;
 **a no-event goal produces the off-ramp (no plan) + a captured check-back or
 clean stop — never a `keep_fit` plan**; **an `event_kind: adventure` goal fills
 from the athlete's words with one confirm**; **a fuzzy date resolves to a
-mid-month placeholder, not a rejection**; **a 50mi+ goal proxies with consent,
-never wedges and never silently writes the nearest bucket**.
+mid-month (the 15th) ISO date, not a rejection**; **a beyond-50k goal (race or
+adventure) off-ramps — no proxy, never wedges, never silently writes the nearest
+bucket**.
 
 ---
 
@@ -475,9 +482,16 @@ framing, the off-ramp/pause state, and adopting U1.
     no keep_fit, no future-plan promise; the real goal rides as an intent. Same shape as the
     W2 no-event off-ramp.
   - Needed ONE small `goal_distance` CHECK migration (`20260626000000_goal_distance_50k.sql`).
-  - **W4b remains** (the W1-deferred half): `races.event_kind` migration + the
-    `ULTRA_SUPPORT.md` §3.5 athlete-stated **adventure fill** (non-race goal + fuzzy dates) +
-    the recap `event_kind` line. The §9 adventure fixtures land with W4b.
+  - **W4b BUILT** (2026-06-25, v0.7.47). The W1-deferred half landed: `races.event_kind`
+    migration (`20260627000000_races_event_kind.sql`); the §3.5 athlete-stated **adventure
+    fill** via a new `extract_and_advance` `event_kind` signal (a personal effort skips the
+    lookup, fills `goal_race` from the athlete's words, ceiling-bounds through the existing
+    `applyStatedDistance` so >40mi off-ramps); the not_found path now **disambiguates**
+    (organized race vs your own thing) instead of dead-ending (David's refinement); the real
+    stated distance rides to the row (`event_distance_mi`); fuzzy dates resolve to the 15th
+    (mid-month ISO — not a non-ISO placeholder, which the `date` columns reject); the recap
+    reads `event_kind` ("your run"). The §9 adventure fixtures landed. The worker race-week
+    "your run vs your race" copy stays deferred (cosmetic, a `fly deploy`).
 - **V4-W5 · Web positioning copy · S.** Home page H1/lede/how-it-works, signup
   headline (§8). David wordsmiths; web-only (Vercel push).
 - **V4-W6 · Eval harness + fixtures · M.** §9. The V3-W5 harness with the v4

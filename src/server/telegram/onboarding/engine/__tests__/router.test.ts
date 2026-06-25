@@ -129,6 +129,7 @@ function out(p: Partial<ExtractAdvanceOutput>): ExtractAdvanceOutput {
     intents: [],
     reflection: null,
     volume_goal: null,
+    event_kind: null,
     ...p,
   };
 }
@@ -513,6 +514,62 @@ describe('router — beyond-50k race takes the off-ramp (V4-W4)', () => {
     expect(saved.slots.goal_distance).toBeUndefined(); // no bucket/proxy write
     expect(saved.out_of_catalog).toBeUndefined(); // off-ramp, not a pocket
     expect(saved.intents).toContain('Western States 100'); // rides as coach context
+  });
+});
+
+describe('router — non-race adventure (V4-W4b)', () => {
+  it('a not_found lookup asks organized-race-or-adventure, pre-fills the name — no dead-end', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race') },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({ next_action: 'confirm', race_lookup_query: 'the Dipsea', message: 'looking' }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(lookupRace).mockResolvedValue({ ok: false } as any);
+
+    await handleV3Message(ctx(56, 'I want to do the Dipsea'), athlete);
+
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toMatch(/the Dipsea/);
+    expect(call[1]).not.toMatch(/couldn't pin that race down/i); // not the old dead-end
+    expect(labels(call)).toEqual(['Organized race', 'My own adventure']);
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.slots.goal_race?.value).toBe('the Dipsea'); // name captured for either answer
+  });
+
+  it('an adventure signal sets event_kind, skips the lookup, and buckets the stated distance', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race') },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'confirm',
+        event_kind: 'adventure',
+        goal_distance_mi: 20,
+        fills: [
+          { slot: 'goal_race', value: 'my July 20-miler', provenance: 'stated' },
+          { slot: 'goal_date', value: '2026-07-15', provenance: 'stated' },
+        ],
+        message: 'nice',
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(57, 'my own 20-miler in mid-July'), athlete);
+
+    expect(lookupRace).not.toHaveBeenCalled(); // an adventure has no catalog entry
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.event_kind).toBe('adventure');
+    expect(saved.slots.goal_distance?.value).toBe('marathon'); // 20mi → marathon band, in code
+    expect(saved.event_distance_mi).toBe(20); // real distance rides to commit
   });
 });
 

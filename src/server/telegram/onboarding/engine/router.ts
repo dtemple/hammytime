@@ -390,7 +390,13 @@ async function runTurn({
     // reflection composition's boundary lead (the race-lookup variant carries its
     // own "Found it — … Heads up though:" lead already).
     let pocketOfferOwnsMessage = false;
-    if (result.output.race_lookup_query && !resolved.overridden) {
+    // A goal the model flagged as the athlete's own adventure (V4-W4b): mark it on
+    // state so commit writes event_kind and the recap frames it as "your run". An
+    // adventure has no catalog entry, so it SKIPS the race lookup — its distance
+    // rides the goal_distance_mi path below, which already buckets or off-ramps.
+    if (result.output.event_kind === 'adventure') working = { ...working, event_kind: 'adventure' };
+    const isAdventure = working.event_kind === 'adventure';
+    if (result.output.race_lookup_query && !resolved.overridden && !isAdventure) {
       const lr = await resolveRace(athleteId, chatId, result.output.race_lookup_query, working);
       working = lr.state;
       message = lr.message;
@@ -634,12 +640,20 @@ async function resolveRace(
     };
   }
 
-  // not_found / error
+  // not_found / error. The lookup missed — but the query might be a small race the
+  // DB doesn't carry OR the athlete's own adventure (a route, an FKT). Don't guess
+  // and don't dead-end (V4-W4b): pre-fill goal_race from their words and ask which
+  // it is. The chip values are plain statements the model reads next turn — "my own
+  // adventure" sets event_kind, "organized race" leaves it a race and the flow asks
+  // for the date/distance. mkSlot unconfirmed: the athlete still confirms the name.
+  const slots: SlotState = { ...state.slots, goal_race: mkSlot(query, 'stated', false) };
   return {
-    state,
-    message:
-      "I couldn't pin that race down. What's the date — and the city, if the name's a common one?",
-    chips: [],
+    state: { ...state, slots },
+    message: `I don't have ${query} in my race list — is that an organized race, or your own thing?`,
+    chips: [
+      { label: 'Organized race', value: "it's an organized race" },
+      { label: 'My own adventure', value: "it's my own adventure, not an organized race" },
+    ],
   };
 }
 

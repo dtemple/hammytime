@@ -57,6 +57,12 @@ describe('applyStatedDistance', () => {
     expect(r.state.out_of_catalog).toBeUndefined();
   });
 
+  it('stashes the exact stated miles for an adventure row (V4-W4b)', () => {
+    const r = applyStatedDistance(stateWith({}), 33, 'my friends 33-mile route');
+    expect(r.state.slots.goal_distance).toEqual(sv('50k', 'stated', true));
+    expect(r.state.event_distance_mi).toBe(33); // the real distance rides to commit
+  });
+
   it('off-ramps a beyond-50k stated distance — no pocket, asks for a shorter event (V4-W4)', () => {
     const r = applyStatedDistance(stateWith({}), 44, '44 miles in the mountains');
     expect(r.pocket).toBe(false);
@@ -114,6 +120,17 @@ describe('ultraOffRampBody + applyUltraOffRamp (V4-W4 — the beyond-50k off-ram
     expect(next.slots.goal_distance).toBeUndefined();
     expect(next.out_of_catalog).toBeUndefined();
     expect(next.intents).toEqual(['Western States, 100mi']);
+  });
+
+  it('clears the adventure flags so a >40 adventure off-ramps cleanly (V4-W4b)', () => {
+    const state = stateWith(
+      { goal_race: sv('a 44-mile loop'), goal_distance: sv('50k') },
+      { event_kind: 'adventure', event_distance_mi: 44 },
+    );
+    const next = applyUltraOffRamp(state, 'a 44-mile loop');
+    expect(next.event_kind).toBeUndefined();
+    expect(next.event_distance_mi).toBeUndefined();
+    expect(next.intents).toEqual(['a 44-mile loop']);
   });
 });
 
@@ -334,6 +351,7 @@ function vout(partial: Partial<ExtractAdvanceOutput> = {}): ExtractAdvanceOutput
     intents: [],
     reflection: null,
     volume_goal: null,
+    event_kind: null,
     ...partial,
   };
 }

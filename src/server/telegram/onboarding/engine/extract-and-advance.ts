@@ -99,6 +99,13 @@ export const ExtractAdvanceSchema = z.object({
     .nullish()
     .catch(null)
     .transform((v) => v ?? null),
+  // The goal is the athlete's OWN dated effort (a self-set long run, a friend's
+  // route, an FKT attempt), not an organized race (V4-W4b). Drives event_kind on
+  // the race row — cosmetic framing only, never plan-shaping. null/absent → race.
+  event_kind: z
+    .enum(['race', 'adventure'])
+    .nullish()
+    .transform((v) => v ?? null),
 });
 export type ExtractAdvanceOutput = z.infer<typeof ExtractAdvanceSchema>;
 
@@ -201,6 +208,12 @@ const EXTRACT_TOOL = {
         description:
           'A periodic mileage target the athlete states as a goal — "100 miles a month" → {miles: 100, period: "month"}, "20 a week" → {miles: 20, period: "week"}. Always emit it when stated; the app decides what to say about it. This is not a race distance — never put it in goal_distance or goal_distance_mi.',
       },
+      event_kind: {
+        type: 'string',
+        enum: ['race', 'adventure'],
+        description:
+          'Set to "adventure" when the goal is the athlete\'s OWN dated effort — a self-set long run, a friend\'s route, an FKT attempt, "my own 20-miler in July" — rather than an organized race. Set "race" (or omit) for an organized event you\'d look up. When you set "adventure", ALSO fill goal_race with a short label in the athlete\'s words (e.g. "Rae Lakes Loop", "my July 20-miler") so it commits as a dated event, and do NOT set race_lookup_query (an adventure isn\'t in any race database).',
+      },
     },
   },
 } as const;
@@ -252,6 +265,7 @@ const FLOW_RULES = [
   'Confirm safety and plan-driving slots inline (a quick yes/no). Let nice-to-haves ride.',
   "When the goal race changes, restate goal_date in the same turn (a fill) or mark it open — never let the old race's date ride on the new goal. When a former goal race becomes a tune-up, carry its name AND its date into tune_up_races.",
   'Dates: any goal_date you emit must be in the future relative to today (the turn context states today\'s date). A bare month like "September" means its next future occurrence — pick the year accordingly.',
+  'The event can be an organized race OR the athlete\'s own dated effort (a self-set long run, a friend\'s route). For a personal effort, set event_kind "adventure" and fill goal_race with a short label from their words — never a race lookup. If a personal effort has only a month, ask once for a specific day; if they don\'t have one, emit the 15th of that month as a provisional date.',
   'Generate the plan only once every required slot is filled and the injury beat is answered; recap the whole picture first.',
   'When you write the recap yourself, include every captured intent and the goal time when one is set — the recap shows the whole picture, not just the slots.',
   'A periodic mileage target ("100 miles a month", "20 a week") is not a plan you can build — emit it as volume_goal and never promise the schedule will hit it; the app states the boundary. If the athlete pushes back on that boundary, hold it plainly and re-offer the two paths: general fitness, or training for a race.',
@@ -336,12 +350,20 @@ export function summarizeState(state: V3OnboardingState): string {
     ? `Intents already captured (emit only new ones): ${state.intents.map((i) => `"${i}"`).join(', ')}.`
     : null;
 
+  // The goal is already flagged a personal adventure (V4-W4b) — keep it that way
+  // unless the athlete pivots to an organized race; don't re-emit it every turn.
+  const eventKindLine =
+    state.event_kind === 'adventure'
+      ? 'This goal is the athlete\'s own adventure (event_kind "adventure"), not an organized race. Keep it that way unless they switch to a named race.'
+      : null;
+
   return [
     `Conversation phase: ${state.phase}. Goal type: ${goalType ?? 'unknown'}. Optional-question budget remaining: ${state.optional_budget_remaining}.`,
     pendingLine,
     oocLine,
     reflectionLine,
     intentsLine,
+    eventKindLine,
     'Slots:',
     lines.join('\n'),
   ]

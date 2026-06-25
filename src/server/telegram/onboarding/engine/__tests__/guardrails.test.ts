@@ -56,6 +56,7 @@ function out(partial: Partial<ExtractAdvanceOutput>): ExtractAdvanceOutput {
     intents: [],
     reflection: null,
     volume_goal: null,
+    event_kind: null,
     ...partial,
   };
 }
@@ -529,6 +530,23 @@ describe('buildRecapMessage', () => {
     };
     const msg = buildRecapMessage(stateWith(slots));
     expect(msg).toContain('left knee');
+  });
+
+  it('frames an adventure as "your run" with the real distance (V4-W4b)', () => {
+    const slots: SlotState = {
+      ...coreSlots('race'),
+      goal_distance: sv('50k'),
+      goal_race: sv('Rae Lakes Loop'),
+      goal_date: sv('2026-09-15'),
+      injury_status: sv('none'),
+    };
+    const msg = buildRecapMessage(
+      stateWith(slots, { event_kind: 'adventure', event_distance_mi: 33 }),
+    );
+    expect(msg).toContain('Your run: Rae Lakes Loop');
+    expect(msg).toContain('33 mi');
+    expect(msg).toContain('your own adventure');
+    expect(msg).not.toContain('• Race:'); // never reads as an organized race
   });
 });
 
