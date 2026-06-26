@@ -13,20 +13,20 @@ export type BotCommand = {
 };
 
 export const BOT_COMMANDS: BotCommand[] = [
-  { command: 'balance', description: 'check your credit balance', inMenu: true },
-  { command: 'buy', description: 'add coaching credit', inMenu: true },
-  { command: 'fresh_update', description: 'get a fresh update right now', inMenu: true },
+  { command: 'prehab', description: 'your prehab routine', inMenu: true },
+  { command: 'help', description: 'what I can do, and how credits work', inMenu: true },
   { command: 'pause', description: 'pause your daily check-ins', inMenu: true },
-  { command: 'resume', description: 'turn your daily check-ins back on', inMenu: true },
-  { command: 'adjust_plan', description: 'change your training plan', inMenu: true },
-  { command: 'next_event', description: 'start training for a new event', inMenu: true },
+  { command: 'fresh_update', description: 'get a fresh update right now', inMenu: true },
   { command: 'edit_profile', description: 'update your profile', inMenu: true },
   { command: 'calendar', description: 'sync your training to a calendar', inMenu: true },
-  { command: 'prehab', description: 'your prehab routine', inMenu: true },
-  { command: 'connect_strava', description: 'connect or reconnect Strava', inMenu: true },
-  { command: 'help', description: 'what I can do, and how credits work', inMenu: true },
 
   // Wired in bot.ts but kept out of the menu/help — dev, recovery, or rarely needed.
+  { command: 'resume', description: 'turn your daily check-ins back on', inMenu: false },
+  { command: 'connect_strava', description: 'connect or reconnect Strava', inMenu: false },
+  { command: 'next_event', description: 'start training for a new event', inMenu: false },
+  { command: 'adjust_plan', description: 'change your training plan', inMenu: false },
+  { command: 'balance', description: 'check your credit balance', inMenu: false },
+  { command: 'buy', description: 'add coaching credit', inMenu: false },
   { command: 'ping', description: 'health check', inMenu: false },
   { command: 'start', description: 'link your account', inMenu: false },
   { command: 'restart', description: 'start onboarding over', inMenu: false },
