@@ -15,6 +15,8 @@
     "db:reset": "supabase db reset",
     "db:types": "supabase gen types typescript --local > src/lib/db-types.ts",
     "test": "vitest run",
+    "eval": "vitest run --config vitest.eval.config.ts",
+    "eval:judge": "EVAL_JUDGE=1 vitest run --config vitest.eval.config.ts",
     "webhook:register": "tsx scripts/register-webhook.ts",
     "commands:register": "tsx scripts/register-commands.ts",
     "strava:webhook:register": "tsx scripts/register-strava-webhook.ts",

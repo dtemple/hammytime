@@ -46,3 +46,8 @@ next-env.d.ts
 
 # Sentry Config File
 .env.sentry-build-plugin
+
+# eval harness scorecards / diff baselines (generated, not source)
+ab-model-eval-*.md
+onboarding-eval-*.md
+onboarding-eval-previous.json
