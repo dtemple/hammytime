@@ -11,7 +11,7 @@ import {
   hardResetOnboarding,
   isOnboarded,
 } from './onboarding/index';
-import { handleCheckinCommand, handleWellnessMessage, nowInTimezone } from './checkin/dispatcher';
+import { handleWellnessMessage, nowInTimezone } from './checkin/dispatcher';
 import { selectionKeyboardFromTap } from './onboarding/dispatcher';
 import {
   clearAutoInactivityPause,
@@ -1264,28 +1264,6 @@ function getBot(): Bot {
     _bot.command('ping', (ctx) => ctx.reply('pong'));
     _bot.command('start', handleStart);
     _bot.command('restart', handleRestart);
-    _bot.command('checkin', async (ctx) => {
-      const db = supabaseAdmin();
-      const { data: athlete } = await db
-        .from('athletes')
-        .select('*')
-        .eq('telegram_chat_id', String(ctx.chat.id))
-        .maybeSingle();
-      if (!athlete) {
-        await ctx.reply('Use your invite link to get started.');
-        return;
-      }
-      const obState = athlete.onboarding_state as {
-        flow?: string;
-        phase?: string;
-        step?: number;
-      } | null;
-      if (!isOnboarded(obState)) {
-        await ctx.reply('Finish onboarding first.');
-        return;
-      }
-      await handleCheckinCommand(ctx, athlete);
-    });
     _bot.command('connect_strava', handleConnectStravaCommand);
     _bot.command('disconnect_strava', handleDisconnectStravaCommand);
     _bot.command('disconnect_calendar', handleDisconnectCalendarCommand);

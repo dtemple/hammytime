@@ -13,7 +13,6 @@ export type BotCommand = {
 };
 
 export const BOT_COMMANDS: BotCommand[] = [
-  { command: 'checkin', description: "log today's readiness and soreness", inMenu: true },
   { command: 'balance', description: 'check your credit balance', inMenu: true },
   { command: 'buy', description: 'add coaching credit', inMenu: true },
   { command: 'fresh_update', description: 'get a fresh update right now', inMenu: true },
