@@ -387,7 +387,14 @@ async function runTurn({
         return;
       }
     }
-    void logOnboardingRun(athleteId, startedAt, result.inputTokens, result.outputTokens);
+    void logOnboardingRun(
+      athleteId,
+      startedAt,
+      result.inputTokens,
+      result.outputTokens,
+      result.cacheCreationTokens,
+      result.cacheReadTokens,
+    );
 
     const resolved = enforceGuardrails(state, result.output);
     let working: V3OnboardingState = {
@@ -909,7 +916,14 @@ async function runGapWalkTurn(
       const history = await loadRecentHistory(athleteId, 8);
       const startedAt = new Date().toISOString();
       const result = await callExtractAndAdvance({ state, history, latest: text, athleteId });
-      void logOnboardingRun(athleteId, startedAt, result.inputTokens, result.outputTokens);
+      void logOnboardingRun(
+        athleteId,
+        startedAt,
+        result.inputTokens,
+        result.outputTokens,
+        result.cacheCreationTokens,
+        result.cacheReadTokens,
+      );
       slots = mergeFills(state.slots, result.output.fills);
     } catch (err) {
       console.error('[v3] gap-walk extract failed', err);

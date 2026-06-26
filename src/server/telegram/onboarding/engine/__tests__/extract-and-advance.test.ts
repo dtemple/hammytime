@@ -5,7 +5,13 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('@/lib/anthropic', () => ({ anthropicClient: vi.fn() }));
 vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
 
-import { buildSystemPrompt, summarizeState, ExtractAdvanceSchema } from '../extract-and-advance';
+import {
+  buildSystemPrompt,
+  summarizeState,
+  ExtractAdvanceSchema,
+  callExtractAndAdvance,
+} from '../extract-and-advance';
+import { anthropicClient } from '@/lib/anthropic';
 import { initialV3State, type V3OnboardingState } from '../../slots/slot-state';
 import type { SlotState } from '../../slots/schema';
 import type { Provenance, SlotValue } from '../../slots/provenance';
@@ -85,6 +91,44 @@ describe('ExtractAdvanceSchema — volume_goal (staging fix)', () => {
 
   it('defaults to null when absent', () => {
     expect(ExtractAdvanceSchema.parse(base).volume_goal).toBeNull();
+  });
+});
+
+describe('callExtractAndAdvance — prompt caching on the static prefix', () => {
+  function toolResponse(usage: Record<string, number>) {
+    return {
+      content: [{ type: 'tool_use', input: { fills: [], next_action: 'ask', message: 'hi' } }],
+      usage,
+    };
+  }
+
+  function input() {
+    return { state: initialV3State(null), history: [], latest: 'hi', athleteId: 'a' };
+  }
+
+  it('marks the system block ephemeral and surfaces a cache read on the warm call', async () => {
+    const create = vi.fn();
+    // First call writes the prefix; the second (inside the TTL) reads it.
+    create.mockResolvedValueOnce(
+      toolResponse({ input_tokens: 50, output_tokens: 10, cache_creation_input_tokens: 3000 }),
+    );
+    create.mockResolvedValueOnce(
+      toolResponse({ input_tokens: 50, output_tokens: 10, cache_read_input_tokens: 3000 }),
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(anthropicClient).mockReturnValue({ messages: { create } } as any);
+
+    const cold = await callExtractAndAdvance(input());
+    const warm = await callExtractAndAdvance(input());
+
+    // The static prefix is sent as a cache-controlled block, not a plain string.
+    const sys = create.mock.calls[0]![0].system;
+    expect(Array.isArray(sys)).toBe(true);
+    expect(sys[0].cache_control).toEqual({ type: 'ephemeral' });
+
+    // Cold call writes the cache; warm call reads it (the DoD assertion).
+    expect(cold.cacheCreationTokens).toBeGreaterThan(0);
+    expect(warm.cacheReadTokens).toBeGreaterThan(0);
   });
 });
 

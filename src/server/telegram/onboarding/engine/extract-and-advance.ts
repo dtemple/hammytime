@@ -27,6 +27,28 @@ const MAX_TOKENS = 1500;
 // Sonnet 4.6 pricing, USD per million tokens (matches race-lookup.ts).
 const COST_PER_M_INPUT = 3.0;
 const COST_PER_M_OUTPUT = 15.0;
+// Prompt-caching multipliers on the input rate: a cache WRITE bills at 1.25×, a
+// cache READ at 0.1×. The static tools+system prefix is cached (see the
+// cache_control marker on `system` below).
+const COST_PER_M_CACHE_WRITE = COST_PER_M_INPUT * 1.25;
+const COST_PER_M_CACHE_READ = COST_PER_M_INPUT * 0.1;
+
+/** USD cost of one Sonnet onboarding turn, cache-aware. Exported so the prod cost
+ *  ledger (logOnboardingRun) and the eval scorecard (engine/__evals__/drive.ts)
+ *  share one formula and can't drift apart when rates or cache multipliers change. */
+export function sonnetCostUsd(usage: {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens?: number;
+  cacheReadTokens?: number;
+}): number {
+  return (
+    (usage.inputTokens / 1_000_000) * COST_PER_M_INPUT +
+    (usage.outputTokens / 1_000_000) * COST_PER_M_OUTPUT +
+    ((usage.cacheCreationTokens ?? 0) / 1_000_000) * COST_PER_M_CACHE_WRITE +
+    ((usage.cacheReadTokens ?? 0) / 1_000_000) * COST_PER_M_CACHE_READ
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Output shape
@@ -385,8 +407,14 @@ export interface ExtractAdvanceInput {
 
 export interface ExtractAdvanceResult {
   output: ExtractAdvanceOutput;
+  // Uncached prompt + content input tokens (the API reports the cached prefix
+  // separately in the two cache fields below, NOT inside input_tokens).
   inputTokens: number;
   outputTokens: number;
+  // Cache write: the turn that paid 1.25× to lay down the static prefix.
+  cacheCreationTokens: number;
+  // Cache read: a turn inside the 5-min TTL that read the prefix at 0.1×.
+  cacheReadTokens: number;
 }
 
 function formatHistory(history: HistoryTurn[]): string {
@@ -446,13 +474,19 @@ export async function callExtractAndAdvance(
   const messages: any[] = [{ role: 'user', content: userContent }];
   let inputTokens = 0;
   let outputTokens = 0;
+  let cacheCreationTokens = 0;
+  let cacheReadTokens = 0;
 
   for (let attempt = 0; attempt < 2; attempt++) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const response = await (client.messages as any).create({
       model: ONBOARDING_MODEL,
       max_tokens: MAX_TOKENS,
-      system: buildSystemPrompt(),
+      // One cache breakpoint on `system` caches the whole static prefix — tools
+      // precede system in cache order, so they ride along. The prefix is
+      // byte-identical per call by design (the date lives in user content), so
+      // back-to-back turns inside the 5-min TTL read it at 0.1×.
+      system: [{ type: 'text', text: buildSystemPrompt(), cache_control: { type: 'ephemeral' } }],
       tools: [EXTRACT_TOOL],
       tool_choice: { type: 'tool', name: 'extract_and_advance' },
       messages,
@@ -460,6 +494,8 @@ export async function callExtractAndAdvance(
 
     inputTokens += response.usage?.input_tokens ?? 0;
     outputTokens += response.usage?.output_tokens ?? 0;
+    cacheCreationTokens += response.usage?.cache_creation_input_tokens ?? 0;
+    cacheReadTokens += response.usage?.cache_read_input_tokens ?? 0;
 
     const toolUse = (response.content as unknown[]).find(
       (b: unknown) => (b as { type?: string }).type === 'tool_use',
@@ -467,7 +503,7 @@ export async function callExtractAndAdvance(
 
     const parsed = ExtractAdvanceSchema.safeParse(toolUse?.input);
     if (parsed.success) {
-      return { output: parsed.data, inputTokens, outputTokens };
+      return { output: parsed.data, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens };
     }
 
     // Malformed — one corrective retry.
@@ -487,9 +523,10 @@ export async function logOnboardingRun(
   startedAt: string,
   inputTokens: number,
   outputTokens: number,
+  cacheCreationTokens = 0,
+  cacheReadTokens = 0,
 ): Promise<void> {
-  const costUsd =
-    (inputTokens / 1_000_000) * COST_PER_M_INPUT + (outputTokens / 1_000_000) * COST_PER_M_OUTPUT;
+  const costUsd = sonnetCostUsd({ inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens });
   await supabaseAdmin()
     .from('agent_runs')
     .insert({
@@ -498,7 +535,9 @@ export async function logOnboardingRun(
       started_at: startedAt,
       finished_at: new Date().toISOString(),
       model: ONBOARDING_MODEL,
-      input_tokens: inputTokens,
+      // input_tokens records total prompt volume (uncached + both cache classes)
+      // so the ledger's token count still reflects the real prompt size.
+      input_tokens: inputTokens + cacheCreationTokens + cacheReadTokens,
       output_tokens: outputTokens,
       cost_usd: costUsd,
     })
