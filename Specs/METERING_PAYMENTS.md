@@ -165,7 +165,7 @@ Webhook idempotency: a replayed event must not double-credit. The DB guard is a 
 
 ## 9. Telegram surface
 
-Commands, all registered in the bot command menu (alongside `/checkin`, `/edit_profile`) and described in `/help`:
+Commands, all registered in the bot command menu (alongside `/edit_profile`, `/calendar`) and described in `/help`:
 
 - **`/balance`** → "$18.40 left — about 5 weeks at your pace." Dollars + estimated time remaining (burn-rate calc from §8). If comped: "You're on the house — no credit needed." If paused: prepend the paused state (§10). If auto-reload on: append "Auto-reload: on (+$25 at $3)."
 - **`/buy`** → the preset-button flow (§6). Also the entry point to toggle auto-reload.
