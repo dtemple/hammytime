@@ -101,9 +101,13 @@ export async function driveFixture(
 
   function terminalOutcome(): DriveOutcome | null {
     if (ports.recorded.generateAndPersistPlan > 0) return 'completed';
-    if (ports.recorded.setCheckBack.length > 0) return 'offramped';
-    const phase = ports.stateStore.get(athleteId)?.phase;
-    if (phase === 'off_ramp') return 'offramped';
+    // Off-ramp terminal: the entry off-ramp's first beat calls enterDormant and
+    // leaves phase 'intake' (the check-back chips + phase 'off_ramp' come on the
+    // second beat). Match the offRamp assertion's predicate so a dormant athlete
+    // reads as terminal, not as non-convergence.
+    if (ports.recorded.enterDormant.length > 0 || ports.recorded.setCheckBack.length > 0)
+      return 'offramped';
+    if (ports.stateStore.get(athleteId)?.phase === 'off_ramp') return 'offramped';
     return null;
   }
 

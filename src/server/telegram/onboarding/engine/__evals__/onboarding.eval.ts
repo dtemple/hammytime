@@ -207,7 +207,7 @@ beforeAll(async () => {
     H.ref.currentRaceLookup = fx.raceLookup ?? {};
     const r = await driveFixture(fx, ports);
     // Deterministic gate first — the judge never touches pass/fail.
-    r.failures = [...checkExpectations(r), ...checkGlobalInvariants(r, fx)];
+    r.failures = [...checkExpectations(r), ...checkGlobalInvariants(r)];
     if (judge) {
       const v = await judgeVoice(r);
       r.voice = { score: v.score, note: v.note };

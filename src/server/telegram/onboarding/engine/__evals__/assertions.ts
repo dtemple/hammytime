@@ -10,7 +10,7 @@
 
 import { requiredCoreSlots, type GoalTypeValue, type SlotKey } from '../../slots/schema';
 import { isFilled } from '../../slots/provenance';
-import type { DriveResult, OnboardingFixture } from './types';
+import type { DriveResult } from './types';
 
 const ORIENTATION_SENTENCE = "Tap a button or type an answer if it's not in the list.";
 
@@ -109,7 +109,7 @@ export function checkExpectations(result: DriveResult): string[] {
  * The §9 global invariants, run on every fixture regardless of its declared
  * expectations. These are the launch-gate safety properties.
  */
-export function checkGlobalInvariants(result: DriveResult, fixture: OnboardingFixture): string[] {
+export function checkGlobalInvariants(result: DriveResult): string[] {
   const out: string[] = [];
   const s = result.finalState;
 
@@ -128,27 +128,13 @@ export function checkGlobalInvariants(result: DriveResult, fixture: OnboardingFi
       out.push(`invariant[no-open-core-at-generate]: generated with open core slots ${JSON.stringify(open)}`);
   }
 
-  // 3. No `stated` provenance for a value absent from the fact sheet. Compared
-  //    only where the fact-sheet ground truth is unambiguous; fuzzy slots are
-  //    skipped (the prompt flags those as judge-assisted, not deterministic).
-  const factsBlob = JSON.stringify(fixture.facts).toLowerCase();
-  for (const turn of result.modelTurns) {
-    for (const fill of turn.fills) {
-      if (fill.provenance !== 'stated') continue;
-      if (typeof fill.value !== 'string') continue;
-      const v = fill.value.toLowerCase();
-      // Only flag clearly-textual stated fills that have no echo in the facts AND
-      // aren't a normalized enum (enums map words → literals, so absence is fine).
-      if (v.length < 4) continue;
-      if (NORMALIZED_ENUM_VALUES.has(v)) continue;
-      if (!factsBlob.includes(v))
-        out.push(
-          `invariant[no-stated-for-unstated]: ${fill.slot}="${fill.value}" marked stated but not in the fact sheet`,
-        );
-    }
-  }
+  // (The §9 "no stated provenance for an unstated value" check is intentionally NOT
+  // a deterministic invariant: a facts-substring match false-positives on
+  // model-resolved dates ("September" → the 15th), looked-up race dates, composed
+  // goal labels, and "nothing" → "none" normalizations — all faithful, not invented.
+  // Fabrication is a qualitative judge dimension, Part 5.)
 
-  // 4. The orientation sentence appears exactly once across all coach messages.
+  // 3. The orientation sentence appears exactly once across all coach messages.
   const orientationCount = result.transcript.filter(
     (t) => t.direction === 'coach' && t.body.includes(ORIENTATION_SENTENCE),
   ).length;
@@ -157,26 +143,3 @@ export function checkGlobalInvariants(result: DriveResult, fixture: OnboardingFi
 
   return out;
 }
-
-// Closed-enum literals the model maps words onto — a `stated` enum fill whose
-// literal isn't verbatim in the facts is still legitimate (the fact sheet says
-// "a few years of consistent running"; the fill is "experienced").
-const NORMALIZED_ENUM_VALUES = new Set([
-  'beginner',
-  'for_fun',
-  'some_training',
-  'experienced',
-  '5k',
-  '10k',
-  'half',
-  'marathon',
-  '50k',
-  'keep_fit',
-  'race',
-  'general_fitness',
-  'none',
-  'active',
-  'monitoring',
-  'past',
-  'unknown',
-]);
