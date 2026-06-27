@@ -46,11 +46,26 @@ function getBuildInfo(): string | null {
   }
 }
 
-// The single logged-send helper: sends one outbound message and persists the
-// VERBATIM body to the messages table (direction = 'out'), so transcripts mirror
-// Telegram. Routes through botApiForChat so group chats (negative ids — the
-// test-athlete onboarding loop) reach the staging bot. Every athlete-facing send
-// goes through here; do not re-implement the send+insert elsewhere.
+// Render an inline keyboard's buttons for the transcript log: one line per row,
+// buttons within a row space-joined, each bracketed — so messages.body reflects
+// the options the athlete actually saw. Only the logged body carries this text;
+// the sent Telegram message keeps the real tappable buttons. Bright-line: every
+// button counts (chips, Yep/Not quite, Connect Strava…). messages.body also feeds
+// the model's conversation history, so it sees what it offered — which pairs with
+// the inbound tap (logged as the chosen label) for a coherent both-sides record.
+function renderKeyboardForLog(keyboard: InlineKeyboard): string {
+  const rows = keyboard.inline_keyboard
+    .map((row) => row.map((b) => `[ ${b.text} ]`).join('  '))
+    .filter((line) => line.length > 0);
+  return rows.length ? `\n\n${rows.join('\n')}` : '';
+}
+
+// The single logged-send helper: sends one outbound message and persists the body
+// to the messages table (direction = 'out'), so transcripts mirror Telegram —
+// including the chips/buttons (see renderKeyboardForLog). Routes through
+// botApiForChat so group chats (negative ids — the test-athlete onboarding loop)
+// reach the staging bot. Every athlete-facing send goes through here; do not
+// re-implement the send+insert elsewhere.
 export async function sendAndLog(
   athleteId: string,
   chatId: number | string,
@@ -67,7 +82,7 @@ export async function sendAndLog(
     athlete_id: athleteId,
     channel: 'tg',
     direction: 'out',
-    body: text,
+    body: keyboard ? `${text}${renderKeyboardForLog(keyboard)}` : text,
   });
 }
 

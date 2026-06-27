@@ -59,13 +59,14 @@ vi.mock('@/lib/calendar-token', () => ({
 }));
 
 import { supabaseAdmin } from '@/lib/db';
-import { Bot } from 'grammy';
+import { Bot, InlineKeyboard } from 'grammy';
 import { handleWellnessMessage } from './checkin/dispatcher';
 import { enqueueJob } from '@/server/jobs/enqueue';
 import { disconnectStrava } from '@/server/strava/disconnect';
 import { disconnectGoogleCalendar } from '@/server/google/disconnect';
 import { enqueueCalendarSyncIfConnected } from '@/server/google/enqueue-sync';
 import {
+  sendAndLog,
   handleInboundText,
   handleInboundVoice,
   handleInboundMedia,
@@ -184,6 +185,59 @@ function configureBotSend() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+// ---------------------------------------------------------------------------
+// sendAndLog — chip/button logging
+// ---------------------------------------------------------------------------
+
+describe('sendAndLog — keyboard logging', () => {
+  afterEach(() => {
+    delete process.env.TELEGRAM_BOT_TOKEN;
+  });
+
+  it('renders button labels into the logged body but sends clean text', async () => {
+    const send = configureBotSend();
+    const inserts: Array<{ body: string }> = [];
+    (supabaseAdmin as AnyMock).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        insert: vi.fn().mockImplementation((row: { body: string }) => {
+          inserts.push(row);
+          return Promise.resolve({ error: null });
+        }),
+      }),
+    });
+    // One button per row, matching the onboarding chip layout.
+    const kb = new InlineKeyboard().text('Race', 'v3:race').row().text('5k', 'v3:5k');
+
+    await sendAndLog(ATHLETE_ID, CHAT_ID, 'What are you training for?', kb);
+
+    // Telegram gets the clean text + the real tappable keyboard.
+    expect(send).toHaveBeenCalledWith(CHAT_ID, 'What are you training for?', {
+      reply_markup: kb,
+    });
+    // The log carries the options (for the transcript + the model's history).
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0]!.body).toBe('What are you training for?\n\n[ Race ]\n[ 5k ]');
+  });
+
+  it('logs the bare text when there is no keyboard', async () => {
+    const send = configureBotSend();
+    const inserts: Array<{ body: string }> = [];
+    (supabaseAdmin as AnyMock).mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        insert: vi.fn().mockImplementation((row: { body: string }) => {
+          inserts.push(row);
+          return Promise.resolve({ error: null });
+        }),
+      }),
+    });
+
+    await sendAndLog(ATHLETE_ID, CHAT_ID, 'On it.');
+
+    expect(send).toHaveBeenCalledWith(CHAT_ID, 'On it.');
+    expect(inserts[0]!.body).toBe('On it.');
+  });
 });
 
 // ---------------------------------------------------------------------------
