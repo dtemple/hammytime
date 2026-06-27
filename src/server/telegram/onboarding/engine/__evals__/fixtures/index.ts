@@ -8,6 +8,7 @@ import { fixture as marathonSmoke } from './marathon-smoke/fixture';
 // Phase 0 — the v4 gate fixtures (the deltas with no v3 coverage).
 import { fixture as generalFitnessOfframp } from './general-fitness-offramp/fixture';
 import { fixture as beyond50kOfframp } from './beyond-50k-offramp/fixture';
+import { fixture as beyond50kAccept50k } from './beyond-50k-accept-50k/fixture';
 import { fixture as adventureMidMonth } from './adventure-mid-month/fixture';
 import { fixture as ultra50kRace } from './ultra-50k-race/fixture';
 
@@ -29,6 +30,7 @@ import { fixture as volumeGoal } from './volume-goal/fixture';
 const phase0: OnboardingFixture[] = [
   generalFitnessOfframp,
   beyond50kOfframp,
+  beyond50kAccept50k,
   adventureMidMonth,
   ultra50kRace,
 ];
