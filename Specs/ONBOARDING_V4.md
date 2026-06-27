@@ -197,6 +197,15 @@ effort, the bot does **not** route into a plan. It:
 The off-ramped athlete is a linked athlete (Strava already connected) with **no
 plan**, in the dormant state (§4.5).
 
+> **Trigger fixed (v0.7.53, 2026-06-26).** As first built, this machinery only fired when
+> the model emitted a `generate`-with-`general_fitness` or a `volume_goal` signal — but the
+> engine prompt told the model to "hold the line" and never settle into `general_fitness`,
+> so a plain conversational "just stay fit" got a goodbye and **never went dormant / never
+> captured a check-back / never alerted David**. The V4-W6 eval caught it. Fix: a
+> `general_fitness` `generate` now bypasses the plan-input gates and falls straight through
+> to this off-ramp, and the prompt routes a confirmed no-event athlete here. See
+> CHANGELOG v0.7.53.
+
 ### 4.4 The post-event pause
 
 When a `committed` event's date passes and the plan's dated days are exhausted,
@@ -502,8 +511,14 @@ framing, the off-ramp/pause state, and adopting U1.
   date") lands on no web surface by choice; the bot orientation + Opener 1 do the
   no-event self-selection (verified event-scoped, left untouched). Web-only (Vercel
   push), no migration, build green + preview-verified.
-- **V4-W6 · Eval harness + fixtures · M.** §9. The V3-W5 harness with the v4
-  fixture/assertion deltas. Launch gate before opening to more users.
+- **V4-W6 · Eval harness + fixtures · M.** ⚙️ **BUILT + run live** (2026-06-26,
+  v0.7.53). §9. The V3-W5 harness with the v4 deltas: a Vitest suite driving the real
+  engine against live Sonnet, a hybrid simulated athlete, 18 fixtures, a deterministic
+  gate + optional `--judge` (built from `V4_W6_PROMPT.md`). The first runs surfaced + fixed
+  the §4.3 off-ramp trigger gap (prod) and shipped prompt caching (Part 1, prod); gate at
+  **14/18**. **Launch-gate-clean pending:** the `target_time` numeric fix
+  (`TARGET_TIME_PACE_FIX_PROMPT.md`) and two fixture tweaks (the `beyond-50k` persona, the
+  `injury-skipper` `[Skip]` pin).
 - **Retire / shelve · S.** Mark `GENERAL_FITNESS.md` shelved; note GF-W1/W2
   superseded; leave their code dormant (§5). Apply the §11 coordinated edits.
 
