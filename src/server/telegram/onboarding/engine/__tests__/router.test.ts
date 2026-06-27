@@ -128,6 +128,7 @@ function out(p: Partial<ExtractAdvanceOutput>): ExtractAdvanceOutput {
     asked_slot: null,
     race_lookup_query: null,
     goal_distance_mi: null,
+    goal_pace_sec_per_mi: null,
     contradiction: null,
     numeric_unresolved: null,
     intents: [],
@@ -815,6 +816,172 @@ describe('router — the Nathan mile turn (R1 fixes 1 + 5)', () => {
     expect(call[1]).toMatch(/doesn't look right for the mile/i);
     const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
     expect(saved.slots.target_time?.value).toBeNull();
+  });
+});
+
+// --- Target-time pace fix: pace→finish computed in code, not the model ---
+
+describe('router — stated-pace → finish (target-time pace fix)', () => {
+  it('computes target_time from a stated pace and confirms the CODE-rendered finish', async () => {
+    // "10 minute miles" with the marathon already known. The app computes the
+    // finish (600 × 26.2 = 15,720s ≈ 4:22:00) — the value the model used to drift
+    // to 26,200s. The confirm echoes the stored value, the check that catches drift.
+    const slots = completeSlots();
+    delete slots.target_time; // not yet set; pace lands now
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots, // goal_distance = 'marathon'
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'ask',
+        asked_slot: 'injury_status',
+        message: 'any injuries?',
+        goal_pace_sec_per_mi: 600,
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(100, 'I want 10 minute miles'), athlete);
+
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toContain('10:00/mi'); // formatPace
+    expect(call[1]).toContain('4:22:00'); // formatFinishTime of the stored value
+    expect(call[1]).toMatch(/that the goal\?/i);
+    expect(labels(call)).toEqual(['That works', 'Not quite']);
+
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.slots.target_time).toEqual({
+      value: 15720,
+      provenance: 'stated',
+      confirmed: true,
+    });
+    expect(saved.pending_confirm).toEqual({ slot: 'target_time', value: 15720, attempts: 1 });
+    expect(commitSlots).not.toHaveBeenCalled(); // the confirm blocks any generate handoff
+  });
+
+  it('re-asks when the stated pace is outside the sane envelope', async () => {
+    const slots = completeSlots();
+    delete slots.target_time;
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots,
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      // 100 s/mi ≈ 1:40/mi — below PACE_ENVELOPE_SEC_PER_MI.min (230).
+      output: out({ next_action: 'ask', message: 'noted', goal_pace_sec_per_mi: 100 }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(101, '100 second miles'), athlete);
+
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toMatch(/pace doesn't look right/i);
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.slots.target_time?.value ?? null).toBeNull(); // no junk finish stored
+    expect(saved.goal_pace_sec_per_mi).toBeUndefined(); // the bad pace is dropped
+  });
+
+  it('stashes a pace stated before the distance is known', async () => {
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race') }, // no distance yet
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({ next_action: 'ask', message: 'which race?', goal_pace_sec_per_mi: 600 }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(102, 'aiming for 10 min miles'), athlete);
+
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.goal_pace_sec_per_mi).toBe(600); // stashed
+    expect(saved.slots.target_time?.value ?? null).toBeNull(); // nothing to compute against yet
+  });
+
+  it('applies a stashed pace once the distance lands', async () => {
+    const slots = completeSlots();
+    delete slots.target_time;
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots, // distance now known
+      goal_pace_sec_per_mi: 600, // stashed from an earlier turn
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({ next_action: 'ask', asked_slot: 'injury_status', message: 'injuries?' }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(103, 'Sunday long runs'), athlete);
+
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.slots.target_time?.value).toBe(15720);
+    expect(saved.goal_pace_sec_per_mi).toBeUndefined(); // stash cleared once applied
+  });
+
+  it('a same-turn race lookup + pace stores the finish silently (no double confirm)', async () => {
+    // The messy-time-goal shape: "Metro Marathon at 10 min miles" fires the race
+    // lookup AND a pace. The race confirm owns the message; the pace-derived finish
+    // is stored silently — the recap (which renders the same value) is the net.
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race') },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      output: out({
+        next_action: 'confirm',
+        race_lookup_query: 'CIM',
+        message: 'looking',
+        goal_pace_sec_per_mi: 600,
+      }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+    vi.mocked(lookupRace).mockResolvedValue({
+      ok: true,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      found: { canonical_name: 'CIM', date: '2026-12-06', distance_mi: 26.2 } as any,
+    });
+
+    await handleV3Message(ctx(104, 'CIM at 10 minute miles'), athlete);
+
+    const call = sendMessage.mock.calls.at(-1)!;
+    expect(call[1]).toContain('Found it — CIM'); // the race confirm owns the turn
+    expect(call[1]).not.toContain('works out to about'); // not a stacked pace confirm
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.slots.target_time?.value).toBe(15720); // computed in code, not the model
+    expect(saved.slots.goal_distance?.value).toBe('marathon');
+    expect(saved.pending_confirm).toBeUndefined(); // only the race confirm, not a pace one
+  });
+
+  it('uses the real pocketed miles, not the bucket nominal, for a sub-floor goal', async () => {
+    // A mile behind the 5k pocket: the finish is pace × 1 mile, not pace × 3.1.
+    loadV3State.mockResolvedValue({
+      ...initialV3State(null),
+      phase: 'intake',
+      slots: { goal_type: sv('race') },
+      out_of_catalog: { words: 'a fast mile', distance_mi: 1, proxy: '5k', consent: 'pending' },
+    } as V3OnboardingState);
+    callExtractAndAdvance.mockResolvedValue({
+      // 7:00/mi = 420 s/mi → 420s for the mile (not 420 × 3.1).
+      output: out({ next_action: 'ask', message: 'noted', goal_pace_sec_per_mi: 420 }),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+
+    await handleV3Message(ctx(105, 'seven minute mile'), athlete);
+
+    const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
+    expect(saved.slots.target_time?.value).toBe(420); // pace × real miles (1), not the 5k nominal
   });
 });
 

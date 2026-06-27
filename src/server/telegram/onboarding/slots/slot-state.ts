@@ -162,6 +162,11 @@ export interface V3OnboardingState {
    *  applyStatedDistance so an adventure row carries the real distance, not the
    *  bucket nominal (a 33-mile route writes 33, not the 50k nominal 31.1). */
   event_distance_mi?: number;
+  /** A goal PACE the athlete stated (sec/mi) BEFORE the distance was known
+   *  (target-time pace fix). Stashed by the router so the implied finish
+   *  (paceToFinish) can be computed once the race/distance lands; cleared the
+   *  moment target_time is set. Rides in the JSONB onboarding_state — no migration. */
+  goal_pace_sec_per_mi?: number;
 }
 
 /**

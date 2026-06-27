@@ -89,6 +89,15 @@ export const ExtractAdvanceSchema = z.object({
     .number()
     .nullish()
     .transform((v) => v ?? null),
+  // A stated goal PACE in seconds per mile ("10 minute miles" → 600, "8:30 pace"
+  // → 510). The model emits only the one-step unit conversion; the APP computes
+  // the implied finish (paceToFinish), never the model — structured outputs drift
+  // from their own prose arithmetic (the 26,200s-for-a-marathon bug). Mirrors the
+  // goal_distance_mi precedent: model surfaces the number, code does the math.
+  goal_pace_sec_per_mi: z
+    .number()
+    .nullish()
+    .transform((v) => v ?? null),
   // A safety-relevant cross-slot conflict to surface before plan-gen (§5.1).
   contradiction: z
     .string()
@@ -199,6 +208,11 @@ const EXTRACT_TOOL = {
         description:
           "A concrete goal distance in MILES that isn't one of the standard buckets (5k/10k/half/marathon) — longer ('44 miles', '50k' ≈ 31, '100 miler') OR shorter ('a mile' → 1, '1500m' ≈ 0.93). The app maps it to a bucket or handles it specially. Don't set this if you set race_lookup_query (the lookup carries the distance), and don't guess goal_distance from a number yourself.",
       },
+      goal_pace_sec_per_mi: {
+        type: 'number',
+        description:
+          'A stated goal PACE in SECONDS PER MILE — "10 minute miles" → 600, "8:30 pace" → 510, "running 9s" → 540. Emit this for a stated pace and let the app compute the finish time. Do NOT compute target_time from a pace yourself, and do NOT set both goal_pace_sec_per_mi and target_time for the same statement. A stated finish TIME ("sub-4", "around 3:55") still goes in target_time directly, not here.',
+      },
       contradiction: {
         type: 'string',
         description:
@@ -253,8 +267,8 @@ const VOICE_RULES = [
 
 const NUMERIC_RULES = [
   'Numbers: never accept a bare number. A time goal is a finish time OR a pace — resolve which.',
-  '"10 minute miles" is a pace; compute the implied finish for the distance. "4:25" for a marathon is hours, not minutes.',
-  'A stated time goal ("sub-5 mile", "around 3:55") is a target_time fill on that same turn — never leave it living in prose only.',
+  'A pace ("10 minute miles", "8:30 pace", "running 9s") is NOT a finish time: emit goal_pace_sec_per_mi in seconds per mile (10:00 → 600, 8:30 → 510) and let the app compute the finish — never do the pace×distance math yourself. "4:25" for a marathon is hours, not minutes.',
+  'A stated finish TIME ("sub-4", "around 3:55") is a target_time fill on that same turn — never leave it living in prose only, and never set both target_time and goal_pace_sec_per_mi for one statement.',
   'Always state the unit back when you echo a time ("a 4:25 finish — four hours twenty-five").',
   'If a number is genuinely ambiguous, set numeric_unresolved and let the app offer the two readings.',
 ].join(' ');

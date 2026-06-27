@@ -306,6 +306,7 @@ describe('commitSlots — a superseded pocket leaves no trace (stale-pocket fix)
       asked_slot: null,
       race_lookup_query: null,
       goal_distance_mi: null,
+      goal_pace_sec_per_mi: null,
       contradiction: null,
       numeric_unresolved: null,
       intents: [],

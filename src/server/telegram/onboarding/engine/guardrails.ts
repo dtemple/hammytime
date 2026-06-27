@@ -732,6 +732,7 @@ export const SYNTHETIC_GENERATE: ExtractAdvanceOutput = {
   asked_slot: null,
   race_lookup_query: null,
   goal_distance_mi: null,
+  goal_pace_sec_per_mi: null,
   contradiction: null,
   numeric_unresolved: null,
   // Empty/absent so a synthetic turn can never append an intent or count as

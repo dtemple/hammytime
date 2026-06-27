@@ -48,11 +48,15 @@ import { loadRecentHistory } from './history';
 import {
   CATALOG_FLOOR_MI,
   deriveBucketFromMiles,
+  formatPace,
   isPastISODate,
+  paceToFinish,
+  PACE_ENVELOPE_SEC_PER_MI,
   resolveFinishTime,
   resolveFinishTimeForMiles,
   todayISOInTz,
 } from './numeric';
+import { formatFinishTime } from '../parsing/durations';
 import {
   acceptPocketAndAdvance,
   applyStatedDistance,
@@ -191,6 +195,14 @@ function nextActionsKeyboard(): InlineKeyboard {
 }
 
 const mkSlot = slotValue;
+
+/** Confirm chips for a code-computed pace→finish (target-time pace fix). `yes` is
+ *  the exact token the pending-confirm fast path keys on; the decline falls to the
+ *  model, which sees the pending confirm in summarizeState. */
+const PACE_CONFIRM_CHIPS: Chip[] = [
+  { label: 'That works', value: 'yes' },
+  { label: 'Not quite', value: 'let me fix that' },
+];
 
 /**
  * Prefix the model's one-time mirror onto whatever message won the turn (R2).
@@ -410,6 +422,10 @@ async function runTurn({
     // reflection composition's boundary lead (the race-lookup variant carries its
     // own "Found it — … Heads up though:" lead already).
     let pocketOfferOwnsMessage = false;
+    // Set when the race-lookup result owns the turn's message (the race confirm /
+    // off-ramp / adventure prompt) — suppresses a same-turn pace→finish confirm so
+    // the athlete isn't shown two confirms at once (target-time pace fix).
+    let raceLookupOwnsMessage = false;
     // A goal the model flagged as the athlete's own adventure (V4-W4b): mark it on
     // state so commit writes event_kind and the recap frames it as "your run". An
     // adventure has no catalog entry, so it SKIPS the race lookup — its distance
@@ -421,6 +437,7 @@ async function runTurn({
       working = lr.state;
       message = lr.message;
       chips = lr.chips;
+      raceLookupOwnsMessage = true;
     } else if (result.output.goal_distance_mi != null && !resolved.overridden) {
       const sd = applyStatedDistance(working, result.output.goal_distance_mi, text);
       working = sd.state;
@@ -513,11 +530,49 @@ async function runTurn({
       }
     }
 
+    // Target-time pace fix: the athlete stated a PACE, not a finish. The model now
+    // surfaces it as goal_pace_sec_per_mi (sec/mi) and the APP computes the implied
+    // finish via paceToFinish — the safety-critical arithmetic the model used to
+    // botch (the 26,200s marathon). Runs AFTER the race-lookup / pocket / backstop
+    // blocks so a same-turn "Metro Marathon at 10-min miles" has its bucket resolved
+    // first. The result is plausible by construction (validated pace × real distance),
+    // so it never needs the backstop; the confirm echoes the CODE-stored value, which
+    // is the check that would have caught 7:16. A pace stated before the distance
+    // lands is stashed (goal_pace_sec_per_mi) and applied when the distance arrives.
+    let paceConfirmFired = false;
+    const statedPace = result.output.goal_pace_sec_per_mi ?? working.goal_pace_sec_per_mi ?? null;
+    if (statedPace != null && !resolved.overridden) {
+      const paceApplied = applyStatedPace(working, Math.round(statedPace), {
+        // Store silently (no stacked confirm) whenever a higher-priority thread
+        // already owns the turn: a race confirm, a pocket offer (this turn or a
+        // prior-turn consent still pending), the off-ramp, or the backstop. The
+        // recap renders the same stored finish, so the value is still validated.
+        messageOwned:
+          raceLookupOwnsMessage ||
+          pocketOfferOwnsMessage ||
+          volumeBoundaryFired ||
+          backstopFired ||
+          working.out_of_catalog?.consent === 'pending',
+      });
+      working = paceApplied.state;
+      if (paceApplied.message != null) {
+        message = paceApplied.message;
+        chips = paceApplied.chips ?? [];
+        paceConfirmFired = true;
+      }
+    }
+
     // A fired backstop owns the turn even against a generate — building the plan
     // now would silently drop the athlete's goal time (the "sub-5 evaporated" bug).
     // Same for a volume boundary: generating past it is the "happily agreed to
-    // 100 miles a month" failure all over again.
-    if (resolved.action === 'generate' && !backstopFired && !volumeBoundaryFired) {
+    // 100 miles a month" failure all over again. A pace confirm likewise blocks the
+    // handoff so the athlete validates the computed finish before the plan is built.
+    if (
+      resolved.action === 'generate' &&
+      !backstopFired &&
+      !volumeBoundaryFired &&
+      !paceConfirmFired
+    ) {
       await finishOnboarding(athlete, chatId, working);
       return;
     }
@@ -597,6 +652,76 @@ function backstopTargetTime(
     state: next,
     message: `That time doesn't look right for ${forLabel}. What's your goal finish, as ${units}?`,
     chips: [],
+  };
+}
+
+/**
+ * Apply a stated goal PACE (sec/mi) to the turn — the target-time pace fix. The
+ * model surfaces the pace; this does the arithmetic the model used to botch:
+ *  - pace out of the sane envelope (230–1500 s/mi) → drop it and re-ask;
+ *  - distance known → compute target_time = pace × distance (the real miles behind
+ *    a pocket, else the bucket nominal via paceToFinish), store it `stated`, and
+ *    confirm the CODE-rendered finish through pending_confirm;
+ *  - distance not known yet → stash the pace until the race/distance lands.
+ *
+ * `opts.messageOwned` is set when a higher-priority block (a race confirm, a pocket
+ * offer, the off-ramp, the backstop) already owns the turn's message: the value is
+ * then stored SILENTLY and the recap is the net — it renders the same stored finish,
+ * the value now agreeing everywhere — rather than stacking a second confirm. Returns
+ * the new state, plus a message + chips only when this block should own the turn.
+ */
+function applyStatedPace(
+  state: V3OnboardingState,
+  pace: number,
+  opts: { messageOwned: boolean },
+): { state: V3OnboardingState; message?: string; chips?: Chip[] } {
+  // A finish time already landed (a direct fill, or computed earlier) — the pace is
+  // moot; drop any stash so it can't reapply.
+  if (state.slots.target_time?.value != null) {
+    return state.goal_pace_sec_per_mi != null
+      ? { state: { ...state, goal_pace_sec_per_mi: undefined } }
+      : { state };
+  }
+
+  if (pace < PACE_ENVELOPE_SEC_PER_MI.min || pace > PACE_ENVELOPE_SEC_PER_MI.max) {
+    // Out of the sane pace envelope — drop it rather than store a junk finish.
+    const cleared = { ...state, goal_pace_sec_per_mi: undefined };
+    if (opts.messageOwned) return { state: cleared };
+    return {
+      state: cleared,
+      message: "That pace doesn't look right to me — what finish time are you aiming for?",
+      chips: [],
+    };
+  }
+
+  // The real distance behind a pocketed goal computes against real miles, not the
+  // bucket nominal (mirrors resolveFinishTimeForMiles / the backstop's oocMiles).
+  const oocMiles = state.out_of_catalog?.distance_mi ?? null;
+  const distance = state.slots.goal_distance?.value as GoalDistanceValue | undefined;
+  if (oocMiles == null && (distance == null || distance === 'keep_fit')) {
+    // Distance not known yet — stash the pace; apply it when the distance lands.
+    return { state: { ...state, goal_pace_sec_per_mi: pace } };
+  }
+
+  const targetTime =
+    oocMiles != null ? Math.round(pace * oocMiles) : paceToFinish(pace, distance as GoalDistanceValue);
+  const stored: V3OnboardingState = {
+    ...state,
+    slots: { ...state.slots, target_time: mkSlot<number>(targetTime, 'stated', true) },
+    goal_pace_sec_per_mi: undefined,
+  };
+  if (opts.messageOwned) return { state: stored };
+
+  const forLabel =
+    oocMiles != null
+      ? Math.round(oocMiles) === 1
+        ? 'the mile'
+        : `${Math.round(oocMiles)} miles`
+      : `the ${distance}`;
+  return {
+    state: { ...stored, pending_confirm: { slot: 'target_time', value: targetTime, attempts: 1 } },
+    message: `${formatPace(pace)} works out to about ${formatFinishTime(targetTime)} for ${forLabel} — that the goal?`,
+    chips: PACE_CONFIRM_CHIPS,
   };
 }
 
