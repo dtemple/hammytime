@@ -319,6 +319,35 @@ export async function handleInboundText(ctx: Context): Promise<void> {
   }
 }
 
+// A voice note that won't transcribe, or an unsupported attachment with no
+// caption, otherwise leaves no trace: the handler returns before
+// handleInboundText, so neither the athlete's attempt nor the bot's fallback is
+// logged and the transcript shows an unexplained gap. Record the attempt as a
+// placeholder inbound (there's no text to log verbatim) and send the fallback
+// through sendAndLog so it lands in messages too — logging both keeps the order
+// readable (the reply would otherwise answer nothing). A pre-link chat has no
+// athlete row to log against, so it degrades to a bare reply.
+async function replyToUnreadable(
+  ctx: Context,
+  placeholder: string,
+  fallback: string,
+): Promise<void> {
+  const chatId = ctx.chat!.id;
+  const { data: athlete } = await supabaseAdmin()
+    .from('athletes')
+    .select('id')
+    .eq('telegram_chat_id', String(chatId))
+    .maybeSingle();
+  if (!athlete) {
+    await ctx.reply(fallback);
+    return;
+  }
+  await supabaseAdmin()
+    .from('messages')
+    .insert({ athlete_id: athlete.id, channel: 'tg', direction: 'in', body: placeholder });
+  await sendAndLog(athlete.id, chatId, fallback);
+}
+
 // Transcribes a Telegram voice note and dispatches it exactly like a typed
 // message. We write the transcript onto ctx.message.text so every downstream
 // path (wellness, onboarding, coaching) picks it up through handleInboundText.
@@ -346,12 +375,20 @@ export async function handleInboundVoice(ctx: Context): Promise<void> {
     // in a console.error — a friend complaining is otherwise the only signal.
     console.error('[bot] voice transcription failed', err);
     Sentry.captureException(err, { tags: { area: 'voice_transcription' } });
-    await ctx.reply('Voice transcription is having trouble right now — mind typing it for now?');
+    await replyToUnreadable(
+      ctx,
+      '[voice note]',
+      'Voice transcription is having trouble right now — mind typing it for now?',
+    );
     return;
   }
 
   if (!transcript) {
-    await ctx.reply("Couldn't make out that audio — mind typing it or trying again?");
+    await replyToUnreadable(
+      ctx,
+      '[voice note]',
+      "Couldn't make out that audio — mind typing it or trying again?",
+    );
     return;
   }
 
@@ -394,7 +431,9 @@ export async function handleInboundMedia(ctx: Context): Promise<void> {
   const caption = ctx.message?.caption?.trim() ?? '';
 
   if (!caption) {
-    await ctx.reply(
+    await replyToUnreadable(
+      ctx,
+      '[attachment]',
       "I can't open attachments like that yet. Tell me in a message what you needed and I'll pick it up from there.",
     );
     return;

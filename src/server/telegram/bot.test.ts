@@ -67,6 +67,7 @@ import { disconnectGoogleCalendar } from '@/server/google/disconnect';
 import { enqueueCalendarSyncIfConnected } from '@/server/google/enqueue-sync';
 import {
   handleInboundText,
+  handleInboundVoice,
   handleInboundMedia,
   handleConnectStravaCommand,
   handlePrehabCommand,
@@ -349,18 +350,101 @@ describe('handleInboundText — wellness routing', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Inbound voice (transcription failure path)
+// ---------------------------------------------------------------------------
+
+describe('handleInboundVoice', () => {
+  afterEach(() => {
+    delete process.env.TELEGRAM_BOT_TOKEN;
+  });
+
+  it('logs the attempt + fallback when transcription fails', async () => {
+    const send = configureBotSend();
+    const inserts: Array<{ direction: string; body: string }> = [];
+    (supabaseAdmin as AnyMock).mockReturnValue({
+      from: vi.fn().mockImplementation((table: string) => {
+        if (table === 'athletes') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({ data: { id: ATHLETE_ID }, error: null }),
+              }),
+            }),
+          };
+        }
+        if (table === 'messages') {
+          return {
+            insert: vi.fn().mockImplementation((row: { direction: string; body: string }) => {
+              inserts.push(row);
+              return Promise.resolve({ error: null });
+            }),
+          };
+        }
+        return {};
+      }),
+    });
+    // getFile throwing short-circuits the try block straight to the catch — no
+    // need to mock fetch/transcribeOgg to exercise the failure path.
+    const ctx = makeCtx({
+      react: vi.fn().mockResolvedValue(undefined),
+      getFile: vi.fn().mockRejectedValue(new Error('telegram getFile down')),
+    });
+
+    await handleInboundVoice(ctx as AnyMock);
+
+    // The fallback is sent AND logged; the attempt is recorded as a placeholder
+    // inbound so a failed voice note isn't an invisible gap in the transcript.
+    expect(send).toHaveBeenCalledWith(
+      CHAT_ID,
+      expect.stringContaining('Voice transcription is having trouble'),
+    );
+    expect(inserts).toContainEqual(expect.objectContaining({ direction: 'in', body: '[voice note]' }));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Inbound media (photos, files, video, stickers…)
 // ---------------------------------------------------------------------------
 
 describe('handleInboundMedia', () => {
-  it('replies with the not-supported notice and does nothing else when there is no caption', async () => {
-    (supabaseAdmin as AnyMock).mockReturnValue(makeDb('active'));
+  afterEach(() => {
+    delete process.env.TELEGRAM_BOT_TOKEN;
+  });
+
+  it('logs the attempt + notice (no caption) and does not route to coaching', async () => {
+    const send = configureBotSend();
+    const inserts: Array<{ direction: string; body: string }> = [];
+    (supabaseAdmin as AnyMock).mockReturnValue({
+      from: vi.fn().mockImplementation((table: string) => {
+        if (table === 'athletes') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({ data: { id: ATHLETE_ID }, error: null }),
+              }),
+            }),
+          };
+        }
+        if (table === 'messages') {
+          return {
+            insert: vi.fn().mockImplementation((row: { direction: string; body: string }) => {
+              inserts.push(row);
+              return Promise.resolve({ error: null });
+            }),
+          };
+        }
+        return {};
+      }),
+    });
     const ctx = makeCtx({ message: { photo: [{ file_id: 'abc' }], message_id: 7 } });
 
     await handleInboundMedia(ctx as AnyMock);
 
-    expect(ctx.reply).toHaveBeenCalledOnce();
-    expect((ctx.reply as AnyMock).mock.calls[0]![0]).toContain("can't open attachments");
+    // The notice is sent AND logged (not a bare ctx.reply).
+    expect(ctx.reply).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledWith(CHAT_ID, expect.stringContaining("can't open attachments"));
+    // The attempt is recorded as a placeholder inbound so the notice isn't orphaned.
+    expect(inserts).toContainEqual(expect.objectContaining({ direction: 'in', body: '[attachment]' }));
     // No caption → never routed into the coaching pipeline.
     expect(enqueueJob).not.toHaveBeenCalled();
   });
