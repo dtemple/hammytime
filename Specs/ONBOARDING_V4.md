@@ -383,6 +383,18 @@ or an adventure with a date."
 
 ## 9. Eval / verification — narrowed but event-broadened
 
+> **Built (V4-W6, 2026-06-26, v0.7.53; gate 14/18) — see §10 + CHANGELOG v0.7.53.** Two
+> refinements the build settled, vs the assertion list below: (1) **"provenance never
+> `stated` for the unstated" is a JUDGE dimension, not a deterministic gate** — a
+> facts-substring match false-positives on model-resolved dates, looked-up race dates,
+> composed goal labels, and "nothing"→"none" normalizations (all faithful, not invented),
+> so fabrication is checked by the optional `--judge` pass, not the hard gate. (2) The
+> **general-fitness / broad-non-running off-ramp** assertions required the §4.3 trigger fix
+> to fire at all (the machinery was unreachable on the conversational path) — now verified.
+> **Open before launch-gate-clean:** the `target_time` numeric fix
+> (`TARGET_TIME_PACE_FIX_PROMPT.md`) and two fixture tweaks (`beyond-50k` persona,
+> `injury-skipper` `[Skip]` pin).
+
 > **Superseded for beyond-50k (V4-W4, 2026-06-24, v0.7.46).** The "consented proxy
 > for a 50mi+ goal" fixtures below (the 44-mile adventure, Western States 100) were
 > built as an **off-ramp**, not a proxy: a goal past the 50k is acknowledged and
