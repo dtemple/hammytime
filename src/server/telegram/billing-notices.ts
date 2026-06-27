@@ -10,14 +10,14 @@ import { supabaseAdmin } from '@/lib/db';
 import { getCreditState } from '@/server/billing/credits';
 import { estimateRunwayDays, runwayLabel } from '@/server/billing/burn-rate';
 import { dollarsLabel } from '@/server/billing/pricing';
-import { botApiForChat } from './bot';
+import { sendAndLog } from './bot';
 
 /**
  * Confirm a top-up in Telegram (Specs/METERING_PAYMENTS.md §6 step 5). Best-effort: the
  * credit is already committed, so a send failure must not propagate (a Stripe webhook
- * that 500s would replay the topup as a no-op and never re-send this). botApiForChat
- * routes the negative test-group chat to the staging bot like the rest of the outbound
- * paths. Call only when the topup actually landed (recordStripeTopup returned true).
+ * that 500s would replay the topup as a no-op and never re-send this). sendAndLog
+ * routes the negative test-group chat to the staging bot and logs the message like the
+ * rest of the outbound paths. Call only when the topup landed (recordStripeTopup → true).
  */
 export async function sendTopupConfirmation(athleteId: string, grossCents: number): Promise<void> {
   try {
@@ -35,11 +35,7 @@ export async function sendTopupConfirmation(athleteId: string, grossCents: numbe
       balanceCents,
     )}, ${runwayLabel(days)} at your pace.`;
 
-    const chatId = athlete.telegram_chat_id;
-    await botApiForChat(chatId).sendMessage(chatId, text);
-    await db
-      .from('messages')
-      .insert({ athlete_id: athleteId, channel: 'tg', direction: 'out', body: text });
+    await sendAndLog(athleteId, athlete.telegram_chat_id, text);
   } catch (err) {
     // Credit already landed; the confirmation is cosmetic. Log and move on.
     Sentry.captureException(err);

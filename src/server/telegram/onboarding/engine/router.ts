@@ -14,7 +14,7 @@ import { InlineKeyboard, type Context } from 'grammy';
 import { supabaseAdmin } from '@/lib/db';
 import type { Database } from '@/lib/db-types';
 import { sendDavidAlert } from '@/server/admin/alerts';
-import { botApiForChat } from '../../bot';
+import { sendAndLog } from '../../bot';
 import { selectionKeyboardFromTap, labelForTap } from '../dispatcher';
 import { lookupRace } from '@/server/agent/race-lookup';
 import { enterDormant, exitDormant, setCheckBack } from '../../pause';
@@ -162,16 +162,14 @@ async function logInbound(athleteId: string, body: string): Promise<void> {
     .insert({ athlete_id: athleteId, channel: 'tg', direction: 'in', body });
 }
 
+// Thin local alias for the engine's many send sites; the send+log lives in sendAndLog.
 async function sendV3(
   athleteId: string,
   chatId: number | string,
   text: string,
   keyboard?: InlineKeyboard,
 ): Promise<void> {
-  await botApiForChat(chatId).sendMessage(chatId, text, keyboard ? { reply_markup: keyboard } : {});
-  await supabaseAdmin()
-    .from('messages')
-    .insert({ athlete_id: athleteId, channel: 'tg', direction: 'out', body: text });
+  await sendAndLog(athleteId, chatId, text, keyboard);
 }
 
 /** One chip per row (never truncate labels — see the onboarding button memo). The

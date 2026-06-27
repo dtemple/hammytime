@@ -45,13 +45,23 @@ function getBuildInfo(): string | null {
   }
 }
 
-// Sends a message and persists it to the messages table (direction = 'out').
+// The single logged-send helper: sends one outbound message and persists the
+// VERBATIM body to the messages table (direction = 'out'), so transcripts mirror
+// Telegram. Routes through botApiForChat so group chats (negative ids — the
+// test-athlete onboarding loop) reach the staging bot. Every athlete-facing send
+// goes through here; do not re-implement the send+insert elsewhere.
 export async function sendAndLog(
   athleteId: string,
   chatId: number | string,
   text: string,
+  keyboard?: InlineKeyboard,
 ): Promise<void> {
-  await getBot().api.sendMessage(chatId, text);
+  const api = botApiForChat(chatId);
+  if (keyboard) {
+    await api.sendMessage(chatId, text, { reply_markup: keyboard });
+  } else {
+    await api.sendMessage(chatId, text);
+  }
   await supabaseAdmin().from('messages').insert({
     athlete_id: athleteId,
     channel: 'tg',
@@ -86,19 +96,11 @@ async function sendWelcomeAndConnect(athleteId: string, chatId: number | string)
     partial: { sub_step: 'awaiting_strava' },
   });
 
-  const keyboard = new InlineKeyboard().url('Connect Strava', stravaConnectUrl(athleteId));
-  await getBot().api.sendMessage(
-    chatId,
+  const welcome =
     'Welcome! Daybreak needs a Strava connection to work. ' +
-      'Connect your Strava account here to begin.',
-    { reply_markup: keyboard },
-  );
-  await supabaseAdmin().from('messages').insert({
-    athlete_id: athleteId,
-    channel: 'tg',
-    direction: 'out',
-    body: 'Welcome. Connect Strava to get started.',
-  });
+    'Connect your Strava account here to begin.';
+  const keyboard = new InlineKeyboard().url('Connect Strava', stravaConnectUrl(athleteId));
+  await sendAndLog(athleteId, chatId, welcome, keyboard);
 }
 
 async function handleStart(ctx: CommandContext<Context>): Promise<void> {

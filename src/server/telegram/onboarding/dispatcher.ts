@@ -132,22 +132,6 @@ async function askQuestion(
   await sendAndLog(athleteId, chatId, question.prompt);
 }
 
-// Send a message carrying an inline keyboard and persist it (sendAndLog is text-only).
-async function sendWithKeyboard(
-  athleteId: string,
-  chatId: number | string,
-  text: string,
-  keyboard: InlineKeyboard,
-): Promise<void> {
-  await telegramBot().api.sendMessage(chatId, text, { reply_markup: keyboard });
-  await supabaseAdmin().from('messages').insert({
-    athlete_id: athleteId,
-    channel: 'tg',
-    direction: 'out',
-    body: text,
-  });
-}
-
 /**
  * Routes an inbound text message through the onboarding state machine.
  *
@@ -181,7 +165,7 @@ export async function handleOnboardingMessage(ctx: Context, athlete: AthleteRow)
       // A text answer can advance into a button screen (e.g. the enrichment echo +
       // confirm buttons): send a fresh keyboarded message when replyMarkup is set.
       if (result.reply && result.replyMarkup) {
-        await sendWithKeyboard(athleteId, chatId, result.reply, result.replyMarkup);
+        await sendAndLog(athleteId, chatId, result.reply, result.replyMarkup);
       } else if (result.reply) {
         await sendAndLog(athleteId, chatId, result.reply);
       }
@@ -189,7 +173,7 @@ export async function handleOnboardingMessage(ctx: Context, athlete: AthleteRow)
     }
     // Step complete: run onComplete then advance to next step
     if (result.reply && result.replyMarkup) {
-      await sendWithKeyboard(athleteId, chatId, result.reply, result.replyMarkup);
+      await sendAndLog(athleteId, chatId, result.reply, result.replyMarkup);
     } else if (result.reply) {
       await sendAndLog(athleteId, chatId, result.reply);
     }
@@ -257,7 +241,7 @@ async function completeStep(
       await advanceQuestion(athleteId, { step: nextStepIdx, question: 0, partial: {} });
       try {
         const { text, keyboard } = await nextStep.onEnter(athleteId);
-        if (keyboard) await sendWithKeyboard(athleteId, chatId, text, keyboard);
+        if (keyboard) await sendAndLog(athleteId, chatId, text, keyboard);
         else await sendAndLog(athleteId, chatId, text);
       } catch (err) {
         console.error(`[onboarding] onEnter failed for step ${nextStep.id}`, err);
@@ -360,7 +344,7 @@ export async function handleOnboardingCallback(
       await ctx.editMessageReplyMarkup().catch(() => undefined);
       await advanceQuestion(athleteId, { step: state.step, question: 0, partial: back.newPartial });
       if (back.reply && back.replyMarkup) {
-        await sendWithKeyboard(athleteId, chatId, back.reply, back.replyMarkup);
+        await sendAndLog(athleteId, chatId, back.reply, back.replyMarkup);
       } else if (back.reply) {
         await sendAndLog(athleteId, chatId, back.reply);
       }
@@ -386,7 +370,7 @@ export async function handleOnboardingCallback(
     // Leave a record of the tapped choice before moving on.
     await recordSelection(ctx, data);
     if (result.reply && result.replyMarkup) {
-      await sendWithKeyboard(athleteId, chatId, result.reply, result.replyMarkup);
+      await sendAndLog(athleteId, chatId, result.reply, result.replyMarkup);
     } else if (result.reply) {
       await sendAndLog(athleteId, chatId, result.reply);
     }
@@ -406,7 +390,7 @@ export async function handleOnboardingCallback(
     // keyboard to a "✅ <choice>" record so it can't be re-tapped, then send a
     // fresh keyboarded message.
     await recordSelection(ctx, data);
-    await sendWithKeyboard(athleteId, chatId, result.reply, result.replyMarkup);
+    await sendAndLog(athleteId, chatId, result.reply, result.replyMarkup);
   } else if (result.replyMarkup) {
     // In-place re-render of the same screen (e.g. a toggle).
     await ctx.editMessageReplyMarkup({ reply_markup: result.replyMarkup });

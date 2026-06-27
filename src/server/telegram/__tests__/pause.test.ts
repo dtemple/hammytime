@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 
-// pause.ts imports telegramBot from ./bot and supabaseAdmin from @/lib/db at the
+// pause.ts imports sendAndLog from ./bot and supabaseAdmin from @/lib/db at the
 // top level; isInactive uses neither, so stub both to keep this a pure unit test.
 import { vi } from 'vitest';
-vi.mock('../bot', () => ({ telegramBot: vi.fn() }));
+vi.mock('../bot', () => ({ sendAndLog: vi.fn() }));
 vi.mock('@/lib/db', () => ({ supabaseAdmin: vi.fn() }));
 
 import {
@@ -18,7 +18,7 @@ import {
   clearAutoInactivityPause,
 } from '../pause';
 import { supabaseAdmin } from '@/lib/db';
-import { telegramBot } from '../bot';
+import { sendAndLog } from '../bot';
 import type { Database } from '@/lib/db-types';
 import type { Plan } from '@/lib/plan-schema';
 
@@ -137,41 +137,34 @@ function stubSupabaseForSweep(rows: SweepRow[]) {
 
 describe('sweepCheckBacks', () => {
   it('nudges a due athlete, logs the message, and nulls the date on success', async () => {
-    const sendMessage = vi.fn().mockResolvedValue(undefined);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    vi.mocked(telegramBot).mockReturnValue({ api: { sendMessage } } as any);
-    const { updates, inserts } = stubSupabaseForSweep([
+    // sendAndLog owns the send+log now; asserting it ran is the "logs the message" check.
+    vi.mocked(sendAndLog).mockReset().mockResolvedValue(undefined);
+    const { updates } = stubSupabaseForSweep([
       { id: 'd1', telegram_chat_id: '111', check_back_at: '2020-01-01T00:00:00Z' },
     ]);
 
     const sent = await sweepCheckBacks();
 
     expect(sent).toBe(1);
-    expect(sendMessage).toHaveBeenCalledWith('111', CHECK_BACK_NUDGE, {});
-    expect(inserts).toHaveLength(1); // the outbound message is logged
+    expect(sendAndLog).toHaveBeenCalledWith('d1', '111', CHECK_BACK_NUDGE);
     expect(updates).toEqual([{ id: 'd1', patch: { check_back_at: null } }]); // nulled
   });
 
   it('clears the date but sends nothing for an athlete with no chat id', async () => {
-    const sendMessage = vi.fn().mockResolvedValue(undefined);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    vi.mocked(telegramBot).mockReturnValue({ api: { sendMessage } } as any);
-    const { updates, inserts } = stubSupabaseForSweep([
+    vi.mocked(sendAndLog).mockReset().mockResolvedValue(undefined);
+    const { updates } = stubSupabaseForSweep([
       { id: 'd2', telegram_chat_id: null, check_back_at: '2020-01-01T00:00:00Z' },
     ]);
 
     const sent = await sweepCheckBacks();
 
     expect(sent).toBe(0);
-    expect(sendMessage).not.toHaveBeenCalled();
-    expect(inserts).toHaveLength(0);
+    expect(sendAndLog).not.toHaveBeenCalled();
     expect(updates).toEqual([{ id: 'd2', patch: { check_back_at: null } }]);
   });
 
   it('leaves the date set when the send fails, so the next tick retries', async () => {
-    const sendMessage = vi.fn().mockRejectedValue(new Error('telegram down'));
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    vi.mocked(telegramBot).mockReturnValue({ api: { sendMessage } } as any);
+    vi.mocked(sendAndLog).mockReset().mockRejectedValue(new Error('telegram down'));
     const { updates } = stubSupabaseForSweep([
       { id: 'd3', telegram_chat_id: '222', check_back_at: '2020-01-01T00:00:00Z' },
     ]);

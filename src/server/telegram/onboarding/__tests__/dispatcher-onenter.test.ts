@@ -68,9 +68,12 @@ describe('dispatcher onEnter entry', () => {
       question: 0,
       partial: {},
     });
-    expect(sendMessage).toHaveBeenCalledWith(123, "Here's your starting plan…", {
-      reply_markup: kb,
-    });
+    expect(sendAndLog as AnyMock).toHaveBeenCalledWith(
+      'athlete-1',
+      123,
+      "Here's your starting plan…",
+      kb,
+    );
   });
 
   it('on onEnter throw, sends a fallback and alerts David (does not crash)', async () => {

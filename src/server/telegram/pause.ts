@@ -11,7 +11,7 @@ import { supabaseAdmin } from '@/lib/db';
 import type { Database } from '@/lib/db-types';
 import { PlanSchema, type Plan } from '@/lib/plan-schema';
 import { futureDatedDayCount, lastDatedDay } from '@/lib/plan-templates';
-import { telegramBot } from './bot';
+import { sendAndLog } from './bot';
 
 type AthleteRow = Database['public']['Tables']['athletes']['Row'];
 
@@ -96,22 +96,7 @@ export async function sendAutoPauseNotice(
 ): Promise<void> {
   if (!athlete.telegram_chat_id) return;
   const keyboard = new InlineKeyboard().text('Turn daily check-ins back on', RESUME_AUTO_CALLBACK);
-  await sendAndLogOutbound(athlete.telegram_chat_id, athlete.id, AUTO_PAUSE_NOTICE, keyboard);
-}
-
-/** Send one outbound bot message and log it to `messages`. Shared by the static,
- *  hand-written notices (auto-pause, dormant check-back nudge — and W3's pause).
- *  Throws on send failure; the caller decides whether that aborts a batch. */
-async function sendAndLogOutbound(
-  chatId: string,
-  athleteId: string,
-  body: string,
-  keyboard?: InlineKeyboard,
-): Promise<void> {
-  await telegramBot().api.sendMessage(chatId, body, keyboard ? { reply_markup: keyboard } : {});
-  await supabaseAdmin()
-    .from('messages')
-    .insert({ athlete_id: athleteId, channel: 'tg', direction: 'out', body });
+  await sendAndLog(athlete.id, athlete.telegram_chat_id, AUTO_PAUSE_NOTICE, keyboard);
 }
 
 /**
@@ -225,7 +210,7 @@ export async function sweepCheckBacks(): Promise<number> {
       continue;
     }
     try {
-      await sendAndLogOutbound(a.telegram_chat_id, a.id, CHECK_BACK_NUDGE);
+      await sendAndLog(a.id, a.telegram_chat_id, CHECK_BACK_NUDGE);
       await supabaseAdmin().from('athletes').update({ check_back_at: null }).eq('id', a.id);
       sent++;
     } catch (err) {
@@ -346,7 +331,7 @@ export async function sendPostEventPauseNotice(
   athlete: Pick<AthleteRow, 'id' | 'telegram_chat_id'>,
 ): Promise<void> {
   if (!athlete.telegram_chat_id) return;
-  await sendAndLogOutbound(athlete.telegram_chat_id, athlete.id, POST_EVENT_PAUSE_NOTICE);
+  await sendAndLog(athlete.id, athlete.telegram_chat_id, POST_EVENT_PAUSE_NOTICE);
 }
 
 // ---------------------------------------------------------------------------

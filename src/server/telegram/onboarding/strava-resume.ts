@@ -1,6 +1,6 @@
 import { InlineKeyboard } from 'grammy';
 import { supabaseAdmin } from '@/lib/db';
-import { botApiForChat } from '../bot';
+import { sendAndLog } from '../bot';
 import {
   fetchRecentActivities,
   getLoggedInAthlete,
@@ -33,20 +33,6 @@ function orientationMessage(firstname: string | null): string {
   ].join('\n\n');
 }
 
-async function sendWithKeyboard(
-  athleteId: string,
-  chatId: number | string,
-  text: string,
-  keyboard?: InlineKeyboard,
-): Promise<void> {
-  await botApiForChat(chatId).sendMessage(chatId, text, keyboard ? { reply_markup: keyboard } : {});
-  await supabaseAdmin().from('messages').insert({
-    athlete_id: athleteId,
-    channel: 'tg',
-    direction: 'out',
-    body: text,
-  });
-}
 
 /**
  * Resume onboarding after a successful Strava OAuth connect (beat A1).
@@ -100,7 +86,7 @@ export async function resumeAfterStrava(athleteId: string): Promise<boolean> {
     const won = await seedV3IfAwaitingStrava(athleteId, v3);
     if (!won) return false;
 
-    await sendWithKeyboard(
+    await sendAndLog(
       athleteId,
       athlete.telegram_chat_id,
       orientationMessage(firstname),
@@ -125,14 +111,14 @@ export async function resumeAfterStrava(athleteId: string): Promise<boolean> {
   if (hasName) {
     const label = tzLabel(timezone);
     const where = label ? `, on ${label}` : '';
-    await sendWithKeyboard(
+    await sendAndLog(
       athleteId,
       athlete.telegram_chat_id,
       `Connected and read your last couple months. You're ${firstname}${where}. Is that right?`,
       new InlineKeyboard().text('Yep', 'profile:yep').text('Not quite', 'profile:fix'),
     );
   } else {
-    await sendWithKeyboard(
+    await sendAndLog(
       athleteId,
       athlete.telegram_chat_id,
       'Connected and read your last couple months. What should I call you?',

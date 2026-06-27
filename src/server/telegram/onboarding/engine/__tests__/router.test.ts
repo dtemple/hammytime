@@ -13,6 +13,10 @@ const { sendMessage, sendChatAction, insert } = vi.hoisted(() => ({
 // '../../../bot').
 vi.mock('../../../bot', () => ({
   botApiForChat: () => ({ sendMessage, sendChatAction }),
+  // sendV3 delegates to sendAndLog; forward to the same sendMessage spy so the
+  // existing sendMessage(chatId, text, …) assertions hold.
+  sendAndLog: (_athleteId: string, chatId: number | string, text: string, keyboard?: unknown) =>
+    sendMessage(chatId, text, keyboard ? { reply_markup: keyboard } : {}),
 }));
 vi.mock('@/lib/db', () => ({
   supabaseAdmin: () => ({

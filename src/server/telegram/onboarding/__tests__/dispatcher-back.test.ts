@@ -34,6 +34,7 @@ vi.mock('@/lib/db', () => ({
 
 import { handleOnboardingCallback } from '../dispatcher';
 import { advanceQuestion } from '../state';
+import { sendAndLog } from '../../bot';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyMock = any;
@@ -72,9 +73,12 @@ describe('dispatcher — onb:back interception', () => {
       question: 0,
       partial: { sub_step: 'asking' },
     });
-    expect(sendMessage).toHaveBeenCalledWith(123, 'Anything hurting or nagging right now?', {
-      reply_markup: kb,
-    });
+    expect(sendAndLog as AnyMock).toHaveBeenCalledWith(
+      'athlete-1',
+      123,
+      'Anything hurting or nagging right now?',
+      kb,
+    );
     // A back tap must never reach the step's forward handler.
     expect(stepA.handleCallback).not.toHaveBeenCalled();
   });
