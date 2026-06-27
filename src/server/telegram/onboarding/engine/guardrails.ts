@@ -633,7 +633,13 @@ export function enforceGuardrails(
   };
 
   // --- generate gate ---
-  if (action === 'generate') {
+  // A general_fitness 'generate' falls straight through to the v4 entry off-ramp
+  // (finishOnboarding): a no-event athlete gets NO plan, so none of the plan-input
+  // gates apply — not the open-core check, not the Strava-inferred-shape confirm,
+  // not the injury beat. It off-ramps the moment it's classified no-event, the same
+  // early exit the volume_goal path already takes. (V4-W6: the gate's stale v3
+  // plan-slot requirement for general_fitness was stranding the "just stay fit" case.)
+  if (action === 'generate' && goalTypeOf(merged) !== 'general_fitness') {
     const openRequired = firstOpenRequired(merged);
     const pendingInferred = firstUnconfirmedInferred(merged);
     if (openRequired) {
