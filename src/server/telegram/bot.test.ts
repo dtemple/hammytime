@@ -167,6 +167,20 @@ function makeDb(
   };
 }
 
+// Configure the grammy Bot mock + token so getBot()/sendAndLog can actually send,
+// and return the sendMessage spy for assertions. Used by tests whose path now goes
+// through sendAndLog (athlete-facing replies are logged, not bare ctx.reply).
+function configureBotSend() {
+  process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+  const sendMessageMock = vi.fn().mockResolvedValue(undefined);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (Bot as AnyMock).mockImplementation(function (this: any) {
+    return { api: { sendMessage: sendMessageMock }, command: vi.fn(), on: vi.fn(), catch: vi.fn() };
+  });
+  _resetBotForTest();
+  return sendMessageMock;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -176,24 +190,28 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('handleInboundText — post-onboarding routing', () => {
+  afterEach(() => {
+    delete process.env.TELEGRAM_BOT_TOKEN;
+  });
+
   it('replies with setup placeholder when plan_versions status is awaiting_paste', async () => {
+    const send = configureBotSend();
     (supabaseAdmin as AnyMock).mockReturnValue(makeDb('awaiting_paste'));
     const ctx = makeCtx();
 
     await handleInboundText(ctx as AnyMock);
 
-    expect(ctx.reply).toHaveBeenCalledWith(
-      'Your plan is being set up. Daily updates start soon.',
-    );
+    expect(send).toHaveBeenCalledWith(CHAT_ID, 'Your plan is being set up. Daily updates start soon.');
   });
 
   it('does not include a /p/ URL in the awaiting_paste reply', async () => {
+    const send = configureBotSend();
     (supabaseAdmin as AnyMock).mockReturnValue(makeDb('awaiting_paste'));
     const ctx = makeCtx();
 
     await handleInboundText(ctx as AnyMock);
 
-    const replyText = (ctx.reply as AnyMock).mock.calls[0]![0] as string;
+    const replyText = (send as AnyMock).mock.calls[0]![1] as string;
     expect(replyText).not.toContain('/p/');
     expect(replyText).not.toContain('http');
   });
@@ -293,12 +311,13 @@ describe('handleInboundText — post-onboarding routing', () => {
   });
 
   it('replies with help-path message when no plan row exists', async () => {
+    const send = configureBotSend();
     (supabaseAdmin as AnyMock).mockReturnValue(makeDb(null, false));
     const ctx = makeCtx();
 
     await handleInboundText(ctx as AnyMock);
 
-    expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining("David's on it"));
+    expect(send).toHaveBeenCalledWith(CHAT_ID, expect.stringContaining("David's on it"));
   });
 });
 
@@ -428,6 +447,7 @@ describe('/connect_strava command', () => {
   });
 
   it("replies with 'Finish onboarding first' when onboarding is incomplete", async () => {
+    const send = configureBotSend();
     (supabaseAdmin as AnyMock).mockReturnValue({
       from: vi.fn().mockReturnValue({
         select: vi.fn().mockReturnValue({
@@ -442,13 +462,14 @@ describe('/connect_strava command', () => {
             }),
           }),
         }),
+        insert: vi.fn().mockResolvedValue({ error: null }),
       }),
     });
     const ctx = makeCtx();
 
     await handleConnectStravaCommand(ctx as AnyMock);
 
-    expect(ctx.reply).toHaveBeenCalledWith('Finish onboarding first.');
+    expect(send).toHaveBeenCalledWith(CHAT_ID, 'Finish onboarding first.');
   });
 
   it('sends URL reply containing /strava/connect?athlete_id= for completed athlete', async () => {
@@ -555,6 +576,7 @@ describe('/prehab command', () => {
   });
 
   it("replies with 'Finish onboarding first' when onboarding is incomplete", async () => {
+    const send = configureBotSend();
     (supabaseAdmin as AnyMock).mockReturnValue({
       from: vi.fn().mockReturnValue({
         select: vi.fn().mockReturnValue({
@@ -569,13 +591,14 @@ describe('/prehab command', () => {
             }),
           }),
         }),
+        insert: vi.fn().mockResolvedValue({ error: null }),
       }),
     });
     const ctx = makeCtx();
 
     await handlePrehabCommand(ctx as AnyMock);
 
-    expect(ctx.reply).toHaveBeenCalledWith('Finish onboarding first.');
+    expect(send).toHaveBeenCalledWith(CHAT_ID, 'Finish onboarding first.');
   });
 
   it('logs the inbound command and sends the prehab routine URL', async () => {

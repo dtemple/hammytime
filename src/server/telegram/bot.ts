@@ -163,7 +163,7 @@ async function handleRestart(ctx: CommandContext<Context>): Promise<void> {
 
   await hardResetOnboarding(athlete.id);
 
-  await ctx.reply('Starting over from the beginning.');
+  await sendAndLog(athlete.id, ctx.chat.id, 'Starting over from the beginning.');
 
   const build = getBuildInfo();
   if (build) await ctx.reply(`[build: ${build}]`);
@@ -237,7 +237,7 @@ export async function handleInboundText(ctx: Context): Promise<void> {
 
   if (!plan) {
     // Help path (no plan row created) or unexpected state
-    await ctx.reply("Sit tight — David's on it. He'll be in touch.");
+    await sendAndLog(athlete.id, ctx.chat!.id, "Sit tight — David's on it. He'll be in touch.");
     return;
   }
 
@@ -259,12 +259,16 @@ export async function handleInboundText(ctx: Context): Promise<void> {
 
   if (!version) {
     console.warn('[bot] athlete has a plan row but no active/awaiting plan_versions row', athlete.id);
-    await ctx.reply('Your onboarding is complete — your daily updates start soon.');
+    await sendAndLog(
+      athlete.id,
+      ctx.chat!.id,
+      'Your onboarding is complete — your daily updates start soon.',
+    );
     return;
   }
 
   if (version.status === 'awaiting_paste') {
-    await ctx.reply('Your plan is being set up. Daily updates start soon.');
+    await sendAndLog(athlete.id, ctx.chat!.id, 'Your plan is being set up. Daily updates start soon.');
   } else if (version.status === 'active') {
     // Hand the message to the worker: persist it, enqueue a tg_message job, and
     // return fast (Telegram wants a quick 200). The worker runs the agent and
@@ -306,7 +310,11 @@ export async function handleInboundText(ctx: Context): Promise<void> {
       );
     }
   } else {
-    await ctx.reply('Your onboarding is complete — your daily updates start soon.');
+    await sendAndLog(
+      athlete.id,
+      ctx.chat!.id,
+      'Your onboarding is complete — your daily updates start soon.',
+    );
   }
 }
 
@@ -408,7 +416,7 @@ export async function handleConnectStravaCommand(ctx: CommandContext<Context>): 
   }
 
   if (!isOnboarded(athlete.onboarding_state as Parameters<typeof isOnboarded>[0])) {
-    await ctx.reply('Finish onboarding first.');
+    await sendAndLog(athlete.id, ctx.chat.id, 'Finish onboarding first.');
     return;
   }
 
@@ -448,7 +456,7 @@ async function handleCalendarCommand(ctx: CommandContext<Context>): Promise<void
   }
 
   if (!isOnboarded(athlete.onboarding_state as Parameters<typeof isOnboarded>[0])) {
-    await ctx.reply('Finish onboarding first.');
+    await sendAndLog(athlete.id, ctx.chat.id, 'Finish onboarding first.');
     return;
   }
 
@@ -480,7 +488,7 @@ export async function handlePrehabCommand(ctx: CommandContext<Context>): Promise
   }
 
   if (!isOnboarded(athlete.onboarding_state as Parameters<typeof isOnboarded>[0])) {
-    await ctx.reply('Finish onboarding first.');
+    await sendAndLog(athlete.id, ctx.chat.id, 'Finish onboarding first.');
     return;
   }
 
@@ -781,7 +789,7 @@ async function loadOnboardedAthlete(ctx: CommandContext<Context>): Promise<Athle
       athlete.onboarding_state as { flow?: string; phase?: string; step?: number } | null,
     )
   ) {
-    await ctx.reply('Finish onboarding first.');
+    await sendAndLog(athlete.id, ctx.chat.id, 'Finish onboarding first.');
     return null;
   }
   return athlete;
@@ -822,7 +830,9 @@ async function handleFreshUpdateCommand(ctx: CommandContext<Context>): Promise<v
   const athlete = await loadOnboardedAthlete(ctx);
   if (!athlete) return;
   if (await hasInFlightCoachingRun(athlete.id)) {
-    await ctx.reply(
+    await sendAndLog(
+      athlete.id,
+      ctx.chat.id,
       "I'm still working on your last one. Give me a moment and I'll be right with you.",
     );
     return;
@@ -854,7 +864,9 @@ async function handleAdjustPlanCommand(ctx: CommandContext<Context>): Promise<vo
   const athlete = await loadOnboardedAthlete(ctx);
   if (!athlete) return;
   if (await hasInFlightCoachingRun(athlete.id)) {
-    await ctx.reply(
+    await sendAndLog(
+      athlete.id,
+      ctx.chat.id,
       "I'm still working on your last one. Give me a moment and I'll be right with you.",
     );
     return;
@@ -905,10 +917,7 @@ async function handleEditProfileCommand(ctx: CommandContext<Context>): Promise<v
       .text('Update something', 'v3:edit:update')
       .row()
       .text('Finish my profile', 'v3:edit:finish');
-    await ctx.reply(prompt, { reply_markup: kb });
-    await db
-      .from('messages')
-      .insert({ athlete_id: athlete.id, channel: 'tg', direction: 'out', body: prompt });
+    await sendAndLog(athlete.id, ctx.chat.id, prompt, kb);
     return;
   }
 
@@ -1150,7 +1159,7 @@ async function handleStravaStatusCommand(ctx: CommandContext<Context>): Promise<
 
   const connected = await hasStravaConnection(athlete.id);
   if (!connected) {
-    await ctx.reply('No Strava connection on file. Run /connect_strava.');
+    await sendAndLog(athlete.id, ctx.chat.id, 'No Strava connection on file. Run /connect_strava.');
     return;
   }
 
@@ -1177,7 +1186,7 @@ async function handleStravaStatusCommand(ctx: CommandContext<Context>): Promise<
       ? `Activities fetch error: ${fetchError}`
       : `Activities in past 14 days: ${activityCount}`,
   ];
-  await ctx.reply(lines.join('\n'));
+  await sendAndLog(athlete.id, ctx.chat.id, lines.join('\n'));
 }
 
 export async function handleDisconnectStravaCommand(ctx: CommandContext<Context>): Promise<void> {
@@ -1294,11 +1303,11 @@ function getBot(): Bot {
       }
       const cs = athlete.checkin_state as Record<string, unknown> | null;
       if (!cs?.sub_step) {
-        await ctx.reply('No active check-in to cancel.');
+        await sendAndLog(athlete.id, ctx.chat.id, 'No active check-in to cancel.');
         return;
       }
       await db.from('athletes').update({ checkin_state: {} }).eq('id', athlete.id);
-      await ctx.reply('Cancelled.');
+      await sendAndLog(athlete.id, ctx.chat.id, 'Cancelled.');
     });
     _bot.on('message:text', async (ctx) => {
       if (!ctx.message.text.startsWith('/')) {
