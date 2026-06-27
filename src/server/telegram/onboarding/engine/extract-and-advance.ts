@@ -56,6 +56,20 @@ export function sonnetCostUsd(usage: {
 
 export type NextAction = 'ask' | 'confirm' | 'recap' | 'generate';
 
+/**
+ * Sonnet occasionally over-escapes line breaks inside the tool-call JSON string
+ * fields — it emits `\\n`, which JSON-decodes to a literal backslash-n instead of a
+ * real newline, so the athlete sees the characters "\n" in Telegram. Decode the
+ * literal escapes back to real whitespace. Intermittent by nature, so this is a
+ * deterministic post-process, not a prompt rule.
+ */
+function decodeLiteralEscapes(text: string): string {
+  return text
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t');
+}
+
 const SlotKeyEnum = z.enum(SLOT_KEYS as [SlotKey, ...SlotKey[]]);
 
 const FillSchema = z.object({
@@ -517,7 +531,14 @@ export async function callExtractAndAdvance(
 
     const parsed = ExtractAdvanceSchema.safeParse(toolUse?.input);
     if (parsed.success) {
-      return { output: parsed.data, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens };
+      const output = {
+        ...parsed.data,
+        message: decodeLiteralEscapes(parsed.data.message),
+        reflection: parsed.data.reflection
+          ? decodeLiteralEscapes(parsed.data.reflection)
+          : parsed.data.reflection,
+      };
+      return { output, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens };
     }
 
     // Malformed — one corrective retry.
