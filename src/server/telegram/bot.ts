@@ -1,4 +1,5 @@
 import { execSync } from 'child_process';
+import * as Sentry from '@sentry/nextjs';
 import { Bot, CommandContext, Context, InlineKeyboard } from 'grammy';
 import { supabaseAdmin } from '@/lib/db';
 import type { Database } from '@/lib/db-types';
@@ -340,7 +341,11 @@ export async function handleInboundVoice(ctx: Context): Promise<void> {
     const buf = await res.arrayBuffer();
     transcript = await transcribeOgg(buf);
   } catch (err) {
+    // Tagged so the transcription pipeline (OpenAI/Telegram-download errors, a
+    // missing key, a deprecated model) is alertable in Sentry rather than buried
+    // in a console.error — a friend complaining is otherwise the only signal.
     console.error('[bot] voice transcription failed', err);
+    Sentry.captureException(err, { tags: { area: 'voice_transcription' } });
     await ctx.reply('Voice transcription is having trouble right now — mind typing it for now?');
     return;
   }
