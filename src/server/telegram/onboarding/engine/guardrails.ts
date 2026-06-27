@@ -27,7 +27,7 @@ import {
 } from '../slots/schema';
 import { unknownSlot, type SlotValue, type Provenance } from '../slots/provenance';
 import { INJURY_CHIPS, SLOT_CHIPS } from '../slots/chips';
-import { isPastISODate, todayISOInTz } from './numeric';
+import { finishToPace, formatPace, isPastISODate, todayISOInTz } from './numeric';
 import type { Chip, ExtractAdvanceOutput, NextAction, SlotFill } from './extract-and-advance';
 
 const EXPERIENCE = new Set(['beginner', 'for_fun', 'some_training', 'experienced']);
@@ -406,6 +406,31 @@ function recapInjuryLine(s: SlotState): string | null {
   return `• Injuries: ${status}`;
 }
 
+/** The implied goal pace appended to the recap's goal-time line — belt-and-
+ *  suspenders for the pace fix: a stated "10 minute miles" recaps as
+ *  "4:22:00 (~10:00/mi)", so a misread finish is visible against the pace the
+ *  athlete actually said. Derived from the REAL distance behind a pocket/adventure
+ *  (the bucket nominal would lie for a 1-mile or a 33-mile goal). Empty when no
+ *  finish, no resolvable distance, or keep_fit. */
+function impliedPaceSuffix(state: V3OnboardingState): string {
+  const target = state.slots.target_time?.value;
+  if (typeof target !== 'number') return '';
+
+  const oocMiles =
+    state.out_of_catalog?.consent === 'accepted' ? state.out_of_catalog.distance_mi : null;
+  const realMiles =
+    oocMiles ?? (state.event_kind === 'adventure' ? (state.event_distance_mi ?? null) : null);
+
+  let pace: number | null = null;
+  if (realMiles != null && realMiles > 0) {
+    pace = Math.round(target / realMiles);
+  } else {
+    const distance = state.slots.goal_distance?.value as GoalDistanceValue | undefined;
+    if (distance && distance !== 'keep_fit') pace = finishToPace(target, distance);
+  }
+  return pace != null ? ` (~${formatPace(pace)})` : '';
+}
+
 export function buildRecapMessage(state: V3OnboardingState): string {
   const s = state.slots;
 
@@ -441,7 +466,9 @@ export function buildRecapMessage(state: V3OnboardingState): string {
   }
 
   if (typeof s.target_time?.value === 'number') {
-    lines.push(`• Goal time: ${formatSlotValue('target_time', s.target_time.value)}`);
+    lines.push(
+      `• Goal time: ${formatSlotValue('target_time', s.target_time.value)}${impliedPaceSuffix(state)}`,
+    );
   }
 
   const name = s.name?.value as string | undefined;

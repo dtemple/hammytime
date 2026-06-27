@@ -502,6 +502,31 @@ describe('buildRecapMessage', () => {
     expect(msg).not.toContain('Race:');
   });
 
+  it('appends the implied pace to the goal-time line (pace-fix belt-and-suspenders)', () => {
+    const slots: SlotState = {
+      ...coreSlots('race'), // goal_distance = 'marathon'
+      target_time: sv(15720), // 10:00/mi × 26.2
+      injury_status: sv('none'),
+    };
+    const msg = buildRecapMessage(stateWith(slots));
+    expect(msg).toContain('• Goal time: 4:22:00 (~10:00/mi)');
+  });
+
+  it('derives the recap pace from the real pocketed miles, not the bucket nominal', () => {
+    const slots: SlotState = {
+      ...coreSlots('race'),
+      goal_distance: sv('5k'), // the proxy bucket
+      target_time: sv(300), // a 5:00 mile
+      injury_status: sv('none'),
+    };
+    const msg = buildRecapMessage(
+      stateWith(slots, {
+        out_of_catalog: { words: 'a fast mile', distance_mi: 1, proxy: '5k', consent: 'accepted' },
+      }),
+    );
+    expect(msg).toContain('(~5:00/mi)'); // 300s ÷ 1 mi, not ÷ 3.1
+  });
+
   it('recaps the real out-of-catalog goal, not the marathon-proxy (V3-W8)', () => {
     const slots: SlotState = {
       ...coreSlots('race'),
