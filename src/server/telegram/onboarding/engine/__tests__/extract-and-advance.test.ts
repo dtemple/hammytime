@@ -70,6 +70,72 @@ describe('ExtractAdvanceSchema — lenient intents parse (R2)', () => {
   });
 });
 
+describe('ExtractAdvanceSchema — fills normalization (the "Lost the thread" fix)', () => {
+  const base = { next_action: 'ask', message: 'm' };
+
+  it('keeps valid-slot fills untouched', () => {
+    const parsed = ExtractAdvanceSchema.parse({
+      ...base,
+      fills: [{ slot: 'goal_type', value: 'race', provenance: 'stated' }],
+    });
+    expect(parsed.fills).toEqual([{ slot: 'goal_type', value: 'race', provenance: 'stated' }]);
+  });
+
+  it('hoists a misfiled goal_distance_mi out of fills instead of failing the call', () => {
+    // The exact B-DIAG shape: the model dropped goal_distance_mi (a top-level field,
+    // not a slot) into `fills` on the off-catalog-distance path. The static enum used
+    // to fail the whole tool call → the retry loop → the "Lost the thread" fallback.
+    const parsed = ExtractAdvanceSchema.parse({
+      ...base,
+      fills: [
+        { slot: 'goal_type', value: 'race', provenance: 'inferred' },
+        { slot: 'goal_distance_mi', value: 44, provenance: 'stated' },
+      ],
+    });
+    expect(parsed.fills).toEqual([{ slot: 'goal_type', value: 'race', provenance: 'inferred' }]);
+    expect(parsed.goal_distance_mi).toBe(44);
+  });
+
+  it('hoists a misfiled goal_pace_sec_per_mi out of fills', () => {
+    const parsed = ExtractAdvanceSchema.parse({
+      ...base,
+      fills: [{ slot: 'goal_pace_sec_per_mi', value: 600, provenance: 'stated' }],
+    });
+    expect(parsed.fills).toEqual([]);
+    expect(parsed.goal_pace_sec_per_mi).toBe(600);
+  });
+
+  it('does not overwrite a top-level numeric field already set by the model', () => {
+    const parsed = ExtractAdvanceSchema.parse({
+      ...base,
+      goal_distance_mi: 50,
+      fills: [{ slot: 'goal_distance_mi', value: 44, provenance: 'stated' }],
+    });
+    expect(parsed.goal_distance_mi).toBe(50);
+  });
+
+  it('drops an unknown slot key without failing, and a bad provenance falls to inferred', () => {
+    const parsed = ExtractAdvanceSchema.parse({
+      ...base,
+      fills: [
+        { slot: 'not_a_slot', value: 'x', provenance: 'stated' },
+        { slot: 'goal_distance', value: 'marathon', provenance: 'whoops' },
+      ],
+    });
+    expect(parsed.fills).toEqual([
+      { slot: 'goal_distance', value: 'marathon', provenance: 'inferred' },
+    ]);
+  });
+
+  it('skips a wholly malformed fill entry (not even an object)', () => {
+    const parsed = ExtractAdvanceSchema.parse({
+      ...base,
+      fills: ['garbage', 42, { slot: 'goal_type', value: 'race', provenance: 'stated' }],
+    });
+    expect(parsed.fills).toEqual([{ slot: 'goal_type', value: 'race', provenance: 'stated' }]);
+  });
+});
+
 describe('ExtractAdvanceSchema — volume_goal (staging fix)', () => {
   const base = { fills: [], next_action: 'ask', message: 'm' };
 

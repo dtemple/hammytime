@@ -15,7 +15,7 @@
 import { z } from 'zod';
 import { anthropicClient } from '@/lib/anthropic';
 import { supabaseAdmin } from '@/lib/db';
-import { ProvenanceSchema } from '../slots/provenance';
+import { ProvenanceSchema, type Provenance } from '../slots/provenance';
 import { SLOTS, SLOT_KEYS, requiredCoreSlots, type SlotKey } from '../slots/schema';
 import { hasReflected, type V3OnboardingState } from '../slots/slot-state';
 import { formatFinishTime } from '../parsing/durations';
@@ -72,20 +72,38 @@ function decodeLiteralEscapes(text: string): string {
 
 const SlotKeyEnum = z.enum(SLOT_KEYS as [SlotKey, ...SlotKey[]]);
 
-const FillSchema = z.object({
-  slot: SlotKeyEnum,
-  // Value typing is slot-dependent (string / number-of-seconds / {body_part,status}
-  // / array); validated and coerced per-slot in guardrails.mergeFills.
+/** A validated slot fill. The model's raw entries are parsed leniently
+ *  (RawFillSchema) and normalized into this shape by the schema transform below.
+ *  Value typing is slot-dependent (string / number-of-seconds / {body_part,status}
+ *  / array) and coerced per-slot in guardrails.mergeFills. */
+export interface SlotFill {
+  slot: SlotKey;
+  value: unknown;
+  provenance: Provenance;
+}
+
+const SLOT_KEY_SET = new Set<string>(SLOT_KEYS);
+
+// A fill as the model emits it, parsed LENIENTLY (slot is a bare string, provenance
+// optional). The static enum on `slot` made one stray entry fail the WHOLE tool call
+// → the retry loop burned out → the "Lost the thread" fallback. The observed stray:
+// the model drops goal_distance_mi (a top-level field, NOT a slot) into `fills` on
+// the off-catalog-distance path. normalizeFills (below) validates each entry, hoists
+// the two misfiled numeric fields, and drops the rest — so a malformed fill never
+// nukes the turn. Mirrors the lenient handling already used for intents/volume_goal.
+const RawFillSchema = z.object({
+  slot: z.string(),
   value: z.unknown(),
-  provenance: ProvenanceSchema,
+  provenance: z.string().nullish(),
 });
-export type SlotFill = z.infer<typeof FillSchema>;
 
 const ChipSchema = z.object({ label: z.string(), value: z.string() });
 export type Chip = z.infer<typeof ChipSchema>;
 
 export const ExtractAdvanceSchema = z.object({
-  fills: z.array(FillSchema).default([]),
+  // Parsed as unknown[] and normalized in the transform below — a single malformed
+  // entry must never fail the whole tool call (see RawFillSchema).
+  fills: z.array(z.unknown()).default([]),
   next_action: z.enum(['ask', 'confirm', 'recap', 'generate']),
   message: z.string(),
   chips: z.array(ChipSchema).default([]),
@@ -151,7 +169,38 @@ export const ExtractAdvanceSchema = z.object({
     .enum(['race', 'adventure'])
     .nullish()
     .transform((v) => v ?? null),
-});
+  })
+  // Normalize `fills`: keep the valid-slot entries, hoist the two numeric extractor
+  // fields the model sometimes misfiles into `fills` (goal_distance_mi /
+  // goal_pace_sec_per_mi → their own top-level field, but only if not already set),
+  // and drop anything else. A bad provenance falls back to "inferred" — the
+  // conservative, needs-confirm value, so a misparse never silently auto-confirms a
+  // safety/plan-driving slot.
+  .transform((obj) => {
+    const fills: SlotFill[] = [];
+    let goalDistanceMi = obj.goal_distance_mi;
+    let goalPaceSecPerMi = obj.goal_pace_sec_per_mi;
+
+    for (const raw of obj.fills) {
+      const parsed = RawFillSchema.safeParse(raw);
+      if (!parsed.success) continue; // wholly malformed entry — drop, never throw
+      const { slot, value, provenance } = parsed.data;
+
+      if (SLOT_KEY_SET.has(slot)) {
+        const prov = ProvenanceSchema.safeParse(provenance);
+        fills.push({ slot: slot as SlotKey, value, provenance: prov.success ? prov.data : 'inferred' });
+        continue;
+      }
+      // Misfiled top-level numeric field — recover the value the model meant to send.
+      const n = typeof value === 'number' ? value : Number(value);
+      if (slot === 'goal_distance_mi' && goalDistanceMi == null && Number.isFinite(n)) goalDistanceMi = n;
+      else if (slot === 'goal_pace_sec_per_mi' && goalPaceSecPerMi == null && Number.isFinite(n))
+        goalPaceSecPerMi = n;
+      // any other unknown slot key: dropped
+    }
+
+    return { ...obj, fills, goal_distance_mi: goalDistanceMi, goal_pace_sec_per_mi: goalPaceSecPerMi };
+  });
 export type ExtractAdvanceOutput = z.infer<typeof ExtractAdvanceSchema>;
 
 // ---------------------------------------------------------------------------
@@ -169,7 +218,7 @@ const EXTRACT_TOOL = {
       fills: {
         type: 'array',
         description:
-          'ONLY the slots this latest message changed. Omit slots that did not change. Never restate the whole profile.',
+          "ONLY the slots this latest message changed. Omit slots that did not change. Never restate the whole profile. Every entry's `slot` must be one of the profile-slot names in the enum below — goal_distance_mi, goal_pace_sec_per_mi, event_kind, intents, volume_goal and the rest are SEPARATE top-level fields, never `fills` entries. For an off-catalog distance set the top-level goal_distance_mi field, not a fill.",
         items: {
           type: 'object',
           required: ['slot', 'value', 'provenance'],
@@ -220,7 +269,7 @@ const EXTRACT_TOOL = {
       goal_distance_mi: {
         type: 'number',
         description:
-          "A concrete goal distance in MILES that isn't one of the standard buckets (5k/10k/half/marathon) — longer ('44 miles', '50k' ≈ 31, '100 miler') OR shorter ('a mile' → 1, '1500m' ≈ 0.93). The app maps it to a bucket or handles it specially. Don't set this if you set race_lookup_query (the lookup carries the distance), and don't guess goal_distance from a number yourself.",
+          "A concrete goal distance in MILES that isn't one of the standard buckets (5k/10k/half/marathon) — longer ('44 miles', '50k' ≈ 31, '100 miler') OR shorter ('a mile' → 1, '1500m' ≈ 0.93). Set it HERE, as this top-level field — it is NOT a slot, so never put goal_distance_mi inside `fills`. The app maps it to a bucket or handles it specially. Don't set this if you set race_lookup_query (the lookup carries the distance), and don't guess goal_distance from a number yourself.",
       },
       goal_pace_sec_per_mi: {
         type: 'number',
@@ -543,6 +592,17 @@ export async function callExtractAndAdvance(
       };
       return { output, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens };
     }
+
+    // The fills-resilience above (RawFillSchema + the normalize transform) absorbs
+    // the common stray-fill malformation (a misfiled goal_distance_mi), so reaching
+    // here now means a structural miss (no/blank message or next_action) or no tool
+    // call at all (a transient). Log the cause — the only window, since the eventual
+    // throw records no usage/output downstream (this is what the fallback hides).
+    console.error(
+      `[onboarding] extract_and_advance malformed (attempt ${attempt}): ` +
+        `stop_reason=${response.stop_reason}, tool_use=${toolUse != null}, ` +
+        `issues=${JSON.stringify(parsed.error.issues).slice(0, 400)}`,
+    );
 
     // Malformed — one corrective retry.
     messages.push({ role: 'assistant', content: response.content });
