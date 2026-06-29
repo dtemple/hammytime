@@ -1,11 +1,13 @@
 # Onboarding chips — policy + audit
 
-_Status: **DRAFT, not signed off** (2026-06-26). Working doc to iterate on
-section by section. Once the policy (§4) is signed off, **this doc is the durable
-source of truth for chip policy** — chips are a version-independent mechanism, so
-they don't belong inside an onboarding-version doc. `ONBOARDING_V4.md` (the live
-onboarding spec; v3 is stale) and `SPEC.md` get a one-line pointer back here. No
-code changes until a section is signed off._
+_Status: **SIGNED OFF 2026-06-29.** This is the durable source of truth for chip
+policy — chips are a version-independent mechanism, so they don't belong inside an
+onboarding-version doc. `ONBOARDING_V4.md` (the live onboarding spec; v3 is stale)
+and `SPEC.md` carry a one-line pointer back here. The policy (§4) and the injury
+decision (§6) are agreed; §5.1/§5.2/§5.3 are built and shipped (CHANGELOG v0.7.55,
+web-only). The §5.3 chip-linter is wired into the V4-W6 eval as the regression net —
+the gate is 19/19 green with no chip-policy failures. One minor open question
+remains (§8: single-option chips, leaning keep) — it doesn't gate the policy._
 
 _Origin: the V4-W6 eval run (`onboarding-eval-2026-06-26T01-23.md`) surfaced a
 chip that does nothing useful — the injury beat's `[Nothing right now | Skip]`,
@@ -173,6 +175,12 @@ model-adherence gaps the §5.1 eval surfaced (transcripts in
 The principle is the only lever here; the set is unbounded. §5.3's chip-linter keeps
 these from regressing once fixed.
 
+**Status: shipped 2026-06-29** (commit `00b3bb5`; web). The chip instruction now
+states the §4 test plainly and forbids chips on a goodbye / off-ramp / reflection
+turn; FLOW_RULES splits the Strava confirm and the experience ask into separate
+turns (closing residual 3.2), strengthens the four-topic order, and tells the coach
+to accept an injury dodge and move on (closing the injury-dodge residual).
+
 **5.3 Eval → regression net.** The harness already parses `[chips: …]` out of
 transcripts, so a chip-linter is cheap and is what keeps Source B from drifting
 back after the prompt change. Assertions to add:
@@ -185,6 +193,33 @@ back after the prompt change. Assertions to add:
 Going chip-by-chip alone misses Source B (unbounded) and stops no regressions.
 Prompting alone can't reach Source A (where the flagged case lives). The split is
 the point.
+
+**Status: shipped 2026-06-29** (CHANGELOG v0.7.55; web; unit-covered in
+`engine/__tests__/chip-linter.test.ts`). `checkChipPolicy`
+(`engine/__evals__/assertions.ts`, folded into `checkGlobalInvariants`, so it runs
+on every fixture) implements all four, deterministically over the rendered
+transcript — no model calls. How each is detected robustly:
+
+- **non-question / terminal** — a "no `?`" rule over-fired on the legitimate
+  chipped turns that *state* rather than ask (an imperative ask, "Go check the site
+  and let me know."; a recap that closes "…building your plan now." + Looks
+  right / Fix it). So the check fires only on a genuinely **non-soliciting** turn:
+  emoji/symbol-only (the 👋😄 goodbye), a reflection-only mirror, or a farewell
+  sign-off with no `?`. (Caught two real false-positive shapes in the §5.1 eval;
+  recalibrated, both now pass.)
+- **same-outcome pair** — two chips in one set sharing a value or a label
+  (deterministic; the perceptual-but-distinct `none`/`unknown` case is structurally
+  gone via §6's single-chip injury set).
+- **option-on-yes/no** — a confirmation tell in the message ("…that right?",
+  "…match?") paired with chips that aren't a pure yes/no set. Tight on the tell so
+  open asks (which legitimately carry option chips) and the check-back offer don't
+  trip it.
+- **round-trip** — the rendered set is matched to an app-guaranteed set (chips.ts)
+  by label; each value must then `coerceFill` to that slot (enum-literal sets) or
+  match the canonical value (the prose sets, which round-trip via the model).
+
+The linter operates only on the onboarding `v3:`-prefixed chips; the post-plan
+next-actions keyboard and other inline keyboards are out of its scope.
 
 ---
 
@@ -235,11 +270,13 @@ Proposed order once the policy (§4) is signed off:
 2. **§5.1** — hand audit + fix the code-owned sets, including the
    experience-chips-on-confirm bug (3.2). Web-only; push to Vercel. **✅ done 2026-06-29.**
 3. **§5.2** — sharpen the chip instruction in the prompt; close the three §5.2
-   residuals the §5.1 eval surfaced (residual 3.2, order, injury-dodge).
-4. **§5.3** — add chip assertions to the V4-W6 eval harness.
+   residuals the §5.1 eval surfaced (residual 3.2, order, injury-dodge). **✅ done
+   2026-06-29** (commit `00b3bb5`).
+4. **§5.3** — add chip assertions to the V4-W6 eval harness. **✅ done 2026-06-29**
+   (CHANGELOG v0.7.55).
 5. Flip this doc to signed-off (it's the chip-policy source of truth); add a
    one-line pointer from `ONBOARDING_V4.md` and `SPEC.md`; log in `CHANGELOG.md`.
-   (`ONBOARDING_V3.md` is stale — don't write back into it.)
+   (`ONBOARDING_V3.md` is stale — don't write back into it.) **✅ done 2026-06-29.**
 
 ---
 

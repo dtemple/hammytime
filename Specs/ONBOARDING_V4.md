@@ -13,6 +13,10 @@ rather than duplicating it. The v3 slot-filling engine, chips, recap, numeric
 handling, and `/edit_profile` are unchanged — v4 changes **what the product is
 for**, not how a slot gets filled._
 
+_Chip policy — when a button earns its place, and the eval chip-linter that enforces
+it — lives in `Specs/ONBOARDING_CHIPS.md` (signed off 2026-06-29), the durable,
+version-independent source of truth for chips._
+
 _Author context: v3 made onboarding a good conversation. v4 narrows what that
 conversation is for. The observed problem (David, June 2026): athletes who join
 without something to train for don't retain and don't have a good experience.

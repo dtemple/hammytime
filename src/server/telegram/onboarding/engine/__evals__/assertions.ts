@@ -10,6 +10,9 @@
 
 import { requiredCoreSlots, type GoalTypeValue, type SlotKey } from '../../slots/schema';
 import { isFilled } from '../../slots/provenance';
+import { SLOT_CHIPS, INJURY_CHIPS } from '../../slots/chips';
+import { coerceFill } from '../guardrails';
+import type { Chip } from '../extract-and-advance';
 import type { DriveResult } from './types';
 
 const ORIENTATION_SENTENCE = "Tap a button or type an answer if it's not in the list.";
@@ -144,6 +147,200 @@ export function checkGlobalInvariants(result: DriveResult): string[] {
   ).length;
   if (orientationCount > 1)
     out.push(`invariant[orientation-once]: orientation sentence appeared ${orientationCount} times`);
+
+  // 4. The chip policy (ONBOARDING_CHIPS §4 / §5.3) — the regression net for the
+  //    §5.1/§5.2 fixes. Folded in here so it runs on every fixture.
+  out.push(...checkChipPolicy(result));
+
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Chip linter (ONBOARDING_CHIPS §5.3)
+// ---------------------------------------------------------------------------
+//
+// The four §4 corollaries, asserted against the rendered transcript — what the
+// athlete actually saw, regardless of which source (code-owned §5.1 or
+// model-owned §5.2) produced the chips. Deterministic by design: no model calls.
+//
+// Scope: only the onboarding *chips* — the buttons whose tap replays the chip's
+// value back as athlete text. Those ship with the `v3:` callback prefix
+// (router.ts CHIP_PREFIX). The post-plan next-actions keyboard (`next:`) and any
+// other inline keyboard are not chips in the policy sense and are left alone.
+
+const CHIP_PREFIX = 'v3:';
+
+// A confirmation tell: the message states a value back and asks the athlete to
+// verify it ("…that right?", "…match?") rather than asking openly ("how would you
+// describe yourself?"). §3.2 is option chips landing on one of THESE — so the
+// regex must catch the confirm phrasings without matching the open asks that
+// legitimately carry option chips (the goal / distance / experience questions).
+const CONFIRM_TELL =
+  /\b(that('?s| is)? right|about right|looks? right|sounds? (right|good|ok|okay)|that match|matches\b|correct|that works?( for you)?)\?/i;
+
+// Affirm/decline vocabulary (chip VALUES, post-prefix). A set drawn only from
+// these is a yes/no set — the legitimate companion to a confirmation tell (Looks
+// right / Fix it → yes / let me fix that; That works / Not quite). Anything else
+// on a confirm tell is an option set (§3.2).
+const YES_NO_VALUES = new Set([
+  'yes',
+  'yeah',
+  'yep',
+  'y',
+  'sure',
+  'ok',
+  'okay',
+  'looks right',
+  'that works',
+  'sounds right',
+  'sounds good',
+  'correct',
+  'no',
+  'nope',
+  'n',
+  'let me fix that',
+  'fix it',
+  'not quite',
+]);
+
+// The app-guaranteed option sets (chips.ts), used by the round-trip check. Match a
+// rendered set by label, then verify the VALUE behind each label still reaches the
+// slot it answers. Enum-literal sets coerce straight through coerceFill; the prose
+// sets (goal_type, the injury beat) round-trip via the model, so the linter checks
+// them by exact match against the canonical value instead.
+const APP_GUARANTEED_SETS: ReadonlyArray<{
+  slot: SlotKey;
+  chips: readonly Chip[];
+  coercible: boolean;
+}> = [
+  { slot: 'goal_type', chips: SLOT_CHIPS.goal_type ?? [], coercible: false },
+  { slot: 'goal_distance', chips: SLOT_CHIPS.goal_distance ?? [], coercible: true },
+  { slot: 'experience_tier', chips: SLOT_CHIPS.experience_tier ?? [], coercible: true },
+  { slot: 'injury_status', chips: INJURY_CHIPS, coercible: false },
+];
+
+/**
+ * A non-soliciting turn — a goodbye, an off-ramp farewell, or a reflection-only
+ * mirror (§3.3) — which must carry no chips. Deliberately NARROW: a bare "no '?'"
+ * test over-fires on the legitimate chipped turns that state rather than ask — an
+ * imperative ask ("Go check the site and let me know.") and a recap that closes on
+ * a statement ("…building your plan now.") + the Looks right / Fix it set. Those
+ * solicit a reply, so chips belong; only true sign-offs and pure mirrors don't.
+ */
+function isNonSoliciting(body: string): boolean {
+  const t = body.trim();
+  if (t.length === 0) return true;
+  // Emoji / punctuation only — the 👋😄 goodbye that re-rendered the goal chips.
+  if (!/[a-z]/i.test(t)) return true;
+  // A reflection-only mirror: its signature opener, with no ask of its own. (A
+  // recap opens "Here's what I've got" — different — and is a solicit, so excluded.)
+  if (/here'?s what i'?m hearing/i.test(t) && !t.includes('?')) return true;
+  // A farewell sign-off that asks nothing. Gated on no '?' so the off-ramp's
+  // check-back offer ("…check back when something lands?" + interval chips) — a
+  // real question — is untouched.
+  if (
+    !t.includes('?') &&
+    /\b(leave it (here|there)|talk soon|take care|catch you (later|around)|whenever (something|anything) (lands|comes up|might be)|message me (then|when))\b/i.test(
+      t,
+    )
+  )
+    return true;
+  return false;
+}
+
+/** The first value that repeats in a list (case-insensitive), or null. */
+function firstDuplicate(xs: string[]): string | null {
+  const seen = new Set<string>();
+  for (const x of xs) {
+    const k = x.toLowerCase().trim();
+    if (seen.has(k)) return x;
+    seen.add(k);
+  }
+  return null;
+}
+
+/** The app-guaranteed set a rendered chip turn answers, by best label overlap
+ *  (labels are distinctive, so one match is enough). null = model chips for an
+ *  open ask, which carry no fixed slot to round-trip against. */
+function recognizeAppSet(labels: string[]): (typeof APP_GUARANTEED_SETS)[number] | null {
+  let best: (typeof APP_GUARANTEED_SETS)[number] | null = null;
+  let bestMatches = 0;
+  for (const set of APP_GUARANTEED_SETS) {
+    const setLabels = new Set(set.chips.map((c) => c.label));
+    const matches = labels.filter((l) => setLabels.has(l)).length;
+    if (matches > bestMatches) {
+      best = set;
+      bestMatches = matches;
+    }
+  }
+  return bestMatches > 0 ? best : null;
+}
+
+/**
+ * The §5.3 chip assertions, run per coach turn over the rendered transcript.
+ * Mirrors the §4 corollaries one-to-one:
+ *   1. no chips on a non-question / terminal turn (§3.3);
+ *   2. no same-outcome pair (§3.1);
+ *   3. no option chips on a yes/no-phrased confirm (§3.2);
+ *   4. an app-guaranteed set's values must round-trip to the slot it asks.
+ */
+export function checkChipPolicy(result: DriveResult): string[] {
+  const out: string[] = [];
+
+  result.transcript.forEach((turn, i) => {
+    if (turn.direction !== 'coach') return;
+    const chips = (turn.chips ?? []).filter((c) => c.data.startsWith(CHIP_PREFIX));
+    if (chips.length === 0) return;
+
+    const labels = chips.map((c) => c.label);
+    const values = chips.map((c) => c.data.slice(CHIP_PREFIX.length));
+    const where = `coach turn ${i}`;
+    const set = `[${labels.join(' | ')}]`;
+
+    // (1) §3.3 — chips on a non-soliciting turn: a goodbye, an off-ramp farewell,
+    //     or a reflection-only mirror. A statement-form ask or a recap still
+    //     solicits a reply, so those keep their chips (see isNonSoliciting).
+    if (isNonSoliciting(turn.body)) {
+      out.push(`chip-policy[non-question]: ${where} carries chips ${set} on a non-soliciting turn`);
+    }
+
+    // (2) §3.1 — a same-outcome pair: two chips that replay to the same value, or
+    //     show the same label, are one choice, not two.
+    const dupValue = firstDuplicate(values);
+    const dupLabel = firstDuplicate(labels);
+    if (dupValue) {
+      out.push(`chip-policy[same-outcome]: ${where} has two chips with the same value "${dupValue}" ${set}`);
+    } else if (dupLabel) {
+      out.push(`chip-policy[same-outcome]: ${where} has two chips with the same label "${dupLabel}" ${set}`);
+    }
+
+    // (3) §3.2 — option chips on a yes/no-phrased confirm. The message verifies a
+    //     value ("…that right?") but the chips offer answer options for a slot.
+    if (CONFIRM_TELL.test(turn.body)) {
+      const allYesNo = values.every((v) => YES_NO_VALUES.has(v.toLowerCase().trim()));
+      if (!allYesNo) {
+        out.push(`chip-policy[option-on-yesno]: ${where} pairs a yes/no confirm with option chips ${set}`);
+      }
+    }
+
+    // (4) §5.3 — a recognized app-guaranteed set whose values don't round-trip to
+    //     its slot. Identify the set by label, then check each value behind it.
+    const appSet = recognizeAppSet(labels);
+    if (appSet) {
+      const canonical = new Map(appSet.chips.map((c) => [c.label, c.value]));
+      for (const c of chips) {
+        const value = c.data.slice(CHIP_PREFIX.length);
+        const expected = canonical.get(c.label);
+        if (expected === undefined) {
+          out.push(`chip-policy[round-trip]: ${where} chip "${c.label}" is not part of the ${appSet.slot} set ${set}`);
+        } else if (appSet.coercible && coerceFill(appSet.slot, value) === undefined) {
+          out.push(`chip-policy[round-trip]: ${where} value "${value}" (chip "${c.label}") doesn't round-trip to ${appSet.slot}`);
+        } else if (!appSet.coercible && value !== expected) {
+          out.push(`chip-policy[round-trip]: ${where} value "${value}" (chip "${c.label}") drifted from the canonical ${appSet.slot} value "${expected}"`);
+        }
+      }
+    }
+  });
 
   return out;
 }
