@@ -140,10 +140,38 @@ Scope:
   ask for that slot, not when it's a batched confirm.
 - Re-read the remaining three sets against §4.
 
+**Status: implemented 2026-06-29** (commits `fff6e3e`, `5404fd9`; web, deployed).
+Deterministic checks green (typecheck, lint, 1233 tests, build); eval **17/19**, no
+regressions, +3 newly passing vs the prior 7/18. Landed: the single injury chip,
+the `unknown` removal (soft-via-open — gate = answered OR asked; the recap→ask-injury
+override records `asked`), and experience-as-its-own-question (Strava no longer
+seeds it; `inferExperienceTier` removed; whole-history framing). Intake is now four
+questions: event → Strava confirm → experience → injuries. The final fix shape
+differed from the bullet above: rather than an `applyChipPolicy` heuristic, the
+structural change (experience no longer seeded → always an open ask) plus
+de-forcing yes/no chips on confirms (recap-only) carries 3.2 — but **not fully**
+(see §5.2 residuals).
+
 **5.2 Model-owned chips (Source B) → sharpen the prompt.** Replace the vague "a
 shortcut the app cannot infer" with the §4 test stated plainly, plus an explicit
-"no chips on a goodbye / off-ramp / reflection turn" (3.3). The principle is the
-only lever here; the set is unbounded.
+"no chips on a goodbye / off-ramp / reflection turn" (3.3). Plus three
+model-adherence gaps the §5.1 eval surfaced (transcripts in
+`onboarding-eval-2026-06-29T17-26.md`):
+
+- **Residual 3.2** — the model still labels the Strava confirm `ask`+`experience_tier`,
+  putting the four tier chips on a "that right?" yes/no (confirm-loop-replay,
+  goal-change). Fix: the Strava confirm and the experience ask are SEPARATE turns —
+  confirm days/long-run with `next_action='confirm'` and NO `asked_slot`; ask
+  experience as its own later turn. (Possibly a small code backstop too.)
+- **Order** — David wants the Strava confirm BEFORE experience (no gotcha), but the
+  model does experience-first ~half the time. Strengthen the four-topic order in
+  FLOW_RULES. The gotcha is already structurally gone, so this is a preference.
+- **Injury dodge** — under soft-via-open the coach should accept a dodge and move on,
+  but it badgered 3× in injury-skipper (a regression from removing `[Skip]`). Add a
+  rule: ask the beat once; if the athlete declines/dodges, accept it and proceed.
+
+The principle is the only lever here; the set is unbounded. §5.3's chip-linter keeps
+these from regressing once fixed.
 
 **5.3 Eval → regression net.** The harness already parses `[chips: …]` out of
 transcripts, so a chip-linter is cheap and is what keeps Source B from drifting
@@ -205,8 +233,9 @@ Proposed order once the policy (§4) is signed off:
 
 1. **§4 + §6** — agree the policy and the injury-beat decision. (This session.)
 2. **§5.1** — hand audit + fix the code-owned sets, including the
-   experience-chips-on-confirm bug (3.2). Web-only; push to Vercel.
-3. **§5.2** — sharpen the chip instruction in the prompt.
+   experience-chips-on-confirm bug (3.2). Web-only; push to Vercel. **✅ done 2026-06-29.**
+3. **§5.2** — sharpen the chip instruction in the prompt; close the three §5.2
+   residuals the §5.1 eval surfaced (residual 3.2, order, injury-dodge).
 4. **§5.3** — add chip assertions to the V4-W6 eval harness.
 5. Flip this doc to signed-off (it's the chip-policy source of truth); add a
    one-line pointer from `ONBOARDING_V4.md` and `SPEC.md`; log in `CHANGELOG.md`.
@@ -219,6 +248,7 @@ Proposed order once the policy (§4) is signed off:
 - Single-option chips (`[Not yet]`, `[No tune-up races]`) — keep as one-tap
   "none/skip" affordances, or drop? They pass §4 (a tap saves typing) but add a
   consistency question. Leaning keep.
-- Does fixing 3.2 in `applyChipPolicy` need a matching prompt nudge so the model
-  stops phrasing batched confirms as asks against an option slot, or is the code
-  guard enough on its own?
+- ~~Does fixing 3.2 in `applyChipPolicy` need a matching prompt nudge…?~~
+  **RESOLVED (§5.1 eval): yes.** The structural fix alone didn't fully close 3.2 —
+  the model still mislabels the Strava confirm, so §5.2's prompt nudge (separate
+  confirm/ask turns) is required, with §5.3's chip-linter as the net.
