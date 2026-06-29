@@ -82,9 +82,9 @@ describe('ExtractAdvanceSchema — fills normalization (the "Lost the thread" fi
   });
 
   it('hoists a misfiled goal_distance_mi out of fills instead of failing the call', () => {
-    // The exact B-DIAG shape: the model dropped goal_distance_mi (a top-level field,
-    // not a slot) into `fills` on the off-catalog-distance path. The static enum used
-    // to fail the whole tool call → the retry loop → the "Lost the thread" fallback.
+    // The exact shape that caused the fallback: the model dropped goal_distance_mi (a
+    // top-level field, not a slot) into `fills` on the off-catalog-distance path. The
+    // static enum used to fail the whole tool call → the retry loop → "Lost the thread".
     const parsed = ExtractAdvanceSchema.parse({
       ...base,
       fills: [
