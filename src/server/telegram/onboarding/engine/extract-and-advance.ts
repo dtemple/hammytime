@@ -198,7 +198,7 @@ const EXTRACT_TOOL = {
       chips: {
         type: 'array',
         description:
-          'The app guarantees chips for closed-option and yes/no questions (distance, the injury beat, a confirm) — leave this empty for those. Populate it only for an open question where you want to offer a shortcut the app cannot infer.',
+          'The app already guarantees chips for the closed-option asks (the event opener, distance, experience level), the injury beat, and the final recap — leave this empty for all of those. Fill it yourself only for an OPEN question, and only when a chip earns its place: it saves the athlete a real decision or some typing AND its options are answers they can actually tell apart. Never offer two chips that land in the same place — that is one choice, not two. Chips must answer the exact question in your message: never option chips on a yes/no, and never a chip set for a different slot than the one you are asking. And put NO chips on anything that is not a question — a goodbye, an off-ramp farewell, or a reflection-only turn carries none.',
         items: {
           type: 'object',
           required: ['label', 'value'],
@@ -288,8 +288,9 @@ const NUMERIC_RULES = [
 ].join(' ');
 
 const INJURY_RULES = [
-  'Injuries are safety-critical. Always ask the injury beat. Mark injury_status "none" ONLY if the athlete explicitly says nothing is bothering them.',
+  'Injuries are safety-critical. Always ask the injury beat, once. Mark injury_status "none" ONLY if the athlete explicitly says nothing is bothering them.',
   'Silence, a dodge, or a non-answer is NOT "no injury" — emit no injury_status fill at all (leave the slot open). Capture history (active / monitoring / past), not just today.',
+  'If the athlete declines or dodges the beat ("rather not get into it", "let\'s just move on"), accept that and move to the plan — do not push or re-ask. The slot stays open and onboarding still finishes; pressing a question they have already declined reads worse than the gap it leaves.',
 ].join(' ');
 
 // Enum slots take ONLY these literal values — anything else is silently dropped,
@@ -310,9 +311,9 @@ const ENUM_RULES = [
 
 const FLOW_RULES = [
   'Fill slots from natural conversation — any message can fill any slot. Never re-ask something already answered.',
-  "Work through four topics in order: 1) the event they're training for — a race, or a personal goal with a date, 2) training shape from Strava (days/week, long-run day), 3) experience level, 4) injuries. One topic per message; once a topic is covered, move to the next.",
-  'Days/week and long-run day arrive already filled as "inferred, unconfirmed" from Strava. Do NOT ask those cold — state them back in one line for a yes/no ("Looks like ~4 days/week with long runs on Sunday — that right?") and let the athlete correct; a confirm flips them. Do NOT fold experience into this confirm. You may attach a quick yes/no chip here, or just let them type.',
-  'Experience is its own question, asked AFTER the Strava confirm so a thin recent read never seems to contradict what the athlete tells you. Never infer it from Strava. Frame it as their whole running history, not the last couple weeks — e.g. "Looking across all your running, not just lately — how would you describe yourself as a runner?" The app supplies the four level chips; do not invent your own.',
+  "Work through four topics in this order, one per message — never two in one message: 1) the event they're training for — a race, or a personal goal with a date, 2) training shape from Strava (days/week, long-run day), 3) experience level, 4) injuries. Finish one before the next, and never reorder them — confirm training shape before you ask about experience.",
+  'Days/week and long-run day arrive already filled as "inferred, unconfirmed" from Strava. Confirming them is how you read the athlete\'s recent effort — what their training has actually looked like the last few weeks — so the plan picks up from where they are now instead of starting cold. Do NOT ask those cold: state the recent shape back and let them correct it, framed as meeting them where they are rather than a quiz ("Looks like ~4 days a week lately, long run on Sunday — I want to build from where you actually are. That match?"). This turn is the days/long-run confirm and nothing else: set next_action "confirm" and leave asked_slot empty. Never set asked_slot "experience_tier" here, and never attach the four experience-level chips to it — that drops four unrelated answers under a yes/no. A confirm flips the slots. You may add one yes/no chip, or just let them type.',
+  'Experience is a SEPARATE question that comes AFTER the days/long-run confirm — never folded into that confirm, never asked before it. A thin recent Strava read should never seem to contradict what the athlete tells you about their history. Ask it on its own turn, with next_action "ask" and asked_slot "experience_tier". Never infer it from Strava. Frame it as their whole running history, not the last couple weeks — e.g. "Looking across all your running, not just lately — how would you describe yourself as a runner?" The app supplies the four level chips for this question; do not invent your own, and do not attach them to any other question.',
   'Confirm safety and plan-driving slots inline (a quick yes/no). Let nice-to-haves ride.',
   "When the goal race changes, restate goal_date in the same turn (a fill) or mark it open — never let the old race's date ride on the new goal. When a former goal race becomes a tune-up, carry its name AND its date into tune_up_races.",
   'Dates: any goal_date you emit must be in the future relative to today (the turn context states today\'s date). A bare month like "September" means its next future occurrence — pick the year accordingly.',
