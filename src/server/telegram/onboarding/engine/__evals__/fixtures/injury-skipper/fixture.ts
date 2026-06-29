@@ -1,11 +1,10 @@
-// V3 §7 keep-verbatim: the injury-skipper taps [Skip] on the injury beat, which
-// writes injury_status 'unknown' (a soft-gate answer, never "healthy") and still
-// generates a conservative plan.
+// The injury-skipper dodges the injury beat by typing a non-answer (there is no
+// [Skip] chip anymore — ONBOARDING_CHIPS §6). Soft-via-open: the beat is asked, the
+// athlete declines, injury_status stays OPEN (no stored value), and the plan still
+// generates. The safety floor is "the beat was asked", which the assertion checks.
 //
-// knownFlaky: the exact [Skip] chip label and the turn it appears on are model-
-// shaped and not knowable without a live run. The persona is told to tap the
-// skip/none-of-the-above button; once a live run confirms the label, this can drop
-// the flaky flag (or pin the tap with a forcedMove).
+// knownFlaky: the exact turn the dodge lands on is model-shaped and not knowable
+// without a live run.
 
 import type { OnboardingFixture } from '../../types';
 import { enduranceSnapshot, found } from '../_shared';
@@ -13,7 +12,7 @@ import { enduranceSnapshot, found } from '../_shared';
 export const fixture: OnboardingFixture = {
   name: 'injury-skipper',
   persona:
-    "Lee — does not want to discuss injuries. When the coach asks about injuries or aches, taps the button that skips the question (a 'Skip' / 'Rather not say' / 'Prefer not to answer' option) rather than typing anything.",
+    "Lee — does not want to discuss injuries. When the coach asks about injuries or aches, types a brief non-answer (e.g. 'I'd rather not get into it' / 'let's skip that') rather than naming anything. Does NOT tap the 'Nothing right now' button — that would assert no injury, which isn't what Lee means.",
   facts: {
     goal: 'the Summit Half in October',
     race: 'Summit Half',
@@ -27,11 +26,15 @@ export const fixture: OnboardingFixture = {
   opening: "I want to do the Summit Half in October",
   initialState: { strava_snapshot: enduranceSnapshot({ longest_run_mi: 11 }) },
   raceLookup: { summit: found('Summit Half', '2026-10-25', 13.1) },
-  knownFlaky: 'exact [Skip] chip label/turn unverified without a live run',
+  knownFlaky: 'the turn the dodge lands on is model-shaped without a live run',
   expect: { planGenerated: true, goalDistance: 'half' },
   customAssertions: (r) => {
+    // Soft-via-open: a dodge leaves injury_status unset, but the beat must have been
+    // asked (that's what lets onboarding complete without an answer).
     const status = r.finalState.slots.injury_status?.value;
-    if (status !== 'unknown')
-      throw new Error(`injury-skipper should leave injury_status 'unknown', got ${String(status)}`);
+    if (status != null)
+      throw new Error(`injury-skipper should leave injury_status open, got ${String(status)}`);
+    if (!r.finalState.asked.includes('injury_status'))
+      throw new Error('injury-skipper completed without the injury beat ever being asked');
   },
 };

@@ -113,11 +113,15 @@ export function checkGlobalInvariants(result: DriveResult): string[] {
   const out: string[] = [];
   const s = result.finalState;
 
-  // 1. The injury beat must be asked before any commit. If the plan was committed
-  //    (generate fired), injury_status must be a non-null answered value.
+  // 1. The injury beat must be SURFACED before any commit. Under soft-via-open
+  //    (ONBOARDING_CHIPS §6) the athlete may dodge — leaving injury_status open —
+  //    so the gate is satisfied by an answer OR by the beat having been asked. The
+  //    invariant is the safety floor: never commit without giving them the chance.
   if (result.ports.commitSlots > 0 || result.ports.generateAndPersistPlan > 0) {
-    if (s.slots.injury_status?.value == null)
-      out.push('invariant[injury-beat]: committed/generated without an answered injury beat');
+    const answered = s.slots.injury_status?.value != null;
+    const asked = s.asked.includes('injury_status');
+    if (!answered && !asked)
+      out.push('invariant[injury-beat]: committed/generated without ever asking the injury beat');
   }
 
   // 2. No generate reached commit with a required-core slot still open.

@@ -289,7 +289,7 @@ const NUMERIC_RULES = [
 
 const INJURY_RULES = [
   'Injuries are safety-critical. Always ask the injury beat. Mark injury_status "none" ONLY if the athlete explicitly says nothing is bothering them.',
-  'Silence or a skip is NOT "no injury" — leave it unknown. Capture history (active / monitoring / past), not just today.',
+  'Silence, a dodge, or a non-answer is NOT "no injury" — emit no injury_status fill at all (leave the slot open). Capture history (active / monitoring / past), not just today.',
 ].join(' ');
 
 // Enum slots take ONLY these literal values — anything else is silently dropped,
@@ -298,10 +298,10 @@ const INJURY_RULES = [
 // never a free-text label like "intermediate".
 const ENUM_RULES = [
   'Closed-enum slots take ONLY these exact literal values — never a paraphrase:',
-  '- experience_tier: "beginner" (new to running), "for_fun" (runs but no structure), "some_training" (some structured training), "experienced" (years of consistent training). There is no "intermediate" — map it to some_training or experienced.',
+  '- experience_tier: "beginner" (new to running), "for_fun" (runs but no structure), "some_training" (some structured training), "experienced" (years of consistent training). There is no "intermediate" — map it to some_training or experienced. Never infer this from Strava volume — it is asked directly.',
   '- goal_distance: "5k", "10k", "half", "marathon", "50k", "keep_fit" (no race, staying fit). A stated "50k" or "50 km" IS the "50k" bucket — fill goal_distance directly. For ANY other off-catalog distance — a number of miles/km, or a named distance like "50 miler" / "100k" / "44 miles" — do NOT guess a bucket; set goal_distance_mi (in miles) and leave goal_distance alone. The boundary cuts both ways: anything SHORTER than a 5K — "a mile" (goal_distance_mi: 1), "1500m" (≈ 0.93), "800m" (≈ 0.5) — is also not a bucket. Never map a stated distance to the nearest bucket in either direction.',
   '- goal_type: "race", "general_fitness".',
-  '- injury_status: "none", "active", "monitoring", "past", "unknown".',
+  '- injury_status: "none", "active", "monitoring", "past".',
   '- injury_detail.status: "active", "monitoring", "past".',
   'Integer-coded slots take ONLY in-range integers:',
   '- long_run_day: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday (NOT 1–7).',
@@ -310,8 +310,9 @@ const ENUM_RULES = [
 
 const FLOW_RULES = [
   'Fill slots from natural conversation — any message can fill any slot. Never re-ask something already answered.',
-  "Work through three topics in order: 1) the event they're training for — a race, or a personal goal with a date, 2) current training shape (days/week, long-run day, experience), 3) injuries. One topic per message; once a topic is covered, move to the next.",
-  'Some shape slots arrive already filled as "inferred, unconfirmed" from Strava. Do NOT ask those cold — state them back together in one line for a yes/no ("Looks like ~4 days/week, long runs Sunday, and you know your way around training — that right?") and let the athlete correct. A confirm flips them to confirmed.',
+  "Work through four topics in order: 1) the event they're training for — a race, or a personal goal with a date, 2) training shape from Strava (days/week, long-run day), 3) experience level, 4) injuries. One topic per message; once a topic is covered, move to the next.",
+  'Days/week and long-run day arrive already filled as "inferred, unconfirmed" from Strava. Do NOT ask those cold — state them back in one line for a yes/no ("Looks like ~4 days/week with long runs on Sunday — that right?") and let the athlete correct; a confirm flips them. Do NOT fold experience into this confirm. You may attach a quick yes/no chip here, or just let them type.',
+  'Experience is its own question, asked AFTER the Strava confirm so a thin recent read never seems to contradict what the athlete tells you. Never infer it from Strava. Frame it as their whole running history, not the last couple weeks — e.g. "Looking across all your running, not just lately — how would you describe yourself as a runner?" The app supplies the four level chips; do not invent your own.',
   'Confirm safety and plan-driving slots inline (a quick yes/no). Let nice-to-haves ride.',
   "When the goal race changes, restate goal_date in the same turn (a fill) or mark it open — never let the old race's date ride on the new goal. When a former goal race becomes a tune-up, carry its name AND its date into tune_up_races.",
   'Dates: any goal_date you emit must be in the future relative to today (the turn context states today\'s date). A bare month like "September" means its next future occurrence — pick the year accordingly.',
@@ -451,9 +452,10 @@ function formatHistory(history: HistoryTurn[]): string {
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-// The cached Strava snapshot, for Opener 2 ("looks like you run ~4×/week…").
-// The model proposes experience_tier / days_per_week / long_run_day as INFERRED
-// fills the athlete then confirms — never as cold questions.
+// The cached Strava snapshot, for the training-shape confirm ("looks like you run
+// ~4×/week…"). The model proposes days_per_week / long_run_day as INFERRED fills
+// the athlete then confirms — never cold. Experience is NOT inferred from Strava
+// (a weak proxy); it's asked directly.
 function formatSnapshot(state: V3OnboardingState): string {
   const s = state.strava_snapshot;
   if (!s || s.run_count === 0)
@@ -461,7 +463,7 @@ function formatSnapshot(state: V3OnboardingState): string {
   const longDay =
     s.dominant_long_run_weekday != null ? WEEKDAYS[s.dominant_long_run_weekday] : 'unclear';
   return [
-    'Strava snapshot (infer training shape from this, then confirm — do not ask cold):',
+    'Strava snapshot — infer days/week + long-run day from this, then confirm (do not ask those cold). Do NOT infer experience from it; ask experience directly.',
     `- ~${Math.round(s.recent_weekly_mileage_mi)} mi/wk recently (${s.runs_per_week.toFixed(1)} runs/wk)`,
     `- longest recent run ~${Math.round(s.longest_run_mi)} mi; long runs tend to land on ${longDay}`,
     `- suggested days/week: ${s.suggested_days_per_week}`,

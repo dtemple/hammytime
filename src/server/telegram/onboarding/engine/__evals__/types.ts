@@ -15,8 +15,9 @@ import type { V3OnboardingState } from '../../slots/slot-state';
 // ---------------------------------------------------------------------------
 
 /** A forced move pins a specific turn to an exact athlete action, overriding the
- *  persona simulator. Used for token-exact cases (a named chip tap, a `[Skip]`),
- *  where letting the LLM improvise would desync the assertion. `turn` is 1-based
+ *  persona simulator. Used for token-exact cases (a named chip tap, e.g.
+ *  `[Nothing right now]`), where letting the LLM improvise would desync the
+ *  assertion. `turn` is 1-based
  *  and counts athlete turns (the opening message is turn 1). */
 export interface ForcedMove {
   turn: number;

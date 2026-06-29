@@ -52,9 +52,8 @@ export function slotValue<T>(
 }
 
 /** True when a slot carries a real, known value (excludes the `unknown`
- *  resting state). Safety slots use a looser check (a skip writes a non-null
- *  `unknown`-provenance value that still counts as answered) — see
- *  slot-state.ts `isV3OnboardingComplete`. */
+ *  resting state). The injury beat is gated separately and softly (answered OR
+ *  asked) — see slot-state.ts `isV3OnboardingComplete`. */
 export function isFilled(slot: SlotValue<unknown> | undefined): boolean {
   return !!slot && slot.value != null && slot.provenance !== 'unknown';
 }

@@ -337,7 +337,7 @@ describe('router — a stranded experience_tier re-asks with tappable chips', ()
 
     expect(commitSlots).not.toHaveBeenCalled();
     const call = sendMessage.mock.calls.at(-1)!;
-    expect(call[1]).toMatch(/experience/);
+    expect(call[1]).toMatch(/describe yourself as a runner/i); // the whole-history experience ask
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const labels = (call[2] as any).reply_markup.inline_keyboard
       .flat()
@@ -1250,7 +1250,7 @@ describe('router — the reflection turn (R2)', () => {
 
     const call = sendMessage.mock.calls.at(-1)!;
     expect(call[1]).toMatch(/^Here's what I'm hearing/);
-    expect(call[1]).toContain('One more thing before I build your plan'); // the override's ask
+    expect(call[1]).toContain('describe yourself as a runner'); // the override's experience ask
     const saved = saveV3State.mock.calls.at(-1)?.[1] as V3OnboardingState;
     expect(saved.reflected).toBe(true);
   });

@@ -26,13 +26,13 @@ export const fixture: OnboardingFixture = {
     injuries: 'none',
   },
   opening: "Training for the Ridgeline Marathon in November",
-  // Inferred, unconfirmed shape slots — the shape that produced the loop.
+  // Inferred, unconfirmed shape slots — the shape that produced the loop. Only
+  // days/week + long-run day are Strava-seeded now; experience is asked directly.
   initialState: {
     strava_snapshot: enduranceSnapshot(),
     slots: {
       days_per_week: { value: 4, provenance: 'inferred', confirmed: false },
       long_run_day: { value: 0, provenance: 'inferred', confirmed: false },
-      experience_tier: { value: 'experienced', provenance: 'inferred', confirmed: false },
     },
   },
   raceLookup: { ridgeline: found('Ridgeline Marathon', '2026-11-08', 26.2) },

@@ -30,7 +30,6 @@ import {
   saveV3State,
   isV3OnboardingComplete,
   isV3Enabled,
-  inferExperienceTier,
   seedStravaInferences,
   DEFAULT_OPTIONAL_BUDGET,
   V3_SCHEMA_VERSION,
@@ -185,12 +184,12 @@ describe('isV3OnboardingComplete', () => {
     ).toBe(true);
   });
 
-  it('treats a skipped injury (unknown) as answered, but an absent one as open', () => {
-    const skipped = makeState({
-      ...coreSlots('general_fitness'),
-      injury_status: sv('unknown', 'unknown'),
-    });
-    expect(isV3OnboardingComplete(skipped)).toBe(true);
+  it('treats an asked-but-unanswered injury beat as satisfied; un-asked + open is not', () => {
+    // Soft-via-open (ONBOARDING_CHIPS §6): a dodge leaves injury_status open, but the
+    // beat having been asked satisfies the gate. There is no `unknown` value.
+    const asked = makeState(coreSlots('general_fitness'));
+    asked.asked = ['injury_status'];
+    expect(isV3OnboardingComplete(asked)).toBe(true);
     expect(isV3OnboardingComplete(makeState(coreSlots('general_fitness')))).toBe(false);
   });
 });
@@ -343,30 +342,6 @@ function snapshot(overrides: Partial<StravaFitnessSnapshot> = {}): StravaFitness
   };
 }
 
-describe('inferExperienceTier', () => {
-  it('reads clear high volume as experienced', () => {
-    expect(
-      inferExperienceTier(snapshot({ recent_weekly_mileage_mi: 35, longest_run_mi: 15 })),
-    ).toBe('experienced');
-  });
-
-  it('reads clear low volume as beginner', () => {
-    expect(inferExperienceTier(snapshot({ recent_weekly_mileage_mi: 6, longest_run_mi: 3 }))).toBe(
-      'beginner',
-    );
-  });
-
-  it('returns null through the ambiguous middle (for_fun / some_training is intent, not volume)', () => {
-    expect(inferExperienceTier(snapshot({ recent_weekly_mileage_mi: 18, longest_run_mi: 9 }))).toBe(
-      null,
-    );
-  });
-
-  it('returns null when the signal is too thin to read', () => {
-    expect(inferExperienceTier(snapshot({ run_count: 2, weeks_observed: 1 }))).toBe(null);
-  });
-});
-
 describe('seedStravaInferences', () => {
   it('seeds days/week + long-run day as inferred/unconfirmed', () => {
     const slots = seedStravaInferences(
@@ -383,17 +358,12 @@ describe('seedStravaInferences', () => {
     expect(slots.days_per_week).toBeDefined();
   });
 
-  it('seeds an experience tier only at the confident extremes', () => {
+  it('never seeds experience — it is asked directly, not inferred from Strava', () => {
     const exp = seedStravaInferences(
       {},
       snapshot({ recent_weekly_mileage_mi: 35, longest_run_mi: 15 }),
     );
-    expect(exp.experience_tier?.value).toBe('experienced');
-    const mid = seedStravaInferences(
-      {},
-      snapshot({ recent_weekly_mileage_mi: 18, longest_run_mi: 9 }),
-    );
-    expect(mid.experience_tier).toBeUndefined();
+    expect(exp.experience_tier).toBeUndefined();
   });
 
   it('seeds nothing when there is no running signal', () => {

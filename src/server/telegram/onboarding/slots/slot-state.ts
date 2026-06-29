@@ -17,7 +17,6 @@ import type { StravaFitnessSnapshot } from '@/server/strava/activities';
 import { isFilled, slotValue } from './provenance';
 import {
   requiredCoreSlots,
-  type ExperienceTierValue,
   type GoalDistanceValue,
   type GoalTypeValue,
   type SlotKey,
@@ -184,8 +183,8 @@ export function hasReflected(state: V3OnboardingState): boolean {
 }
 
 /** The starting v3 state, post-Strava. The fitness snapshot is cached here; the
- *  Strava-inferred slots (experience_tier, days/week, long-run day) are seeded
- *  and stated back by the engine/openers (W2/W3), not here. */
+ *  Strava-inferred shape slots (days/week, long-run day) are seeded and stated
+ *  back by the engine, not here. Experience is asked directly, not seeded. */
 export function initialV3State(snapshot?: StravaFitnessSnapshot | null): V3OnboardingState {
   return {
     flow: 'v3',
@@ -199,31 +198,15 @@ export function initialV3State(snapshot?: StravaFitnessSnapshot | null): V3Onboa
 }
 
 /**
- * A conservative experience-tier read from the Strava snapshot — extremes only.
+ * Seed the two Strava-inferable training-shape slots (days/week, long-run day) as
+ * `inferred`/unconfirmed. The `firstUnconfirmedInferred` guardrail then forces a
+ * stated-back confirm before plan-gen, deterministically — rather than trusting the
+ * model to re-infer them from the snapshot text each run. Returns a new slot map;
+ * only slots with a usable signal are added.
  *
- * v2's training-shape step deliberately asked experience as a plain choice
- * because "Strava volume is a poor proxy for how someone describes their own
- * training level" (steps/02-training-shape.ts). v3 keeps that caution: this only
- * commits a guess at the confident ends (clearly a beginner / clearly
- * experienced) and returns null through the ambiguous middle, where `for_fun`
- * vs. `some_training` is intent — not volume — and the model asks cold. Whatever
- * it returns is seeded `inferred`/unconfirmed, so Opener 2 states it back for a
- * one-tap correction; a wrong guess costs the athlete nothing.
- */
-export function inferExperienceTier(snapshot: StravaFitnessSnapshot): ExperienceTierValue | null {
-  if (snapshot.run_count < 4 || snapshot.weeks_observed < 2) return null; // too thin to read
-  const { recent_weekly_mileage_mi: miles, longest_run_mi: longest } = snapshot;
-  if (miles >= 30 && longest >= 13) return 'experienced';
-  if (miles <= 8 && longest <= 4) return 'beginner';
-  return null; // the for_fun / some_training middle — ask, don't guess
-}
-
-/**
- * Seed the three Strava-inferable training-shape slots as `inferred`/unconfirmed
- * (W3). The `firstUnconfirmedInferred` guardrail then forces a stated-back
- * confirm (Opener 2) before plan-gen, deterministically — rather than trusting
- * the model to remember to infer them from the snapshot text each run. Returns a
- * new slot map; only slots with a usable signal are added.
+ * Experience is deliberately NOT seeded (ONBOARDING_CHIPS Part 2): Strava volume is
+ * a poor proxy for how someone describes their training level, so it's asked
+ * directly (with chips), after the days/long-run confirm.
  *
  * No running signal (run_count 0) → nothing is seeded and the engine asks cold,
  * matching the snapshot summary the model already sees.
@@ -240,9 +223,6 @@ export function seedStravaInferences(
   if (snapshot.dominant_long_run_weekday != null) {
     next.long_run_day = slotValue(snapshot.dominant_long_run_weekday, 'inferred', false);
   }
-
-  const tier = inferExperienceTier(snapshot);
-  if (tier) next.experience_tier = slotValue(tier, 'inferred', false);
 
   return next;
 }
@@ -319,16 +299,18 @@ export function isV3Enabled(): boolean {
 /**
  * Whether onboarding can hand off to plan generation: every required-core slot
  * (goal-type-aware — a keep_fit athlete needs no race) is filled, and the injury
- * beat has been answered.
+ * beat is satisfied.
  *
- * The injury beat is a SOFT gate (decision #6): a `[Skip]` writes injury_status
- * with the value `unknown` — a non-null, answered value — which satisfies the
- * gate and generates a conservative plan. Only a never-asked injury (the slot
- * absent entirely) leaves the beat open.
+ * The injury beat is a SOFT gate (ONBOARDING_CHIPS §6): satisfied once the athlete
+ * has ANSWERED it (injury_status set) OR it has been ASKED at least once (`asked`
+ * includes 'injury_status'). A dodge after the beat is asked leaves injury_status
+ * open and still completes — there is no stored `unknown` value and no `[Skip]`
+ * button. Only a never-asked, never-answered injury leaves the beat open.
  */
 export function isV3OnboardingComplete(state: V3OnboardingState): boolean {
   const goalType = (state.slots.goal_type?.value as GoalTypeValue | null) ?? null;
   const coreFilled = requiredCoreSlots(goalType).every((k) => isFilled(state.slots[k]));
   const injuryAnswered = state.slots.injury_status?.value != null;
-  return coreFilled && injuryAnswered;
+  const injuryAsked = state.asked.includes('injury_status');
+  return coreFilled && (injuryAnswered || injuryAsked);
 }

@@ -30,7 +30,7 @@ import type { SlotValue } from './provenance';
 export type GoalTypeValue = 'race' | 'general_fitness';
 export type ExperienceTierValue = 'beginner' | 'for_fun' | 'some_training' | 'experienced';
 export type GoalDistanceValue = '5k' | '10k' | 'half' | 'marathon' | '50k' | 'keep_fit';
-export type InjuryStatusValue = 'none' | 'active' | 'monitoring' | 'past' | 'unknown';
+export type InjuryStatusValue = 'none' | 'active' | 'monitoring' | 'past';
 
 /** A described injury: the part and how live it is. `past` maps to the
  *  `injuries.status` value 'resolved' at write time (W3). */
@@ -176,7 +176,9 @@ export const SLOTS: Record<SlotKey, SlotDef> = {
   experience_tier: {
     key: 'experience_tier',
     class: 'required-core',
-    source: 'strava',
+    // Asked directly (with chips), not Strava-inferred — volume is a poor proxy
+    // for how someone describes their training level (ONBOARDING_CHIPS Part 2).
+    source: 'asked',
     confirmPolicy: 'inline',
     planDriving: true,
     safety: false,

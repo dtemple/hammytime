@@ -33,7 +33,7 @@ import type { Chip, ExtractAdvanceOutput, NextAction, SlotFill } from './extract
 const EXPERIENCE = new Set(['beginner', 'for_fun', 'some_training', 'experienced']);
 const DISTANCE = new Set(['5k', '10k', 'half', 'marathon', '50k', 'keep_fit']);
 const GOAL_TYPE = new Set(['race', 'general_fitness']);
-const INJURY_STATUS = new Set(['none', 'active', 'monitoring', 'past', 'unknown']);
+const INJURY_STATUS = new Set(['none', 'active', 'monitoring', 'past']);
 const INJURY_DETAIL_STATUS = new Set(['active', 'monitoring', 'past']);
 
 /** Per-slot validation/coercion of a raw model value. Returns undefined to drop
@@ -150,15 +150,17 @@ export function mergeFills(slots: SlotState, fills: SlotFill[]): SlotState {
       continue;
     }
 
-    // Changed value (or first fill) — reset the confirm per provenance.
-    let value = coerced;
-    let provenance = fill.provenance;
-
-    // Injury never becomes "none" by inference — silence/inference stays unknown.
-    if (fill.slot === 'injury_status' && value === 'none' && provenance !== 'stated') {
-      value = 'unknown';
-      provenance = 'unknown';
+    // Injury never becomes "none" by inference — silence/inference leaves the beat
+    // OPEN (drop the fill), never a stored value (ONBOARDING_CHIPS §6). The soft
+    // gate (isV3OnboardingComplete: answered OR asked) is what lets an unanswered
+    // beat still complete; there is no `unknown` value to carry it.
+    if (fill.slot === 'injury_status' && coerced === 'none' && fill.provenance !== 'stated') {
+      continue;
     }
+
+    // Changed value (or first fill) — reset the confirm per provenance.
+    const value = coerced;
+    const provenance = fill.provenance;
 
     next[fill.slot] = {
       value,
@@ -326,11 +328,18 @@ function buildConfirmMessage(slot: SlotKey, value: unknown): string {
 // model keeps failing to land.
 // R2 copy reframe (DRAFT — David's voice pass): scheduling framing, not
 // comprehension-checking ("Want to be sure I have this").
+// Experience is asked directly (not Strava-inferred), AFTER the days/long-run
+// confirm, and framed as the athlete's whole running history so a thin recent read
+// never seems to contradict what they tell us (ONBOARDING_CHIPS Part 2, row E).
+// The four level chips ride along via SLOT_CHIPS[experience_tier].
+const EXPERIENCE_ASK =
+  'Looking across all your running — not just the last few weeks — how would you describe yourself as a runner?';
+
 const DIRECT_ASKS: Partial<Record<SlotKey, string>> = {
   days_per_week: "Let's pin this one down — how many days a week are you running?",
   long_run_day: "Let's pin this one down — which day do you do your long run?",
   goal_distance: "Let's pin this one down — what distance are you targeting?",
-  experience_tier: "Let's pin this one down — how would you describe your running background?",
+  experience_tier: EXPERIENCE_ASK,
   target_time: "Let's pin this one down — what finish time are you aiming for?",
   goal_date: "Let's pin this one down — what date is your race?",
 };
@@ -340,6 +349,7 @@ function buildDirectAskMessage(slot: SlotKey): string {
 }
 
 function buildAskMessage(slot: SlotKey): string {
+  if (slot === 'experience_tier') return EXPERIENCE_ASK;
   return `One more thing before I build your plan — what's your ${slotLabel(slot)}?`;
 }
 
@@ -509,7 +519,7 @@ export function recapDisplayedSlots(
   }
   const detail = s.injury_detail?.value as { body_part?: string } | undefined;
   if (detail?.body_part) add('injury_detail');
-  else if (s.injury_status?.value !== 'unknown') add('injury_status');
+  else add('injury_status'); // open injury → value null → add() skips it
   if (typeof s.target_time?.value === 'number') add('target_time');
 
   return shown;
@@ -525,8 +535,12 @@ export function recapDisplayedSlots(
  * questions where it wants to offer a shortcut; those pass through untouched.
  *  - ask + injury beat                       → INJURY_CHIPS (the gate's set)
  *  - ask + a slot with a canonical set       → that set (overrides the model)
- *  - confirm | recap with no chips           → YES_FIX_CHIPS (a yes/no is owed one)
- *  - anything else (open ask, model's chips) → modelChips unchanged
+ *  - recap with no chips                      → YES_FIX_CHIPS (the final gate)
+ *  - anything else (confirm, open ask)       → modelChips unchanged
+ *
+ * A plain `confirm` (the Strava shape confirm, a slot echo) no longer force-gets
+ * yes/no chips — the model chooses whether a quick tap helps, else the athlete
+ * just types (ONBOARDING_CHIPS Part 2). Only the final recap is owed a set in code.
  */
 export function applyChipPolicy(
   action: NextAction,
@@ -538,7 +552,7 @@ export function applyChipPolicy(
     const canonical = SLOT_CHIPS[targetSlot];
     if (canonical) return [...canonical];
   }
-  if ((action === 'confirm' || action === 'recap') && modelChips.length === 0) {
+  if (action === 'recap' && modelChips.length === 0) {
     return [...YES_FIX_CHIPS];
   }
   return modelChips;
@@ -700,8 +714,12 @@ export function enforceGuardrails(
         // The athlete just affirmed a recap and the injury beat is the only thing
         // open (core is complete — the recap displayed it). A second recap would
         // loop "Looks right" → recap forever; ask the injury question directly.
+        // Record the ask in `asked` (same array reference as working.asked) so the
+        // soft gate (answered OR asked) lets a subsequent dodge complete instead of
+        // re-looping — there's no `unknown` value to carry it anymore.
         action = 'ask';
         askSlot = 'injury_status';
+        if (!asked.includes('injury_status')) asked.push('injury_status');
         message =
           'Before I build it — anything bothering you right now, or any past injuries I should know about?';
         chips = [];

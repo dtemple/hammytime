@@ -125,10 +125,9 @@ describe('mergeFills', () => {
     const merged = mergeFills({}, [fill('age', 34, 'inferred')]);
     expect(merged.age!.confirmed).toBe(true);
   });
-  it('never lets injury_status become "none" by inference', () => {
+  it('never lets injury_status become "none" by inference — the fill is dropped', () => {
     const merged = mergeFills({}, [fill('injury_status', 'none', 'inferred')]);
-    expect(merged.injury_status!.value).toBe('unknown');
-    expect(merged.injury_status!.provenance).toBe('unknown');
+    expect(merged.injury_status).toBeUndefined(); // left open, not a stored value
   });
   it('keeps an explicit "none"', () => {
     const merged = mergeFills({}, [fill('injury_status', 'none', 'stated')]);
@@ -258,7 +257,7 @@ describe('enforceGuardrails — generate gate', () => {
     );
     expect(r.action).toBe('ask');
     expect(r.overridden).toBe(true);
-    expect(r.message).toMatch(/experience/);
+    expect(r.message).toMatch(/describe yourself as a runner/i); // the whole-history experience ask
   });
 
   it('blocks generate on an unconfirmed inferred plan-driving slot and confirms it', () => {
@@ -270,7 +269,7 @@ describe('enforceGuardrails — generate gate', () => {
     const r = enforceGuardrails(stateWith(slots), out({ next_action: 'generate' }));
     expect(r.action).toBe('confirm');
     expect(r.message).toMatch(/days per week/);
-    expect(r.chips.length).toBe(2);
+    expect(r.chips).toEqual([]); // a confirm is chip-free now — the athlete types or taps a model chip
   });
 
   it('blocks generate when the injury beat is unanswered', () => {
@@ -590,10 +589,9 @@ describe('applyChipPolicy', () => {
     ]);
   });
 
-  it('attaches the injury beat chips for an injury ask', () => {
+  it('attaches the single injury beat chip for an injury ask', () => {
     expect(applyChipPolicy('ask', 'injury_status', []).map((c) => c.label)).toEqual([
       'Nothing right now',
-      'Skip',
     ]);
   });
 
@@ -613,9 +611,11 @@ describe('applyChipPolicy', () => {
     expect(applyChipPolicy('ask', 'schedule_constraints', shortcut)).toBe(shortcut);
   });
 
-  it('owes a confirm / recap a yes-no set when the model sent none', () => {
-    expect(applyChipPolicy('confirm', null, []).map((c) => c.label)).toEqual(YES_FIX_LABELS);
+  it('owes only the recap a yes-no set; a confirm carries the model chips (or none)', () => {
     expect(applyChipPolicy('recap', null, []).map((c) => c.label)).toEqual(YES_FIX_LABELS);
+    expect(applyChipPolicy('confirm', null, [])).toEqual([]);
+    const shortcut = [{ label: 'Looks right', value: 'yes' }];
+    expect(applyChipPolicy('confirm', null, shortcut)).toBe(shortcut);
   });
 });
 
@@ -628,12 +628,12 @@ describe('enforceGuardrails — chip policy wiring', () => {
     expect(r.chips.map((c) => c.value)).toEqual(['5k', '10k', 'half', 'marathon']);
   });
 
-  it('an injury ask ships the Nothing/Skip chips', () => {
+  it('an injury ask ships the single Nothing-right-now chip', () => {
     const r = enforceGuardrails(
       stateWith({}),
       out({ next_action: 'ask', asked_slot: 'injury_status', message: 'any injuries?' }),
     );
-    expect(r.chips.map((c) => c.label)).toEqual(['Nothing right now', 'Skip']);
+    expect(r.chips.map((c) => c.label)).toEqual(['Nothing right now']);
   });
 
   it('an open-slot ask stays chip-less', () => {
@@ -644,12 +644,12 @@ describe('enforceGuardrails — chip policy wiring', () => {
     expect(r.chips).toEqual([]);
   });
 
-  it('a confirm turn gets yes-no chips', () => {
+  it('a confirm turn carries no forced chips (the model chooses)', () => {
     const r = enforceGuardrails(
       stateWith(coreSlots('race')),
       out({ next_action: 'confirm', message: 'right?' }),
     );
-    expect(r.chips.map((c) => c.label)).toEqual(YES_FIX_LABELS);
+    expect(r.chips).toEqual([]);
   });
 
   it('a generate override forced to ask a missing distance ships distance chips', () => {
@@ -880,7 +880,8 @@ describe('enforceGuardrails — recap bulk-confirm (R1 fix 2, the Nathan regress
     );
     expect(r.action).toBe('ask');
     expect(r.message).toMatch(/anything bothering you/i);
-    expect(r.chips.map((c) => c.label)).toEqual(['Nothing right now', 'Skip']);
+    expect(r.chips.map((c) => c.label)).toEqual(['Nothing right now']);
+    expect(r.state.asked).toContain('injury_status'); // recorded so a dodge can't re-loop
     expect(r.state.recap_shown).toBeUndefined();
   });
 
@@ -905,11 +906,9 @@ describe('resolveRecapAffirmAndAdvance — the chip fast path (R1 fix 2)', () =>
 });
 
 describe('recapDisplayedSlots — mirrors what the recap shows', () => {
-  it('includes only displayed slots and skips unknowns', () => {
-    const slots: SlotState = {
-      ...nathanSlots(),
-      injury_status: sv('unknown', 'unknown', false), // a skip — the recap shows nothing for it
-    };
+  it('includes only displayed slots and skips an open (unanswered) injury', () => {
+    const slots: SlotState = { ...nathanSlots() };
+    delete slots.injury_status; // dodged/open — the recap shows nothing for it
     const shown = recapDisplayedSlots(stateWith(slots));
     const keys = shown.map((s) => s.slot);
     expect(keys).not.toContain('injury_status');
