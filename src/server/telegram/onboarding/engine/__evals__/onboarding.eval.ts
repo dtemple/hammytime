@@ -46,6 +46,16 @@ vi.mock('../../../bot', () => ({
     },
     sendChatAction: async () => undefined,
   }),
+  // sendV3 delegates to sendAndLog (added in 7f11baf); record it the same way so the
+  // transcript + chip extraction (drive.ts reads opts.reply_markup.inline_keyboard) hold.
+  sendAndLog: async (
+    _athleteId: string,
+    chatId: number | string,
+    text: string,
+    keyboard?: unknown,
+  ) => {
+    H.sentMessages.push([chatId, text, keyboard ? { reply_markup: keyboard } : undefined]);
+  },
 }));
 
 vi.mock('@/lib/db', () => ({
