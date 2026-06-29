@@ -713,13 +713,12 @@ export function enforceGuardrails(
       if (state.recap_shown?.length) {
         // The athlete just affirmed a recap and the injury beat is the only thing
         // open (core is complete — the recap displayed it). A second recap would
-        // loop "Looks right" → recap forever; ask the injury question directly.
-        // Record the ask in `asked` (same array reference as working.asked) so the
-        // soft gate (answered OR asked) lets a subsequent dodge complete instead of
+        // loop "Looks right" → recap forever; ask the injury question directly. The
+        // ask is recorded in `asked` at the targetSlot chokepoint below, so the soft
+        // gate (answered OR asked) lets a subsequent dodge complete instead of
         // re-looping — there's no `unknown` value to carry it anymore.
         action = 'ask';
         askSlot = 'injury_status';
-        if (!asked.includes('injury_status')) asked.push('injury_status');
         message =
           'Before I build it — anything bothering you right now, or any past injuries I should know about?';
         chips = [];
@@ -761,6 +760,11 @@ export function enforceGuardrails(
   // model's asked_slot, falling back to the first open required slot.
   const targetSlot: SlotKey | null =
     action === 'ask' ? (askSlot ?? output.asked_slot ?? firstOpenRequired(merged)) : null;
+  // One chokepoint for recording what this turn actually asked — covers the
+  // gate-forced override asks above, not just the model's own asked_slot. The
+  // injury soft gate (answered OR asked) reads this back, so a force-asked beat the
+  // athlete then dodges still completes. `asked` is working.asked (same reference).
+  if (targetSlot && !asked.includes(targetSlot)) asked.push(targetSlot);
   chips = applyChipPolicy(action, targetSlot, chips);
 
   return { state: working, action, message, chips, overridden };
