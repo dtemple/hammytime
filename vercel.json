@@ -1,6 +1,5 @@
 {
   "crons": [
-    { "path": "/api/cron/daily-checkin", "schedule": "0 * * * *" },
-    { "path": "/api/cron/strava-refresh", "schedule": "0 12 * * *" }
+    { "path": "/api/cron/daily-checkin", "schedule": "0 * * * *" }
   ]
 }
