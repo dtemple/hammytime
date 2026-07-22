@@ -43,13 +43,11 @@ Put the `crons` block back in `vercel.json`:
 Then `git add vercel.json && git commit -m "Resume: re-enable daily cron" && git push`.
 The push is the web deploy.
 
-**Also remove the Strava keep-alive cron (added during the pause, SPEC v0.7.57).**
-The block above already omits `/api/cron/strava-refresh` — putting it back drops the
-cron. Also delete the route itself so it can't be hit directly:
-`git rm src/app/api/cron/strava-refresh/route.ts`. It was a fetch-only keep-alive
-so the paused app kept making Strava calls; once normal runs resume they fetch
-Strava again, so it's redundant and would double-fetch. Ship the deletion in the
-same `commit → push`.
+**The Strava keep-alive cron is already gone** (removed 2026-07-22, SPEC v0.7.58,
+when the re-application was abandoned). The route and its `vercel.json` entry no
+longer exist, so there's nothing to delete here — the block above is already correct.
+It was a fetch-only keep-alive that kept the paused app making Strava calls during
+the re-application window; normal runs fetch Strava on their own, so it stays gone.
 
 ## Step 2 — Bring the worker back
 
