@@ -2,8 +2,18 @@
 
 Daybreak was paused in July 2026 because Strava changed its API terms to bar AI
 applications. See `PAUSE_RUNBOOK.md` for what was shut off. This is the reverse:
-how to bring it back. The pause was fully reversible — no data deleted, no athletes
-disconnected — so this is mostly undoing four things.
+how to bring it back.
+
+> **Updated 2026-08-18 — a retirement pass ran on top of the pause.** The July
+> pause was fully reversible. This is no longer. On 2026-08-18 the Strava push
+> subscription was deleted, and all 15 OAuth grants (10 Strava, 5 Google Calendar)
+> were revoked on the providers' side and dropped from `oauth_tokens`. The Fly
+> machine was destroyed and the `crons` block removed.
+>
+> What that changes below: **every athlete has to redo OAuth from scratch** —
+> there are no refresh tokens left to resume from — and Step 4 is now mandatory,
+> not optional. Athlete data (conversations, memory files, plans) was *not*
+> deleted; a local archive sits at `transcripts/archive-2026-08-18/`.
 
 ## Precondition — do NOT skip
 
@@ -72,16 +82,26 @@ WHERE pause_reason = 'manual';
 Sanity check first: `SELECT count(*) FROM athletes WHERE pause_reason = 'manual';`
 should match the number you paused.
 
-## Step 4 — Re-register the Strava webhook (only if you disabled it)
+## Step 4 — Re-register the Strava webhook (required)
 
-If during the pause you deleted the Strava push subscription (optional step in the
-pause runbook), re-create it so activity uploads trigger again:
+Subscription `351755` was deleted on 2026-08-18, so there is none. Re-create it so
+activity uploads trigger again:
 
 ```bash
 npx tsx scripts/register-strava-webhook.ts
+npx tsx scripts/register-strava-webhook.ts list   # confirm exactly one
 ```
 
-Skip if you never disabled it.
+## Step 5 — Every athlete reconnects (required)
+
+`oauth_tokens` is empty. Both grants were revoked on the provider side, so nothing
+refreshes and nothing resumes silently — each athlete has to run `/connect_strava`
+(and `/calendar`, if they want calendar sync back) themselves. Plan the return
+broadcast around that ask rather than treating it as a background detail.
+
+Their Daybreak Google calendars were deliberately left intact, so a reconnecting
+athlete may end up with a second calendar — check for an existing one before
+creating.
 
 ---
 
@@ -106,5 +126,5 @@ npx tsx scripts/broadcast.ts return-message.txt --send    # send
 - Check dependency drift — `@anthropic-ai/claude-agent-sdk` and the Claude model
   ids in `worker/config.ts` (`COACH_MODEL`) age fast; a model may be retired.
 - Re-read `claude-status.md` and `Specs/CHANGELOG.md` to reload where things stood.
-- Strava tokens refresh on use; if any athlete's refresh token was revoked in the
-  interim, they'll need `/connect_strava` again — the agent surfaces the gap.
+- All Strava and Google tokens were revoked on 2026-08-18, so every athlete needs
+  `/connect_strava` again regardless of how long it's been (see Step 5).

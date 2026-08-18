@@ -1,5 +1,11 @@
 # Pause runbook — Strava API shutdown (2026-07)
 
+> **Superseded in part on 2026-08-18.** This runbook describes the July pause,
+> which was deliberately reversible. A retirement pass has since gone further:
+> the push subscription is deleted, all 15 OAuth grants are revoked, the Fly
+> machine is destroyed, and the `crons` block is gone. The "What NOT to do yet"
+> section below no longer holds. `RESTART_RUNBOOK.md` has the current picture.
+
 Strava changed its API terms to bar AI applications, which covers Daybreak. This
 pauses the whole system: stops all recurring cost (Anthropic API + the always-on
 Fly worker) and stops every Strava API call. It is fully reversible — no tokens
